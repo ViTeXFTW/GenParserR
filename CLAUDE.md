@@ -96,9 +96,12 @@ schema.json ──embedded──▶ schema ──▶ analysis ──▶ server
   reference table), `model` (resolves the schema scope at a CST position).
   All positions are **byte offsets**; the server converts to LSP line/char.
 - **`server`** — `tower-lsp` over stdio. `backend.rs` holds open docs as
-  `ropey` ropes (FULL document sync, re-parse on every change), the shared
-  `Analyzer`, and the `WorkspaceIndex`. `convert.rs` does byte-offset ↔ LSP
-  position mapping.
+  `DocumentState`s (`ropey` rope + cached parse + version; INCREMENTAL sync —
+  deltas applied to the rope, one re-parse per change batch in `refresh`,
+  read-only requests reuse the cached parse), the shared `Analyzer`, and the
+  `WorkspaceIndex`. `convert.rs` does byte-offset ↔ LSP position mapping in
+  the position encoding negotiated at `initialize` (UTF-8 when the client
+  offers it, else the UTF-16 baseline).
 
 ### Two concepts worth understanding before editing
 

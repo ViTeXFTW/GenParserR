@@ -1,31 +1,51 @@
 //! The tower-lsp language server backend.
 //!
-//! Holds open documents as `ropey` ropes, a shared [`Analyzer`] (the embedded
-//! schema), and a workspace symbol [`WorkspaceIndex`]. Uses FULL document sync:
-//! INI files are small, so re-parsing on each change is simpler and reliably
-//! correct, and the analysis is fast enough not to need debouncing.
+//! Holds open documents as [`DocumentState`]s — a `ropey` rope plus the cached
+//! parse for that text — alongside a shared [`Analyzer`] (the embedded schema)
+//! and a workspace symbol [`WorkspaceIndex`]. Document sync is INCREMENTAL:
+//! `didChange` deltas are applied to the rope and the document is re-parsed
+//! once per change batch; read-only requests reuse the cached parse.
 
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex, RwLock};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use dashmap::DashMap;
 use genparser_analysis::index::{definitions_in, WorkspaceIndex};
 use genparser_analysis::nav::{hover_at, reference_at, HoverInfo};
 use genparser_analysis::{completion, diagnostics, semantic, Analyzer};
+use genparser_syntax::Parse;
 use ropey::Rope;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{jsonrpc::Result, Client, LanguageServer};
 
-use crate::convert;
+use crate::convert::{self, PositionEnc};
+
+/// An open document: its text and the parse of that exact text. `refresh` is
+/// the only place a new parse is produced for an open document.
+struct DocumentState {
+    rope: Rope,
+    parse: Arc<Parse>,
+    version: i32,
+}
 
 pub struct Backend {
     client: Client,
     analyzer: Arc<Analyzer>,
     /// Open documents, keyed by URI.
-    docs: DashMap<Url, Rope>,
+    docs: DashMap<Url, DocumentState>,
     index: RwLock<WorkspaceIndex>,
     /// Workspace roots, captured at `initialize` and scanned in `initialized`.
     roots: Mutex<Vec<PathBuf>>,
+    /// Position encoding negotiated at `initialize` (UTF-16 until then).
+    encoding: OnceLock<PositionEnc>,
+}
+
+/// Read a file leniently: real INIs predate UTF-8 (Windows-1252 comments), so
+/// a strict `read_to_string` would silently drop them from the index.
+fn read_lossy(path: &Path) -> Option<String> {
+    std::fs::read(path)
+        .ok()
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
 }
 
 impl Backend {
@@ -36,27 +56,53 @@ impl Backend {
             docs: DashMap::new(),
             index: RwLock::new(WorkspaceIndex::new()),
             roots: Mutex::new(Vec::new()),
+            encoding: OnceLock::new(),
         }
     }
 
-    /// Parse `text`, update the index for `uri`, and publish diagnostics.
-    async fn refresh(&self, uri: &Url, rope: &Rope) {
-        let text = rope.to_string();
-        let parse = self.analyzer.parse(&text);
+    fn enc(&self) -> PositionEnc {
+        self.encoding.get().copied().unwrap_or_default()
+    }
 
-        // Update the cross-file index with this file's definitions.
-        let defs = definitions_in(&self.analyzer, &parse, uri.as_str());
+    /// Re-parse the document's current text, cache the parse, and publish.
+    /// Skips publishing if a newer version landed while parsing.
+    async fn refresh(&self, uri: &Url) {
+        let Some((rope, version)) = self
+            .docs
+            .get(uri)
+            .map(|d| (d.rope.clone(), d.version))
+        else {
+            return;
+        };
+        let parse = Arc::new(self.analyzer.parse(&rope.to_string()));
+        {
+            let Some(mut entry) = self.docs.get_mut(uri) else { return };
+            if entry.version != version {
+                return; // superseded; the newer change runs its own refresh
+            }
+            entry.parse = parse.clone();
+        }
+        self.publish(uri, &rope, &parse, version).await;
+    }
+
+    /// Update the cross-file index from `parse` and publish diagnostics.
+    async fn publish(&self, uri: &Url, rope: &Rope, parse: &Parse, version: i32) {
+        let defs = definitions_in(&self.analyzer, parse, uri.as_str());
         if let Ok(mut idx) = self.index.write() {
             idx.set_file(uri.as_str(), defs);
         }
 
+        let enc = self.enc();
         let lsp_diags: Vec<Diagnostic> = {
             let idx = self.index.read().ok();
-            let diags = diagnostics::diagnose(&self.analyzer, &parse, idx.as_deref());
-            diags.iter().map(|d| convert::to_lsp_diagnostic(rope, d)).collect()
+            let diags = diagnostics::diagnose(&self.analyzer, parse, idx.as_deref());
+            diags
+                .iter()
+                .map(|d| convert::to_lsp_diagnostic(rope, d, enc))
+                .collect()
         };
         self.client
-            .publish_diagnostics(uri.clone(), lsp_diags, None)
+            .publish_diagnostics(uri.clone(), lsp_diags, Some(version))
             .await;
     }
 
@@ -74,7 +120,7 @@ impl Backend {
                 if path.extension().and_then(|e| e.to_str()) != Some("ini") {
                     continue;
                 }
-                let Ok(text) = std::fs::read_to_string(path) else { continue };
+                let Some(text) = read_lossy(path) else { continue };
                 let Ok(uri) = Url::from_file_path(path) else { continue };
                 let parse = self.analyzer.parse(&text);
                 let defs = definitions_in(&self.analyzer, &parse, uri.as_str());
@@ -83,14 +129,21 @@ impl Backend {
         }
     }
 
+    /// The cached state for an open document (rope + parse), if any.
+    fn doc(&self, uri: &Url) -> Option<(Rope, Arc<Parse>)> {
+        self.docs
+            .get(uri)
+            .map(|d| (d.rope.clone(), d.parse.clone()))
+    }
+
     /// Resolve a URI's text to a rope, preferring open documents and falling
     /// back to disk (for go-to-definition into unopened files).
     fn rope_for(&self, uri: &Url) -> Option<Rope> {
         if let Some(doc) = self.docs.get(uri) {
-            return Some(doc.clone());
+            return Some(doc.rope.clone());
         }
         let path = uri.to_file_path().ok()?;
-        std::fs::read_to_string(path).ok().map(|s| Rope::from_str(&s))
+        read_lossy(&path).map(|s| Rope::from_str(&s))
     }
 }
 
@@ -112,14 +165,18 @@ impl LanguageServer for Backend {
             *r = roots;
         }
 
+        let (enc, enc_kind) = convert::negotiate_encoding(&params.capabilities);
+        let _ = self.encoding.set(enc);
+
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "genparser-lsp".into(),
                 version: Some(env!("CARGO_PKG_VERSION").into()),
             }),
             capabilities: ServerCapabilities {
+                position_encoding: Some(enc_kind),
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::FULL,
+                    TextDocumentSyncKind::INCREMENTAL,
                 )),
                 completion_provider: Some(CompletionOptions {
                     trigger_characters: Some(vec!["=".into(), " ".into()]),
@@ -145,11 +202,15 @@ impl LanguageServer for Backend {
     async fn initialized(&self, _: InitializedParams) {
         self.scan_workspace();
         // Re-publish diagnostics for any already-open docs now that the index
-        // is populated (so cross-file references resolve).
-        let open: Vec<(Url, Rope)> =
-            self.docs.iter().map(|e| (e.key().clone(), e.value().clone())).collect();
-        for (uri, rope) in open {
-            self.refresh(&uri, &rope).await;
+        // is populated (so cross-file references resolve). The cached parse is
+        // still valid — only the index changed.
+        let open: Vec<(Url, Rope, Arc<Parse>, i32)> = self
+            .docs
+            .iter()
+            .map(|e| (e.key().clone(), e.rope.clone(), e.parse.clone(), e.version))
+            .collect();
+        for (uri, rope, parse, version) in open {
+            self.publish(&uri, &rope, &parse, version).await;
         }
         self.client
             .log_message(MessageType::INFO, "genparser language server ready")
@@ -163,18 +224,32 @@ impl LanguageServer for Backend {
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
         let rope = Rope::from_str(&params.text_document.text);
-        self.docs.insert(uri.clone(), rope.clone());
-        self.refresh(&uri, &rope).await;
+        let parse = Arc::new(self.analyzer.parse(&params.text_document.text));
+        let version = params.text_document.version;
+        self.docs.insert(
+            uri.clone(),
+            DocumentState {
+                rope: rope.clone(),
+                parse: parse.clone(),
+                version,
+            },
+        );
+        self.publish(&uri, &rope, &parse, version).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
-        // FULL sync: the last change carries the entire document text.
-        if let Some(change) = params.content_changes.into_iter().last() {
-            let rope = Rope::from_str(&change.text);
-            self.docs.insert(uri.clone(), rope.clone());
-            self.refresh(&uri, &rope).await;
+        let version = params.text_document.version;
+        let enc = self.enc();
+        {
+            let Some(mut entry) = self.docs.get_mut(&uri) else { return };
+            // Each change applies to the text produced by the previous one.
+            for change in params.content_changes {
+                convert::apply_change(&mut entry.rope, change.range, &change.text, enc);
+            }
+            entry.version = version;
         }
+        self.refresh(&uri).await;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
@@ -186,11 +261,10 @@ impl LanguageServer for Backend {
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri;
         let pos = params.text_document_position.position;
-        let Some(rope) = self.docs.get(&uri).map(|d| d.clone()) else {
+        let Some((rope, parse)) = self.doc(&uri) else {
             return Ok(None);
         };
-        let parse = self.analyzer.parse(&rope.to_string());
-        let offset = convert::position_to_offset(&rope, pos);
+        let offset = convert::position_to_offset(&rope, pos, self.enc());
         let idx = self.index.read().ok();
         let items: Vec<CompletionItem> =
             completion::complete(&self.analyzer, &parse, offset, idx.as_deref())
@@ -205,12 +279,11 @@ impl LanguageServer for Backend {
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
         let uri = params.text_document.uri;
-        let Some(rope) = self.docs.get(&uri).map(|d| d.clone()) else {
+        let Some((rope, parse)) = self.doc(&uri) else {
             return Ok(None);
         };
-        let parse = self.analyzer.parse(&rope.to_string());
         let tokens = semantic::semantic_tokens(&self.analyzer, &parse);
-        let data = convert::to_lsp_semantic_tokens(&rope, &tokens);
+        let data = convert::to_lsp_semantic_tokens(&rope, &tokens, self.enc());
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
             result_id: None,
             data,
@@ -223,11 +296,11 @@ impl LanguageServer for Backend {
     ) -> Result<Option<GotoDefinitionResponse>> {
         let uri = params.text_document_position_params.text_document.uri;
         let pos = params.text_document_position_params.position;
-        let Some(rope) = self.docs.get(&uri).map(|d| d.clone()) else {
+        let Some((rope, parse)) = self.doc(&uri) else {
             return Ok(None);
         };
-        let parse = self.analyzer.parse(&rope.to_string());
-        let offset = convert::position_to_offset(&rope, pos);
+        let enc = self.enc();
+        let offset = convert::position_to_offset(&rope, pos, enc);
         let Some(reference) = reference_at(&self.analyzer, &parse, offset) else {
             return Ok(None);
         };
@@ -246,7 +319,7 @@ impl LanguageServer for Backend {
             if let Some(target_rope) = self.rope_for(&target_uri) {
                 out.push(Location {
                     uri: target_uri,
-                    range: convert::span_to_range(&target_rope, span),
+                    range: convert::span_to_range(&target_rope, span, enc),
                 });
             }
         }
@@ -260,11 +333,11 @@ impl LanguageServer for Backend {
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let uri = params.text_document_position_params.text_document.uri;
         let pos = params.text_document_position_params.position;
-        let Some(rope) = self.docs.get(&uri).map(|d| d.clone()) else {
+        let Some((rope, parse)) = self.doc(&uri) else {
             return Ok(None);
         };
-        let parse = self.analyzer.parse(&rope.to_string());
-        let offset = convert::position_to_offset(&rope, pos);
+        let enc = self.enc();
+        let offset = convert::position_to_offset(&rope, pos, enc);
         let Some(info) = hover_at(&self.analyzer, &parse, offset) else {
             return Ok(None);
         };
@@ -292,7 +365,7 @@ impl LanguageServer for Backend {
                 kind: MarkupKind::Markdown,
                 value: markdown,
             }),
-            range: Some(convert::span_to_range(&rope, span)),
+            range: Some(convert::span_to_range(&rope, span, enc)),
         }))
     }
 }

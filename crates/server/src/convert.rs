@@ -1,10 +1,10 @@
 //! Conversions between analysis byte offsets and LSP line/character positions,
 //! and between analysis result types and `lsp-types`.
 //!
-//! Positions use a character-column model (LSP `character` == count of Unicode
-//! scalar values from the line start). Generals INI files are effectively
-//! ASCII, so this matches UTF-16 columns in practice; non-BMP text is the only
-//! unsupported edge case.
+//! LSP `character` columns are counted in *negotiated* code units: UTF-16 by
+//! default (the protocol's mandatory baseline), or UTF-8 when the client
+//! advertises support and we pick it at `initialize`. Every conversion here
+//! therefore takes the negotiated [`PositionEnc`].
 
 use genparser_analysis::completion::{Completion, CompletionKind};
 use genparser_analysis::diagnostics::{Diagnostic as AnDiagnostic, Severity};
@@ -13,39 +13,127 @@ use genparser_analysis::Span;
 use ropey::Rope;
 use tower_lsp::lsp_types::*;
 
+/// The position encoding negotiated with the client at `initialize`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PositionEnc {
+    /// `character` counts UTF-8 bytes from the line start.
+    Utf8,
+    /// `character` counts UTF-16 code units from the line start (LSP default).
+    #[default]
+    Utf16,
+}
+
+/// Pick the best encoding the client supports: UTF-8 if offered (no conversion
+/// cost on our byte-offset spans), otherwise the mandatory UTF-16 baseline.
+pub fn negotiate_encoding(caps: &ClientCapabilities) -> (PositionEnc, PositionEncodingKind) {
+    let offered = caps
+        .general
+        .as_ref()
+        .and_then(|g| g.position_encodings.as_deref())
+        .unwrap_or(&[]);
+    if offered.contains(&PositionEncodingKind::UTF8) {
+        (PositionEnc::Utf8, PositionEncodingKind::UTF8)
+    } else {
+        (PositionEnc::Utf16, PositionEncodingKind::UTF16)
+    }
+}
+
+/// Char range of `line`'s content, excluding any trailing line break — LSP
+/// clamps an oversized `character` to the line *length*; the break itself is
+/// addressed as `(line + 1, 0)`.
+fn line_content(rope: &Rope, line: usize) -> (usize, usize) {
+    let start = rope.line_to_char(line);
+    let mut end = if line + 1 < rope.len_lines() {
+        rope.line_to_char(line + 1)
+    } else {
+        rope.len_chars()
+    };
+    while end > start {
+        let c = rope.char(end - 1);
+        if c == '\n' || c == '\r' {
+            end -= 1;
+        } else {
+            break;
+        }
+    }
+    (start, end)
+}
+
 /// Convert a byte offset to an LSP position via the rope.
-pub fn offset_to_position(rope: &Rope, byte: u32) -> Position {
+pub fn offset_to_position(rope: &Rope, byte: u32, enc: PositionEnc) -> Position {
     let byte = (byte as usize).min(rope.len_bytes());
     let char = rope.byte_to_char(byte);
     let line = rope.char_to_line(char);
     let line_start = rope.line_to_char(line);
+    let character = match enc {
+        PositionEnc::Utf8 => byte - rope.char_to_byte(line_start),
+        PositionEnc::Utf16 => rope.char_to_utf16_cu(char) - rope.char_to_utf16_cu(line_start),
+    };
     Position {
         line: line as u32,
-        character: (char - line_start) as u32,
+        character: character as u32,
+    }
+}
+
+/// Convert an LSP position to a rope char index (clamped per the LSP rules:
+/// line to the last line, character to the line's content length).
+pub fn position_to_char(rope: &Rope, pos: Position, enc: PositionEnc) -> usize {
+    let line = (pos.line as usize).min(rope.len_lines().saturating_sub(1));
+    let (start, end) = line_content(rope, line);
+    match enc {
+        PositionEnc::Utf8 => {
+            let start_b = rope.char_to_byte(start);
+            let end_b = rope.char_to_byte(end);
+            let target = (start_b + pos.character as usize).min(end_b);
+            // byte_to_char floors to a char boundary, tolerating mid-scalar input.
+            rope.byte_to_char(target)
+        }
+        PositionEnc::Utf16 => {
+            let start_cu = rope.char_to_utf16_cu(start);
+            let end_cu = rope.char_to_utf16_cu(end);
+            let target = (start_cu + pos.character as usize).min(end_cu);
+            rope.utf16_cu_to_char(target)
+        }
     }
 }
 
 /// Convert an LSP position to a byte offset via the rope (clamped to bounds).
-pub fn position_to_offset(rope: &Rope, pos: Position) -> u32 {
-    let line = (pos.line as usize).min(rope.len_lines().saturating_sub(1));
-    let line_start = rope.line_to_char(line);
-    let line_len = rope.line(line).len_chars();
-    let char = line_start + (pos.character as usize).min(line_len);
-    rope.char_to_byte(char) as u32
+pub fn position_to_offset(rope: &Rope, pos: Position, enc: PositionEnc) -> u32 {
+    rope.char_to_byte(position_to_char(rope, pos, enc)) as u32
+}
+
+/// Apply one LSP `didChange` content change to the rope in place. A change
+/// without a range replaces the whole document (clients may always fall back
+/// to full sync for a single change).
+pub fn apply_change(
+    rope: &mut Rope,
+    range: Option<Range>,
+    text: &str,
+    enc: PositionEnc,
+) {
+    match range {
+        None => *rope = Rope::from_str(text),
+        Some(r) => {
+            let start = position_to_char(rope, r.start, enc);
+            let end = position_to_char(rope, r.end, enc).max(start);
+            rope.remove(start..end);
+            rope.insert(start, text);
+        }
+    }
 }
 
 /// Convert an analysis span to an LSP range.
-pub fn span_to_range(rope: &Rope, span: Span) -> Range {
+pub fn span_to_range(rope: &Rope, span: Span, enc: PositionEnc) -> Range {
     Range {
-        start: offset_to_position(rope, span.start),
-        end: offset_to_position(rope, span.end),
+        start: offset_to_position(rope, span.start, enc),
+        end: offset_to_position(rope, span.end, enc),
     }
 }
 
 /// Convert an analysis diagnostic to an LSP diagnostic.
-pub fn to_lsp_diagnostic(rope: &Rope, d: &AnDiagnostic) -> Diagnostic {
+pub fn to_lsp_diagnostic(rope: &Rope, d: &AnDiagnostic, enc: PositionEnc) -> Diagnostic {
     Diagnostic {
-        range: span_to_range(rope, d.span),
+        range: span_to_range(rope, d.span, enc),
         severity: Some(match d.severity {
             Severity::Error => DiagnosticSeverity::ERROR,
             Severity::Warning => DiagnosticSeverity::WARNING,
@@ -110,24 +198,25 @@ fn sem_kind_index(kind: SemKind) -> u32 {
 }
 
 /// Delta-encode analysis semantic tokens into the LSP wire format. Input must be
-/// sorted by start offset (as produced by `semantic_tokens`).
+/// sorted by start offset (as produced by `semantic_tokens`). Tokens never span
+/// lines, so `length` is the column difference in negotiated units.
 pub fn to_lsp_semantic_tokens(
     rope: &Rope,
     tokens: &[genparser_analysis::semantic::SemToken],
+    enc: PositionEnc,
 ) -> Vec<SemanticToken> {
     let mut out = Vec::with_capacity(tokens.len());
     let mut prev_line = 0u32;
     let mut prev_start = 0u32;
     for t in tokens {
-        let pos = offset_to_position(rope, t.span.start);
-        let start_char = rope.byte_to_char((t.span.start as usize).min(rope.len_bytes()));
-        let end_char = rope.byte_to_char((t.span.end as usize).min(rope.len_bytes()));
-        let length = (end_char - start_char) as u32;
-        let delta_line = pos.line - prev_line;
+        let start = offset_to_position(rope, t.span.start, enc);
+        let end = offset_to_position(rope, t.span.end, enc);
+        let length = end.character.saturating_sub(start.character);
+        let delta_line = start.line - prev_line;
         let delta_start = if delta_line == 0 {
-            pos.character - prev_start
+            start.character - prev_start
         } else {
-            pos.character
+            start.character
         };
         out.push(SemanticToken {
             delta_line,
@@ -136,8 +225,8 @@ pub fn to_lsp_semantic_tokens(
             token_type: sem_kind_index(t.kind),
             token_modifiers_bitset: 0,
         });
-        prev_line = pos.line;
-        prev_start = pos.character;
+        prev_line = start.line;
+        prev_start = start.character;
     }
     out
 }
@@ -150,9 +239,15 @@ mod tests {
     #[test]
     fn position_offset_round_trip() {
         let rope = Rope::from_str("Weapon AK47\n  PrimaryDamage = 50.0\nEnd\n");
-        for byte in [0u32, 7, 14, 30, 35] {
-            let pos = offset_to_position(&rope, byte);
-            assert_eq!(position_to_offset(&rope, pos), byte, "byte {byte} via {pos:?}");
+        for enc in [PositionEnc::Utf8, PositionEnc::Utf16] {
+            for byte in [0u32, 7, 14, 30, 35] {
+                let pos = offset_to_position(&rope, byte, enc);
+                assert_eq!(
+                    position_to_offset(&rope, pos, enc),
+                    byte,
+                    "byte {byte} via {pos:?} ({enc:?})"
+                );
+            }
         }
     }
 
@@ -161,7 +256,186 @@ mod tests {
         let rope = Rope::from_str("Weapon AK47\n  PrimaryDamage = 50.0\nEnd\n");
         // The 'P' of PrimaryDamage is at line 1, char 2.
         let byte = "Weapon AK47\n  ".len() as u32;
-        assert_eq!(offset_to_position(&rope, byte), Position { line: 1, character: 2 });
+        assert_eq!(
+            offset_to_position(&rope, byte, PositionEnc::Utf16),
+            Position { line: 1, character: 2 }
+        );
+    }
+
+    #[test]
+    fn non_ascii_columns_differ_by_encoding() {
+        // "; émoji 🚀 comment" — é is 2 UTF-8 bytes / 1 UTF-16 unit,
+        // 🚀 is 4 UTF-8 bytes / 2 UTF-16 units.
+        let rope = Rope::from_str("; \u{e9}moji \u{1F680} x\nEnd\n");
+        let byte_of_x = "; \u{e9}moji \u{1F680} ".len() as u32;
+        let p8 = offset_to_position(&rope, byte_of_x, PositionEnc::Utf8);
+        let p16 = offset_to_position(&rope, byte_of_x, PositionEnc::Utf16);
+        assert_eq!(p8.character, byte_of_x);
+        assert_eq!(p16.character, "; émoji ".chars().count() as u32 + 2 + 1);
+        // Both round-trip to the same byte.
+        assert_eq!(position_to_offset(&rope, p8, PositionEnc::Utf8), byte_of_x);
+        assert_eq!(position_to_offset(&rope, p16, PositionEnc::Utf16), byte_of_x);
+    }
+
+    #[test]
+    fn position_clamps_to_line_content() {
+        let rope = Rope::from_str("abc\r\ndef\n");
+        // Past-end character clamps to the line length, not into the \r\n.
+        let pos = Position { line: 0, character: 99 };
+        assert_eq!(position_to_offset(&rope, pos, PositionEnc::Utf16), 3);
+        // Past-end line clamps to the last line.
+        let pos = Position { line: 99, character: 0 };
+        assert_eq!(position_to_offset(&rope, pos, PositionEnc::Utf16), 9);
+    }
+
+    #[test]
+    fn apply_change_replaces_range() {
+        let mut rope = Rope::from_str("Weapon AK47\n  PrimaryDamage = 50.0\nEnd\n");
+        // Replace "50.0" with "75.5".
+        let range = Range {
+            start: Position { line: 1, character: 18 },
+            end: Position { line: 1, character: 22 },
+        };
+        apply_change(&mut rope, Some(range), "75.5", PositionEnc::Utf16);
+        assert_eq!(rope.to_string(), "Weapon AK47\n  PrimaryDamage = 75.5\nEnd\n");
+    }
+
+    #[test]
+    fn apply_change_across_lines_and_at_eof() {
+        let mut rope = Rope::from_str("Weapon A\nEnd\nWeapon B\nEnd\n");
+        // Delete the whole second block including its leading newline.
+        let range = Range {
+            start: Position { line: 2, character: 0 },
+            end: Position { line: 4, character: 0 },
+        };
+        apply_change(&mut rope, Some(range), "", PositionEnc::Utf16);
+        assert_eq!(rope.to_string(), "Weapon A\nEnd\n");
+        // Insert at EOF.
+        let at_eof = Range {
+            start: Position { line: 2, character: 0 },
+            end: Position { line: 2, character: 0 },
+        };
+        apply_change(&mut rope, Some(at_eof), "Weapon C\nEnd\n", PositionEnc::Utf16);
+        assert_eq!(rope.to_string(), "Weapon A\nEnd\nWeapon C\nEnd\n");
+        // Range-less change replaces everything.
+        apply_change(&mut rope, None, "GameData\nEnd\n", PositionEnc::Utf16);
+        assert_eq!(rope.to_string(), "GameData\nEnd\n");
+    }
+
+    #[test]
+    fn apply_change_crlf_document() {
+        let mut rope = Rope::from_str("Weapon AK47\r\n  PrimaryDamage = 50.0\r\nEnd\r\n");
+        let range = Range {
+            start: Position { line: 1, character: 18 },
+            end: Position { line: 1, character: 22 },
+        };
+        apply_change(&mut rope, Some(range), "75.5", PositionEnc::Utf16);
+        assert_eq!(
+            rope.to_string(),
+            "Weapon AK47\r\n  PrimaryDamage = 75.5\r\nEnd\r\n"
+        );
+    }
+
+    #[test]
+    fn negotiates_utf8_when_offered() {
+        let mut caps = ClientCapabilities::default();
+        assert_eq!(negotiate_encoding(&caps).0, PositionEnc::Utf16);
+        caps.general = Some(GeneralClientCapabilities {
+            position_encodings: Some(vec![
+                PositionEncodingKind::UTF16,
+                PositionEncodingKind::UTF8,
+            ]),
+            ..Default::default()
+        });
+        assert_eq!(negotiate_encoding(&caps).0, PositionEnc::Utf8);
+    }
+
+    /// Property test: random LSP delta sequences applied to the rope must
+    /// reproduce the text computed by an independent string-based reference.
+    /// Positions are generated freely (past-end lines/columns included) but
+    /// only BMP text is used, so UTF-16 clamping is unambiguous.
+    #[test]
+    fn random_delta_sequences_match_reference() {
+        fn ref_byte(text: &str, line: u32, ch: u32, enc: PositionEnc) -> usize {
+            let lines: Vec<&str> = text.split('\n').collect();
+            let line = (line as usize).min(lines.len() - 1);
+            let start: usize = lines[..line].iter().map(|l| l.len() + 1).sum();
+            let content = lines[line].strip_suffix('\r').unwrap_or(lines[line]);
+            match enc {
+                PositionEnc::Utf8 => {
+                    let mut t = start + (ch as usize).min(content.len());
+                    while !text.is_char_boundary(t) {
+                        t -= 1;
+                    }
+                    t
+                }
+                PositionEnc::Utf16 => {
+                    let mut cu = 0usize;
+                    for (i, c) in content.char_indices() {
+                        if cu >= ch as usize {
+                            return start + i;
+                        }
+                        cu += c.len_utf16();
+                    }
+                    start + content.len()
+                }
+            }
+        }
+        fn ref_apply(text: &str, r: Option<Range>, new: &str, enc: PositionEnc) -> String {
+            match r {
+                None => new.to_string(),
+                Some(r) => {
+                    let s = ref_byte(text, r.start.line, r.start.character, enc);
+                    let e = ref_byte(text, r.end.line, r.end.character, enc).max(s);
+                    format!("{}{}{}", &text[..s], new, &text[e..])
+                }
+            }
+        }
+
+        let snippets = [
+            "", "X", "\u{e9}", "\n", "\r\n", "Weapon Z\nEnd\n",
+            "; comment \u{e9}\n", " = 5.0", "End",
+        ];
+        let mut state = 0x2545F4914F6CDD1Du64;
+        let mut next = move || {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (state >> 33) as u32
+        };
+
+        for enc in [PositionEnc::Utf8, PositionEnc::Utf16] {
+            for round in 0..200 {
+                let mut expected =
+                    String::from("Weapon AK47\n  PrimaryDamage = 50.0\nEnd\n");
+                let mut rope = Rope::from_str(&expected);
+                for edit in 0..8 {
+                    let text = snippets[(next() % snippets.len() as u32) as usize];
+                    let range = if next() % 10 == 0 {
+                        None // full-replacement fallback
+                    } else {
+                        let a = Position { line: next() % 8, character: next() % 40 };
+                        let b = Position { line: next() % 8, character: next() % 40 };
+                        // LSP requires start <= end; order by reference bytes.
+                        let (s, e) = if ref_byte(&expected, a.line, a.character, enc)
+                            <= ref_byte(&expected, b.line, b.character, enc)
+                        {
+                            (a, b)
+                        } else {
+                            (b, a)
+                        };
+                        Some(Range { start: s, end: e })
+                    };
+                    expected = ref_apply(&expected, range, text, enc);
+                    apply_change(&mut rope, range, text, enc);
+                    assert_eq!(
+                        rope.to_string(),
+                        expected,
+                        "diverged ({enc:?}, round {round}, edit {edit}, range {range:?}, text {text:?})"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -172,7 +446,7 @@ mod tests {
             SemToken { span: Span::new(7, 11), kind: SemKind::BlockName },// "AK47"   line0 col7
             SemToken { span: Span::new(12, 15), kind: SemKind::Keyword }, // "End"    line1 col0
         ];
-        let lsp = to_lsp_semantic_tokens(&rope, &tokens);
+        let lsp = to_lsp_semantic_tokens(&rope, &tokens, PositionEnc::Utf16);
         assert_eq!(lsp[0].delta_line, 0);
         assert_eq!(lsp[0].delta_start, 0);
         assert_eq!(lsp[0].length, 6);

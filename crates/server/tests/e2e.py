@@ -3,7 +3,10 @@
 
 Sends initialize -> initialized -> didOpen (a Weapon block with a bad value and
 an unknown field), then asserts we get publishDiagnostics, completions, and
-semantic tokens back. Exits non-zero on failure.
+semantic tokens back. Also drives INCREMENTAL didChange deltas (multi-change
+batches, CRLF documents, EOF edits) and asserts the resulting diagnostics are
+identical to a full-text baseline of the same final text. Exits non-zero on
+failure.
 """
 import json
 import subprocess
@@ -85,7 +88,11 @@ def main() -> int:
     caps = init["result"]["capabilities"]
     assert "completionProvider" in caps, "missing completionProvider"
     assert "semanticTokensProvider" in caps, "missing semanticTokensProvider"
-    print("OK: initialize advertised capabilities")
+    sync = caps.get("textDocumentSync")
+    assert sync == 2, f"expected INCREMENTAL sync (2), got {sync!r}"
+    # We offered no positionEncodings, so the server must stay on the baseline.
+    assert caps.get("positionEncoding", "utf-16") == "utf-16", caps.get("positionEncoding")
+    print("OK: initialize advertised capabilities (incremental sync, utf-16)")
 
     send({"jsonrpc": "2.0", "method": "initialized", "params": {}})
 
@@ -135,7 +142,79 @@ def main() -> int:
     assert len(data) % 5 == 0 and len(data) > 0, "malformed semantic token data"
     print(f"OK: semantic tokens returned {len(data)//5} tokens")
 
-    # 5) shutdown
+    # 5) incremental deltas must produce the same diagnostics as the full text.
+    def norm(diags):
+        return sorted(
+            (d.get("code"), d["range"]["start"]["line"], d["range"]["start"]["character"],
+             d["range"]["end"]["line"], d["range"]["end"]["character"], d["message"])
+            for d in diags
+        )
+
+    def open_doc(doc_uri, doc_text, version=1):
+        send({"jsonrpc": "2.0", "method": "textDocument/didOpen",
+              "params": {"textDocument": {"uri": doc_uri, "languageId": "generals-ini",
+                                          "version": version, "text": doc_text}}})
+        msg = wait_for(
+            lambda m: m.get("method") == "textDocument/publishDiagnostics"
+            and m["params"]["uri"] == doc_uri,
+            f"diagnostics for {doc_uri}",
+        )
+        assert msg, f"no diagnostics for {doc_uri}"
+        return msg["params"]
+
+    def change_doc(doc_uri, version, changes):
+        send({"jsonrpc": "2.0", "method": "textDocument/didChange",
+              "params": {"textDocument": {"uri": doc_uri, "version": version},
+                         "contentChanges": changes}})
+        msg = wait_for(
+            lambda m: m.get("method") == "textDocument/publishDiagnostics"
+            and m["params"]["uri"] == doc_uri
+            and m["params"].get("version") == version,
+            f"diagnostics v{version} for {doc_uri}",
+        )
+        assert msg, f"no v{version} diagnostics for {doc_uri}"
+        return msg["params"]
+
+    cases = [
+        # (name, initial text, [(range, newText)], final text)
+        ("value edit + field insert (multi-change batch)",
+         "Weapon AK47\n  PrimaryDamage = 50.0\nEnd\n",
+         [({"start": {"line": 1, "character": 18}, "end": {"line": 1, "character": 22}},
+           "Maybe"),
+          ({"start": {"line": 2, "character": 0}, "end": {"line": 2, "character": 0}},
+           "  Bogus = 1\n")],
+         "Weapon AK47\n  PrimaryDamage = Maybe\n  Bogus = 1\nEnd\n"),
+        ("CRLF document edit",
+         "Weapon M16\r\n  PrimaryDamage = 25.0\r\nEnd\r\n",
+         [({"start": {"line": 1, "character": 18}, "end": {"line": 1, "character": 22}},
+           "Nope")],
+         "Weapon M16\r\n  PrimaryDamage = Nope\r\nEnd\r\n"),
+        ("append block at EOF",
+         "Weapon Pistol\nEnd\n",
+         [({"start": {"line": 2, "character": 0}, "end": {"line": 2, "character": 0}},
+           "Weapon Rifle\n  ScaleWeaponSpeed = Maybe\nEnd\n")],
+         "Weapon Pistol\nEnd\nWeapon Rifle\n  ScaleWeaponSpeed = Maybe\nEnd\n"),
+        ("delete spanning lines",
+         "Weapon A\n  Bogus = 1\n  Bogus2 = 2\nEnd\n",
+         [({"start": {"line": 1, "character": 0}, "end": {"line": 3, "character": 0}},
+           "")],
+         "Weapon A\nEnd\n"),
+    ]
+    for i, (name, initial, changes, final) in enumerate(cases):
+        inc_uri = f"file:///test/inc{i}.ini"
+        base_uri = f"file:///test/base{i}.ini"
+        open_doc(inc_uri, initial)
+        got = change_doc(inc_uri, 2, [{"range": rng, "text": txt} for rng, txt in changes])
+        want = open_doc(base_uri, final)
+        assert norm(got["diagnostics"]) == norm(want["diagnostics"]), (
+            f"[{name}] incremental diagnostics diverge from full-text baseline:\n"
+            f"  incremental: {norm(got['diagnostics'])}\n"
+            f"  baseline:    {norm(want['diagnostics'])}"
+        )
+        assert got.get("version") == 2, f"[{name}] missing/wrong version stamp"
+        print(f"OK: incremental == baseline: {name}")
+
+    # 6) shutdown
     send({"jsonrpc": "2.0", "id": 99, "method": "shutdown", "params": None})
     wait_for(lambda m: m.get("id") == 99, "shutdown")
     send({"jsonrpc": "2.0", "method": "exit", "params": None})
