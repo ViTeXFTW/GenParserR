@@ -1,0 +1,19 @@
+.*
+!.gitignore
+
+/target
+**/*.rs.bk
+Cargo.lock
+
+# VS Code extension
+editors/vscode/node_modules
+editors/vscode/out
+editors/vscode/*.vsix
+editors/vscode/server
+
+# Reference game source (large, external)
+/GeneralsCode
+/examples
+
+# Real-game INI corpus (fetched by scripts/fetch-corpus.*)
+/corpus

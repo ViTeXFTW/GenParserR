@@ -1,0 +1,19 @@
+[package]
+name = "genparser-analysis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+genparser-schema.workspace = true
+genparser-syntax.workspace = true
+rowan.workspace = true
+
+[dev-dependencies]
+serde.workspace = true
+toml.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "analyze"
+harness = false

@@ -1,0 +1,1456 @@
+{
+  "format_version": 1,
+  "engine_revision": "handwritten-initial",
+  "blocks": [
+    {
+      "name": "Object",
+      "parse_fn": "INI::parseObjectDefinition",
+      "named": true,
+      "defines": "object",
+      "doc": "A game object (unit, structure, projectile, ...). Fields configure the ThingTemplate; module slots (Draw/Body/Behavior/ClientUpdate) host nested modules.",
+      "fields": [
+        {
+          "name": "DisplayName",
+          "value_type": {
+            "kind": "ascii_string"
+          },
+          "parse_fn": "INI::parseAndTranslateLabel",
+          "doc": "Localized display-name label key."
+        },
+        {
+          "name": "Side",
+          "value_type": {
+            "kind": "ascii_string"
+          },
+          "parse_fn": "INI::parseAsciiString",
+          "doc": null
+        },
+        {
+          "name": "TransportSlotCount",
+          "value_type": {
+            "kind": "u_int"
+          },
+          "parse_fn": "INI::parseUnsignedByte",
+          "doc": null
+        },
+        {
+          "name": "FenceWidth",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "FenceXOffset",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "IsBridge",
+          "value_type": {
+            "kind": "bool"
+          },
+          "parse_fn": "INI::parseBool",
+          "doc": null
+        },
+        {
+          "name": "VisionRange",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "ShroudClearingRange",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "ShroudRevealToAllRange",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "PlacementViewAngle",
+          "value_type": {
+            "kind": "angle_real"
+          },
+          "parse_fn": "INI::parseAngleReal",
+          "doc": null
+        },
+        {
+          "name": "FactoryExitWidth",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "FactoryExtraBibWidth",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "IsTrainable",
+          "value_type": {
+            "kind": "bool"
+          },
+          "parse_fn": "INI::parseBool",
+          "doc": null
+        },
+        {
+          "name": "EnterGuard",
+          "value_type": {
+            "kind": "bool"
+          },
+          "parse_fn": "INI::parseBool",
+          "doc": null
+        },
+        {
+          "name": "HijackGuard",
+          "value_type": {
+            "kind": "bool"
+          },
+          "parse_fn": "INI::parseBool",
+          "doc": null
+        },
+        {
+          "name": "BuildCost",
+          "value_type": {
+            "kind": "u_int"
+          },
+          "parse_fn": "INI::parseUnsignedShort",
+          "doc": null
+        },
+        {
+          "name": "BuildTime",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "RefundValue",
+          "value_type": {
+            "kind": "u_int"
+          },
+          "parse_fn": "INI::parseUnsignedShort",
+          "doc": null
+        },
+        {
+          "name": "EnergyProduction",
+          "value_type": {
+            "kind": "int"
+          },
+          "parse_fn": "INI::parseInt",
+          "doc": null
+        },
+        {
+          "name": "EnergyBonus",
+          "value_type": {
+            "kind": "int"
+          },
+          "parse_fn": "INI::parseInt",
+          "doc": null
+        },
+        {
+          "name": "IsForbidden",
+          "value_type": {
+            "kind": "bool"
+          },
+          "parse_fn": "INI::parseBool",
+          "doc": null
+        },
+        {
+          "name": "IsPrerequisite",
+          "value_type": {
+            "kind": "bool"
+          },
+          "parse_fn": "INI::parseBool",
+          "doc": null
+        },
+        {
+          "name": "KindOf",
+          "value_type": {
+            "kind": "unknown",
+            "parse_fn": "KindOfMaskType::parseFromINI"
+          },
+          "parse_fn": "KindOfMaskType::parseFromINI",
+          "doc": "Space-separated KindOf flags (set not yet enumerated)."
+        },
+        {
+          "name": "CommandSet",
+          "value_type": {
+            "kind": "reference",
+            "ref_kind": "command_set"
+          },
+          "parse_fn": "INI::parseAsciiString",
+          "doc": null
+        },
+        {
+          "name": "BuildVariations",
+          "value_type": {
+            "kind": "ascii_string_list"
+          },
+          "parse_fn": "INI::parseAsciiStringVector",
+          "doc": null
+        },
+        {
+          "name": "SelectPortrait",
+          "value_type": {
+            "kind": "ascii_string"
+          },
+          "parse_fn": "INI::parseAsciiString",
+          "doc": null
+        },
+        {
+          "name": "ButtonImage",
+          "value_type": {
+            "kind": "ascii_string"
+          },
+          "parse_fn": "INI::parseAsciiString",
+          "doc": null
+        },
+        {
+          "name": "UpgradeCameo1",
+          "value_type": {
+            "kind": "reference",
+            "ref_kind": "upgrade"
+          },
+          "parse_fn": "INI::parseAsciiString",
+          "doc": null
+        },
+        {
+          "name": "UpgradeCameo2",
+          "value_type": {
+            "kind": "reference",
+            "ref_kind": "upgrade"
+          },
+          "parse_fn": "INI::parseAsciiString",
+          "doc": null
+        },
+        {
+          "name": "UpgradeCameo3",
+          "value_type": {
+            "kind": "reference",
+            "ref_kind": "upgrade"
+          },
+          "parse_fn": "INI::parseAsciiString",
+          "doc": null
+        },
+        {
+          "name": "UpgradeCameo4",
+          "value_type": {
+            "kind": "reference",
+            "ref_kind": "upgrade"
+          },
+          "parse_fn": "INI::parseAsciiString",
+          "doc": null
+        },
+        {
+          "name": "UpgradeCameo5",
+          "value_type": {
+            "kind": "reference",
+            "ref_kind": "upgrade"
+          },
+          "parse_fn": "INI::parseAsciiString",
+          "doc": null
+        },
+        {
+          "name": "Scale",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "ShadowSizeX",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "ShadowSizeY",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "ShadowOffsetX",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "ShadowOffsetY",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "ShadowTexture",
+          "value_type": {
+            "kind": "ascii_string"
+          },
+          "parse_fn": "INI::parseAsciiString",
+          "doc": null
+        },
+        {
+          "name": "OcclusionDelay",
+          "value_type": {
+            "kind": "duration"
+          },
+          "parse_fn": "INI::parseDurationUnsignedInt",
+          "doc": null
+        },
+        {
+          "name": "Locomotor",
+          "value_type": {
+            "kind": "ascii_string_list"
+          },
+          "parse_fn": "AIUpdateModuleData::parseLocomotorSet",
+          "doc": "`<LocomotorSetType> <LocomotorName>` pairs."
+        },
+        {
+          "name": "InstanceScaleFuzziness",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "StructureRubbleHeight",
+          "value_type": {
+            "kind": "u_int"
+          },
+          "parse_fn": "INI::parseUnsignedByte",
+          "doc": null
+        },
+        {
+          "name": "ThreatValue",
+          "value_type": {
+            "kind": "u_int"
+          },
+          "parse_fn": "INI::parseUnsignedShort",
+          "doc": null
+        },
+        {
+          "name": "CrusherLevel",
+          "value_type": {
+            "kind": "u_int"
+          },
+          "parse_fn": "INI::parseUnsignedByte",
+          "doc": null
+        },
+        {
+          "name": "CrushableLevel",
+          "value_type": {
+            "kind": "u_int"
+          },
+          "parse_fn": "INI::parseUnsignedByte",
+          "doc": null
+        }
+      ],
+      "module_slots": [
+        {
+          "keyword": "Draw",
+          "interface": "Draw",
+          "doc": "Rendering module (e.g. W3DModelDraw)."
+        },
+        {
+          "keyword": "Body",
+          "interface": "Body",
+          "doc": "Health/body module (e.g. ActiveBody)."
+        },
+        {
+          "keyword": "Behavior",
+          "interface": "Behavior",
+          "doc": "Behavior/update/upgrade module."
+        },
+        {
+          "keyword": "ClientUpdate",
+          "interface": "ClientUpdate",
+          "doc": "Client-side update module."
+        }
+      ]
+    },
+    {
+      "name": "Weapon",
+      "parse_fn": "INI::parseWeaponTemplateDefinition",
+      "named": true,
+      "defines": "weapon",
+      "doc": "A weapon template (damage, range, reload, projectile, ...).",
+      "fields": [
+        {
+          "name": "PrimaryDamage",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "PrimaryDamageRadius",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "SecondaryDamage",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "SecondaryDamageRadius",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "ShockWaveAmount",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "ShockWaveRadius",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "ShockWaveTaperOff",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "AttackRange",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "MinimumAttackRange",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "RequestAssistRange",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "AcceptableAimDelta",
+          "value_type": {
+            "kind": "angle_real"
+          },
+          "parse_fn": "INI::parseAngleReal",
+          "doc": null
+        },
+        {
+          "name": "ScatterRadius",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "ScatterTargetScalar",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "ScatterRadiusVsInfantry",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "DamageType",
+          "value_type": {
+            "kind": "enum",
+            "value_set": "damage_type"
+          },
+          "parse_fn": "DamageTypeFlags::parseSingleBitFromINI",
+          "doc": null
+        },
+        {
+          "name": "DeathType",
+          "value_type": {
+            "kind": "enum",
+            "value_set": "death_type"
+          },
+          "parse_fn": "INI::parseIndexList",
+          "doc": null
+        },
+        {
+          "name": "WeaponSpeed",
+          "value_type": {
+            "kind": "velocity"
+          },
+          "parse_fn": "INI::parseVelocityReal",
+          "doc": null
+        },
+        {
+          "name": "MinWeaponSpeed",
+          "value_type": {
+            "kind": "velocity"
+          },
+          "parse_fn": "INI::parseVelocityReal",
+          "doc": null
+        },
+        {
+          "name": "ScaleWeaponSpeed",
+          "value_type": {
+            "kind": "bool"
+          },
+          "parse_fn": "INI::parseBool",
+          "doc": null
+        },
+        {
+          "name": "WeaponRecoil",
+          "value_type": {
+            "kind": "angle_real"
+          },
+          "parse_fn": "INI::parseAngleReal",
+          "doc": null
+        },
+        {
+          "name": "MinTargetPitch",
+          "value_type": {
+            "kind": "angle_real"
+          },
+          "parse_fn": "INI::parseAngleReal",
+          "doc": null
+        },
+        {
+          "name": "MaxTargetPitch",
+          "value_type": {
+            "kind": "angle_real"
+          },
+          "parse_fn": "INI::parseAngleReal",
+          "doc": null
+        },
+        {
+          "name": "RadiusDamageAngle",
+          "value_type": {
+            "kind": "angle_real"
+          },
+          "parse_fn": "INI::parseAngleReal",
+          "doc": null
+        },
+        {
+          "name": "ProjectileObject",
+          "value_type": {
+            "kind": "reference",
+            "ref_kind": "object"
+          },
+          "parse_fn": "INI::parseAsciiString",
+          "doc": null
+        },
+        {
+          "name": "FireSound",
+          "value_type": {
+            "kind": "ascii_string"
+          },
+          "parse_fn": "INI::parseAudioEventRTS",
+          "doc": null
+        },
+        {
+          "name": "FireSoundLoopTime",
+          "value_type": {
+            "kind": "duration"
+          },
+          "parse_fn": "INI::parseDurationUnsignedInt",
+          "doc": null
+        },
+        {
+          "name": "ClipSize",
+          "value_type": {
+            "kind": "int"
+          },
+          "parse_fn": "INI::parseInt",
+          "doc": null
+        },
+        {
+          "name": "ContinuousFireOne",
+          "value_type": {
+            "kind": "int"
+          },
+          "parse_fn": "INI::parseInt",
+          "doc": null
+        },
+        {
+          "name": "ContinuousFireTwo",
+          "value_type": {
+            "kind": "int"
+          },
+          "parse_fn": "INI::parseInt",
+          "doc": null
+        },
+        {
+          "name": "ContinuousFireCoast",
+          "value_type": {
+            "kind": "duration"
+          },
+          "parse_fn": "INI::parseDurationUnsignedInt",
+          "doc": null
+        },
+        {
+          "name": "AutoReloadWhenIdle",
+          "value_type": {
+            "kind": "duration"
+          },
+          "parse_fn": "INI::parseDurationUnsignedInt",
+          "doc": null
+        },
+        {
+          "name": "ClipReloadTime",
+          "value_type": {
+            "kind": "duration"
+          },
+          "parse_fn": "INI::parseDurationUnsignedInt",
+          "doc": null
+        },
+        {
+          "name": "ShotsPerBarrel",
+          "value_type": {
+            "kind": "int"
+          },
+          "parse_fn": "INI::parseInt",
+          "doc": null
+        },
+        {
+          "name": "DamageDealtAtSelfPosition",
+          "value_type": {
+            "kind": "bool"
+          },
+          "parse_fn": "INI::parseBool",
+          "doc": null
+        },
+        {
+          "name": "ProjectileStreamName",
+          "value_type": {
+            "kind": "ascii_string"
+          },
+          "parse_fn": "INI::parseAsciiString",
+          "doc": null
+        },
+        {
+          "name": "LaserName",
+          "value_type": {
+            "kind": "ascii_string"
+          },
+          "parse_fn": "INI::parseAsciiString",
+          "doc": null
+        },
+        {
+          "name": "LaserBoneName",
+          "value_type": {
+            "kind": "ascii_string"
+          },
+          "parse_fn": "INI::parseAsciiString",
+          "doc": null
+        },
+        {
+          "name": "LeechRangeWeapon",
+          "value_type": {
+            "kind": "bool"
+          },
+          "parse_fn": "INI::parseBool",
+          "doc": null
+        },
+        {
+          "name": "CapableOfFollowingWaypoints",
+          "value_type": {
+            "kind": "bool"
+          },
+          "parse_fn": "INI::parseBool",
+          "doc": null
+        },
+        {
+          "name": "ShowsAmmoPips",
+          "value_type": {
+            "kind": "bool"
+          },
+          "parse_fn": "INI::parseBool",
+          "doc": null
+        },
+        {
+          "name": "AllowAttackGarrisonedBldgs",
+          "value_type": {
+            "kind": "bool"
+          },
+          "parse_fn": "INI::parseBool",
+          "doc": null
+        },
+        {
+          "name": "PlayFXWhenStealthed",
+          "value_type": {
+            "kind": "bool"
+          },
+          "parse_fn": "INI::parseBool",
+          "doc": null
+        },
+        {
+          "name": "PreAttackDelay",
+          "value_type": {
+            "kind": "duration"
+          },
+          "parse_fn": "INI::parseDurationUnsignedInt",
+          "doc": null
+        },
+        {
+          "name": "ContinueAttackRange",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "SuspendFXDelay",
+          "value_type": {
+            "kind": "duration"
+          },
+          "parse_fn": "INI::parseDurationUnsignedInt",
+          "doc": null
+        },
+        {
+          "name": "MissileCallsOnDie",
+          "value_type": {
+            "kind": "bool"
+          },
+          "parse_fn": "INI::parseBool",
+          "doc": null
+        },
+        {
+          "name": "HistoricBonusTime",
+          "value_type": {
+            "kind": "duration"
+          },
+          "parse_fn": "INI::parseDurationUnsignedInt",
+          "doc": null
+        },
+        {
+          "name": "HistoricBonusRadius",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "HistoricBonusCount",
+          "value_type": {
+            "kind": "int"
+          },
+          "parse_fn": "INI::parseInt",
+          "doc": null
+        },
+        {
+          "name": "HistoricBonusWeapon",
+          "value_type": {
+            "kind": "reference",
+            "ref_kind": "weapon"
+          },
+          "parse_fn": "INI::parseWeaponTemplate",
+          "doc": null
+        }
+      ],
+      "module_slots": []
+    },
+    {
+      "name": "Armor",
+      "parse_fn": "INI::parseArmorDefinition",
+      "named": true,
+      "defines": "armor",
+      "doc": "Armor template: damage coefficients per damage type. Each `Armor =` line is a `<DamageType> <Percent>` pair (DEFAULT sets the fallthrough).",
+      "fields": [
+        {
+          "name": "Armor",
+          "value_type": {
+            "kind": "ascii_string_list"
+          },
+          "parse_fn": "ArmorTemplate::parseArmorCoefficients",
+          "doc": "`<DamageType> <Percent>` — damage multiplier for that damage type."
+        }
+      ],
+      "module_slots": []
+    },
+    {
+      "name": "Locomotor",
+      "parse_fn": "INI::parseLocomotorTemplateDefinition",
+      "named": true,
+      "defines": "locomotor",
+      "doc": "Movement template controlling speed, turning and physics for a locomotor set.",
+      "fields": [
+        {
+          "name": "Surfaces",
+          "value_type": {
+            "kind": "unknown",
+            "parse_fn": "INI::parseBitString32"
+          },
+          "parse_fn": "INI::parseBitString32",
+          "doc": "Surface-type flags (set not yet enumerated)."
+        },
+        {
+          "name": "Speed",
+          "value_type": {
+            "kind": "velocity"
+          },
+          "parse_fn": "INI::parseVelocityReal",
+          "doc": null
+        },
+        {
+          "name": "SpeedDamaged",
+          "value_type": {
+            "kind": "velocity"
+          },
+          "parse_fn": "INI::parseVelocityReal",
+          "doc": null
+        },
+        {
+          "name": "TurnRate",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseAngularVelocityReal",
+          "doc": null
+        },
+        {
+          "name": "TurnRateDamaged",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseAngularVelocityReal",
+          "doc": null
+        },
+        {
+          "name": "Acceleration",
+          "value_type": {
+            "kind": "acceleration"
+          },
+          "parse_fn": "INI::parseAccelerationReal",
+          "doc": null
+        },
+        {
+          "name": "AccelerationDamaged",
+          "value_type": {
+            "kind": "acceleration"
+          },
+          "parse_fn": "INI::parseAccelerationReal",
+          "doc": null
+        },
+        {
+          "name": "Lift",
+          "value_type": {
+            "kind": "acceleration"
+          },
+          "parse_fn": "INI::parseAccelerationReal",
+          "doc": null
+        },
+        {
+          "name": "LiftDamaged",
+          "value_type": {
+            "kind": "acceleration"
+          },
+          "parse_fn": "INI::parseAccelerationReal",
+          "doc": null
+        },
+        {
+          "name": "Braking",
+          "value_type": {
+            "kind": "acceleration"
+          },
+          "parse_fn": "INI::parseAccelerationReal",
+          "doc": null
+        },
+        {
+          "name": "MinSpeed",
+          "value_type": {
+            "kind": "velocity"
+          },
+          "parse_fn": "INI::parseVelocityReal",
+          "doc": null
+        },
+        {
+          "name": "MinTurnSpeed",
+          "value_type": {
+            "kind": "velocity"
+          },
+          "parse_fn": "INI::parseVelocityReal",
+          "doc": null
+        },
+        {
+          "name": "PreferredHeight",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "PreferredHeightDamping",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "CirclingRadius",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "SpeedLimitZ",
+          "value_type": {
+            "kind": "velocity"
+          },
+          "parse_fn": "INI::parseVelocityReal",
+          "doc": null
+        },
+        {
+          "name": "MaxThrustAngle",
+          "value_type": {
+            "kind": "angle_real"
+          },
+          "parse_fn": "INI::parseAngleReal",
+          "doc": null
+        },
+        {
+          "name": "AccelerationPitchLimit",
+          "value_type": {
+            "kind": "angle_real"
+          },
+          "parse_fn": "INI::parseAngleReal",
+          "doc": null
+        },
+        {
+          "name": "DecelerationPitchLimit",
+          "value_type": {
+            "kind": "angle_real"
+          },
+          "parse_fn": "INI::parseAngleReal",
+          "doc": null
+        },
+        {
+          "name": "PitchStiffness",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "RollStiffness",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "PitchDamping",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "RollDamping",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        }
+      ],
+      "module_slots": []
+    },
+    {
+      "name": "Upgrade",
+      "parse_fn": "INI::parseUpgradeDefinition",
+      "named": true,
+      "defines": "upgrade",
+      "doc": "A purchasable/researchable upgrade definition.",
+      "fields": [
+        {
+          "name": "DisplayName",
+          "value_type": {
+            "kind": "ascii_string"
+          },
+          "parse_fn": "INI::parseAsciiString",
+          "doc": null
+        },
+        {
+          "name": "Type",
+          "value_type": {
+            "kind": "enum",
+            "value_set": "upgrade_type"
+          },
+          "parse_fn": "INI::parseIndexList",
+          "doc": "PLAYER- or OBJECT-scoped."
+        },
+        {
+          "name": "BuildTime",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "BuildCost",
+          "value_type": {
+            "kind": "int"
+          },
+          "parse_fn": "INI::parseInt",
+          "doc": null
+        },
+        {
+          "name": "ButtonImage",
+          "value_type": {
+            "kind": "ascii_string"
+          },
+          "parse_fn": "INI::parseAsciiString",
+          "doc": null
+        }
+      ],
+      "module_slots": []
+    }
+  ],
+  "modules": [
+    {
+      "name": "W3DModelDraw",
+      "interfaces": [
+        "Draw"
+      ],
+      "doc": "Standard model-based draw module. Hosts ConditionState/AnimationState sub-blocks.",
+      "fields": []
+    },
+    {
+      "name": "ActiveBody",
+      "interfaces": [
+        "Body"
+      ],
+      "doc": "Standard destructible body with hit points.",
+      "fields": [
+        {
+          "name": "MaxHealth",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "InitialHealth",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "SubdualDamageCap",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "SubdualDamageHealRate",
+          "value_type": {
+            "kind": "duration"
+          },
+          "parse_fn": "INI::parseDurationUnsignedInt",
+          "doc": null
+        },
+        {
+          "name": "SubdualDamageHealAmount",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        }
+      ]
+    },
+    {
+      "name": "ArmorUpgrade",
+      "interfaces": [
+        "Behavior",
+        "Upgrade"
+      ],
+      "doc": "On the granting upgrade, swaps the object's armor set (UpgradeMux trigger fields apply).",
+      "fields": [
+        {
+          "name": "TriggeredBy",
+          "value_type": {
+            "kind": "ascii_string_list"
+          },
+          "parse_fn": "INI::parseAsciiStringVector",
+          "doc": "Upgrade(s) that activate this module."
+        },
+        {
+          "name": "ConflictsWith",
+          "value_type": {
+            "kind": "ascii_string_list"
+          },
+          "parse_fn": "INI::parseAsciiStringVector",
+          "doc": "Upgrade(s) that suppress this module."
+        },
+        {
+          "name": "RemovesUpgrades",
+          "value_type": {
+            "kind": "ascii_string_list"
+          },
+          "parse_fn": "INI::parseAsciiStringVector",
+          "doc": null
+        },
+        {
+          "name": "RequiresAllTriggers",
+          "value_type": {
+            "kind": "bool"
+          },
+          "parse_fn": "INI::parseBool",
+          "doc": null
+        },
+        {
+          "name": "FXListUpgrade",
+          "value_type": {
+            "kind": "ascii_string"
+          },
+          "parse_fn": "INI::parseFXList",
+          "doc": null
+        }
+      ]
+    }
+  ],
+  "value_sets": [
+    {
+      "id": "damage_type",
+      "members": [
+        {
+          "name": "EXPLOSION",
+          "value": 0
+        },
+        {
+          "name": "CRUSH",
+          "value": 1
+        },
+        {
+          "name": "ARMOR_PIERCING",
+          "value": 2
+        },
+        {
+          "name": "SMALL_ARMS",
+          "value": 3
+        },
+        {
+          "name": "GATTLING",
+          "value": 4
+        },
+        {
+          "name": "RADIATION",
+          "value": 5
+        },
+        {
+          "name": "FLAME",
+          "value": 6
+        },
+        {
+          "name": "LASER",
+          "value": 7
+        },
+        {
+          "name": "SNIPER",
+          "value": 8
+        },
+        {
+          "name": "POISON",
+          "value": 9
+        },
+        {
+          "name": "HEALING",
+          "value": 10
+        },
+        {
+          "name": "UNRESISTABLE",
+          "value": 11
+        },
+        {
+          "name": "WATER",
+          "value": 12
+        },
+        {
+          "name": "DEPLOY",
+          "value": 13
+        },
+        {
+          "name": "SURRENDER",
+          "value": 14
+        },
+        {
+          "name": "HACK",
+          "value": 15
+        },
+        {
+          "name": "KILL_PILOT",
+          "value": 16
+        },
+        {
+          "name": "PENALTY",
+          "value": 17
+        },
+        {
+          "name": "FALLING",
+          "value": 18
+        },
+        {
+          "name": "MELEE",
+          "value": 19
+        },
+        {
+          "name": "DISARM",
+          "value": 20
+        },
+        {
+          "name": "HAZARD_CLEANUP",
+          "value": 21
+        },
+        {
+          "name": "PARTICLE_BEAM",
+          "value": 22
+        },
+        {
+          "name": "TOPPLING",
+          "value": 23
+        },
+        {
+          "name": "INFANTRY_MISSILE",
+          "value": 24
+        },
+        {
+          "name": "AURORA_BOMB",
+          "value": 25
+        },
+        {
+          "name": "LAND_MINE",
+          "value": 26
+        },
+        {
+          "name": "JET_MISSILES",
+          "value": 27
+        },
+        {
+          "name": "STEALTHJET_MISSILES",
+          "value": 28
+        },
+        {
+          "name": "MOLOTOV_COCKTAIL",
+          "value": 29
+        },
+        {
+          "name": "COMANCHE_VULCAN",
+          "value": 30
+        },
+        {
+          "name": "FLESHY_SNIPER",
+          "value": 31
+        },
+        {
+          "name": "SUBDUAL_MISSILE",
+          "value": 32
+        },
+        {
+          "name": "SUBDUAL_VEHICLE",
+          "value": 33
+        },
+        {
+          "name": "SUBDUAL_BUILDING",
+          "value": 34
+        },
+        {
+          "name": "SUBDUAL_UNRESISTABLE",
+          "value": 35
+        },
+        {
+          "name": "MICROWAVE",
+          "value": 36
+        },
+        {
+          "name": "KILL_GARRISONED",
+          "value": 37
+        },
+        {
+          "name": "STATUS",
+          "value": 38
+        }
+      ]
+    },
+    {
+      "id": "death_type",
+      "members": [
+        {
+          "name": "NORMAL",
+          "value": 0
+        },
+        {
+          "name": "NONE",
+          "value": 1
+        },
+        {
+          "name": "CRUSHED",
+          "value": 2
+        },
+        {
+          "name": "BURNED",
+          "value": 3
+        },
+        {
+          "name": "EXPLODED",
+          "value": 4
+        },
+        {
+          "name": "POISONED",
+          "value": 5
+        },
+        {
+          "name": "TOPPLED",
+          "value": 6
+        },
+        {
+          "name": "FLOODED",
+          "value": 7
+        },
+        {
+          "name": "SUICIDED",
+          "value": 8
+        },
+        {
+          "name": "LASERED",
+          "value": 9
+        },
+        {
+          "name": "DETONATED",
+          "value": 10
+        },
+        {
+          "name": "SPLATTED",
+          "value": 11
+        },
+        {
+          "name": "POISONED_BETA",
+          "value": 12
+        },
+        {
+          "name": "EXTRA_2",
+          "value": 13
+        },
+        {
+          "name": "EXTRA_3",
+          "value": 14
+        },
+        {
+          "name": "EXTRA_4",
+          "value": 15
+        },
+        {
+          "name": "EXTRA_5",
+          "value": 16
+        },
+        {
+          "name": "EXTRA_6",
+          "value": 17
+        },
+        {
+          "name": "EXTRA_7",
+          "value": 18
+        },
+        {
+          "name": "EXTRA_8",
+          "value": 19
+        },
+        {
+          "name": "POISONED_GAMMA",
+          "value": 20
+        }
+      ]
+    },
+    {
+      "id": "upgrade_type",
+      "members": [
+        {
+          "name": "PLAYER",
+          "value": 0
+        },
+        {
+          "name": "OBJECT",
+          "value": 1
+        }
+      ]
+    }
+  ]
+}

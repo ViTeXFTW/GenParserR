@@ -1,0 +1,36 @@
+# Expected behavior for ObjectTest.ini.
+#
+# Reference resolution and draw-module completion already work; the
+# module-tag / WeaponSet-condition warnings and weapon-slot completion are not
+# built yet and are marked `xfail`.
+
+# Undefined upgrade reference -> unresolved (a stricter, modder-helpful warning).
+[[diag]]
+severity = "warning"
+code = "unresolved-reference"
+on = "unkonwnUpgrade"
+
+# Missing ModuleTag after a module name should be flagged (not built yet).
+[[diag]]
+severity = "warning"
+code = "missing-module-tag"
+on = "W3DModelDraw"
+xfail = true
+
+# A WeaponSet without a Condition should warn (not built yet).
+[[diag]]
+severity = "warning"
+code = "missing-condition"
+on = "WeaponSet"
+xfail = true
+
+# After `Draw =` -> offer draw modules.
+[[complete]]
+at = "$1"
+includes = ["W3DModelDraw"]
+
+# After `Weapon =` inside a WeaponSet -> offer the weapon slot enums (not built).
+[[complete]]
+at = "$2"
+includes = ["PRIMARY", "SECONDARY", "TERTIARY"]
+xfail = true

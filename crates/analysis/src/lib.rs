@@ -1,0 +1,224 @@
+//! Semantic analysis for Generals INI documents.
+//!
+//! The [`Analyzer`] owns the engine [`Schema`] and exposes the IDE-agnostic
+//! operations the language server needs: parsing (with a schema-derived
+//! [`OpenerOracle`]), [`diagnostics`], [`completion`], and [`semantic`] tokens.
+//! All positions are byte offsets into the source; the server maps them to
+//! LSP line/character positions.
+
+use std::collections::{HashMap, HashSet};
+
+use genparser_schema::{BlockType, ModuleType, Schema, ValueSet};
+use genparser_syntax::{parse, OpenerOracle, Parse};
+
+pub mod completion;
+pub mod diagnostics;
+pub mod index;
+pub mod model;
+pub mod nav;
+pub mod semantic;
+
+pub use diagnostics::{Diagnostic, Severity};
+pub use index::WorkspaceIndex;
+
+/// A half-open byte range `[start, end)` into the source text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Span {
+    pub start: u32,
+    pub end: u32,
+}
+
+impl Span {
+    pub fn new(start: u32, end: u32) -> Self {
+        Span { start, end }
+    }
+}
+
+impl From<rowan::TextRange> for Span {
+    fn from(r: rowan::TextRange) -> Self {
+        Span {
+            start: r.start().into(),
+            end: r.end().into(),
+        }
+    }
+}
+
+/// The analyzer: a schema plus the lookup tables and opener oracle derived from
+/// it. Cheap to share; build once and reuse across documents.
+pub struct Analyzer {
+    schema: Schema,
+    block_by_name: HashMap<String, usize>,
+    module_by_name: HashMap<String, usize>,
+    value_set_by_id: HashMap<String, usize>,
+    openers: SchemaOpeners,
+}
+
+impl Analyzer {
+    /// Build an analyzer from a schema (typically [`genparser_schema::embedded`]).
+    pub fn new(schema: Schema) -> Self {
+        let block_by_name = schema
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(i, b)| (b.name.clone(), i))
+            .collect();
+        let module_by_name = schema
+            .modules
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (m.name.clone(), i))
+            .collect();
+        let value_set_by_id = schema
+            .value_sets
+            .iter()
+            .enumerate()
+            .map(|(i, v)| (v.id.clone(), i))
+            .collect();
+        let openers = SchemaOpeners::from_schema(&schema);
+        Analyzer {
+            schema,
+            block_by_name,
+            module_by_name,
+            value_set_by_id,
+            openers,
+        }
+    }
+
+    /// Build an analyzer from the embedded schema.
+    pub fn embedded() -> Self {
+        Self::new(genparser_schema::embedded())
+    }
+
+    pub fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    /// Parse `src` using the schema-derived opener oracle.
+    pub fn parse(&self, src: &str) -> Parse {
+        parse(src, &self.openers)
+    }
+
+    pub fn block(&self, name: &str) -> Option<&BlockType> {
+        self.block_by_name.get(name).map(|&i| &self.schema.blocks[i])
+    }
+
+    pub fn module(&self, name: &str) -> Option<&ModuleType> {
+        self.module_by_name
+            .get(name)
+            .map(|&i| &self.schema.modules[i])
+    }
+
+    pub fn value_set(&self, id: &str) -> Option<&ValueSet> {
+        self.value_set_by_id
+            .get(id)
+            .map(|&i| &self.schema.value_sets[i])
+    }
+
+    /// All top-level block keywords (for completion at file scope).
+    pub fn block_names(&self) -> impl Iterator<Item = &str> {
+        self.schema.blocks.iter().map(|b| b.name.as_str())
+    }
+}
+
+/// An [`OpenerOracle`] backed by the schema. Scope-opening is *context-aware*,
+/// mirroring the engine: a line opens a nested `End`-terminated scope only when
+/// its head keyword is a valid child of the current scope — either a module slot
+/// declared by the enclosing block, or one of a curated set of sub-block
+/// keywords the engine parses recursively (condition states, armor/weapon sets,
+/// etc.). At file scope the parser opens a block for any line itself, so the
+/// oracle is only consulted for nested lines.
+///
+/// This context-sensitivity is what prevents a field/value whose first token
+/// happens to equal a block keyword (e.g. `Armor = TankArmor` inside an
+/// `ArmorSet`, or `Animation foo.bar` inside a `ConditionState`) from being
+/// mistaken for a new block.
+pub struct SchemaOpeners {
+    /// Block keyword -> the set of module-slot keywords it declares.
+    block_slots: HashMap<String, HashSet<String>>,
+    /// Curated sub-block keywords valid inside any scope.
+    subblocks: HashSet<String>,
+}
+
+/// Sub-block keywords the engine parses as nested `End`-terminated scopes via
+/// custom parse functions (so they aren't visible as module slots in the
+/// schema). Curated and easily extended.
+const CURATED_SUBBLOCKS: &[&str] = &[
+    "ConditionState",
+    "DefaultConditionState",
+    "TransitionState",
+    "AnimationState",
+    "DefaultAnimationState",
+    "IdleAnimationState",
+    "ArmorSet",
+    "WeaponSet",
+    "AttackContactPoint",
+    "Turret",
+    "AltTurret",
+    "UnitSpecificSounds",
+    "InheritableModule",
+    "OverrideableByLikeKind",
+];
+
+impl SchemaOpeners {
+    pub fn from_schema(schema: &Schema) -> Self {
+        let block_slots = schema
+            .blocks
+            .iter()
+            .map(|block| {
+                let slots = block
+                    .module_slots
+                    .iter()
+                    .map(|s| s.keyword.clone())
+                    .collect();
+                (block.name.clone(), slots)
+            })
+            .collect();
+        let subblocks = CURATED_SUBBLOCKS.iter().map(|s| s.to_string()).collect();
+        SchemaOpeners {
+            block_slots,
+            subblocks,
+        }
+    }
+}
+
+impl OpenerOracle for SchemaOpeners {
+    fn opens_scope(&self, enclosing: Option<&str>, head: &str, _has_equals: bool) -> bool {
+        match enclosing {
+            // File scope is handled by the parser (it opens a block for every
+            // line), so this is only a defensive fallback.
+            None => false,
+            // Inside a scope, a child opens only if it is a curated sub-block or
+            // a module slot declared by the enclosing block.
+            Some(scope_head) => {
+                self.subblocks.contains(head)
+                    || self
+                        .block_slots
+                        .get(scope_head)
+                        .is_some_and(|slots| slots.contains(head))
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builds_from_embedded_schema() {
+        let a = Analyzer::embedded();
+        assert!(a.block("Object").is_some());
+        assert!(a.block("Weapon").is_some());
+        assert!(a.module("ActiveBody").is_some());
+        // Context-aware: `Behavior` opens only inside `Object`; `ConditionState`
+        // opens inside any scope (curated sub-block); a leaf field never opens;
+        // and a block keyword used as a field inside a sub-block stays a leaf.
+        assert!(a.openers.opens_scope(Some("Object"), "Behavior", true));
+        assert!(a.openers.opens_scope(Some("W3DModelDraw"), "ConditionState", true));
+        assert!(!a.openers.opens_scope(Some("Object"), "PrimaryDamage", true));
+        // `Armor`/`Animation` are block keywords but must NOT open when they are
+        // fields nested inside another scope (the bug this guards against).
+        assert!(!a.openers.opens_scope(Some("ArmorSet"), "Armor", true));
+        assert!(!a.openers.opens_scope(Some("DefaultConditionState"), "Animation", false));
+    }
+}

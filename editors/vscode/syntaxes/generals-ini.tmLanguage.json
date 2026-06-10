@@ -1,0 +1,38 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Generals INI",
+  "scopeName": "source.generals-ini",
+  "comment": "Minimal fallback grammar. Precise, schema-aware coloring comes from the language server's semantic tokens; this only provides sensible colors before the server connects.",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#end" },
+    { "include": "#string" },
+    { "include": "#number" },
+    { "include": "#assignment" }
+  ],
+  "repository": {
+    "comment": {
+      "match": ";.*$",
+      "name": "comment.line.semicolon.generals-ini"
+    },
+    "end": {
+      "match": "^\\s*\\b(End)\\b",
+      "name": "keyword.control.end.generals-ini"
+    },
+    "string": {
+      "match": "\"[^\"]*\"",
+      "name": "string.quoted.double.generals-ini"
+    },
+    "number": {
+      "match": "\\b-?[0-9]+(\\.[0-9]+)?%?\\b",
+      "name": "constant.numeric.generals-ini"
+    },
+    "assignment": {
+      "match": "^\\s*([A-Za-z0-9_]+)\\s*(=)",
+      "captures": {
+        "1": { "name": "variable.other.property.generals-ini" },
+        "2": { "name": "keyword.operator.assignment.generals-ini" }
+      }
+    }
+  }
+}

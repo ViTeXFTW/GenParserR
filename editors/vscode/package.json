@@ -1,0 +1,75 @@
+{
+  "name": "genparser-vscode",
+  "displayName": "Generals Zero Hour INI",
+  "description": "Language support (diagnostics, completion, semantic highlighting) for C&C Generals: Zero Hour INI files, powered by the genparser language server.",
+  "version": "0.1.0",
+  "license": "GPL-3.0-or-later",
+  "publisher": "genparser",
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:generals-ini"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "generals-ini",
+        "aliases": [
+          "Generals INI",
+          "generals-ini"
+        ],
+        "extensions": [
+          ".ini"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "generals-ini",
+        "scopeName": "source.generals-ini",
+        "path": "./syntaxes/generals-ini.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Generals INI",
+      "properties": {
+        "genparser.server.path": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Absolute path to the `genparser-lsp` server binary. If empty, the extension uses the bundled binary under `server/`, then falls back to `genparser-lsp` on your PATH."
+        },
+        "genparser.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace the communication between VS Code and the language server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile",
+    "package": "npx --yes @vscode/vsce package --allow-missing-repository"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.84.0",
+    "typescript": "^5.4.0"
+  }
+}

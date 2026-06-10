@@ -1,0 +1,23 @@
+[package]
+name = "genparser-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "genparser-lsp"
+path = "src/main.rs"
+
+[dependencies]
+genparser-schema.workspace = true
+genparser-syntax.workspace = true
+genparser-analysis.workspace = true
+tower-lsp.workspace = true
+tokio.workspace = true
+ropey.workspace = true
+dashmap.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+walkdir.workspace = true
