@@ -135,16 +135,22 @@ stdio transport and a document selector for your INI files.
 
 ### Known limitations / future work
 
-* The hand-written schema currently covers a core set of blocks (`Object`,
-  `Weapon`, `Armor`, `Locomotor`, `Upgrade`) and a few modules; more are added
-  by hand from the engine `FieldParse` tables as needed.
-* Some custom sub-object parsers (FX nuggets, OCL nuggets, weapon/armor sets)
-  are modeled as lenient `Unknown` / list fields; their inner structure isn't
-  validated yet.
+The full phase-by-phase plan and status lives in
+[`docs/roadmap.md`](docs/roadmap.md). Current state in brief:
+
+* All 63 of the engine's top-level block types are structurally modeled
+  (scopes nest correctly; zero `syntax` / `unknown-block` diagnostics across
+  the full Zero Hour game data), but most field lists are still skeletons —
+  field/value typing is grown by hand from the engine `FieldParse` tables,
+  highest corpus frequency first (roadmap Phase 5).
+* A few value validators (Color, Coord, Duration, typed token lists like
+  `Armor = <DamageType> <percent>`) are not implemented yet; those fields are
+  treated leniently (roadmap Phase 4).
 * Enum/bitflag value sets that aren't yet enumerated are modeled as `Unknown`
   (member validation is then skipped, never falsely flagged).
-* Positions assume effectively-ASCII content (true for vanilla INI); non-BMP
-  text columns are not adjusted for UTF-16.
+* Editing is incremental end-to-end (block-splice reparse + per-block
+  diagnostics cache; a keystroke in a 60k-line file costs ~150 µs), and
+  positions honor the negotiated LSP encoding (UTF-8 or UTF-16).
 
 ## License
 

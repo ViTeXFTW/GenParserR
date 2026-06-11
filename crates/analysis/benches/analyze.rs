@@ -9,7 +9,9 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use genparser_analysis::diagnostics::DiagnosticsCache;
 use genparser_analysis::{diagnostics, index, semantic, Analyzer};
+use genparser_syntax::{Edit, Strategy};
 
 /// Same shape as the syntax-crate generator, but kept schema-conformant so the
 /// diagnostics pass runs its real (non-error) field/value validation paths.
@@ -96,16 +98,83 @@ fn bench_analyze(c: &mut Criterion) {
             &parse,
             |b, parse| b.iter(|| black_box(index::definitions_in(&analyzer, parse, "bench.ini"))),
         );
-        // The full keystroke path as the server runs it today: parse + diagnose.
+        // The full keystroke path as the server ran it pre-Phase-3:
+        // full parse + full diagnose.
         group.bench_with_input(BenchmarkId::new("keystroke", lines), &src, |b, src| {
             b.iter(|| {
                 let parse = analyzer.parse(src);
                 black_box(diagnostics::diagnose(&analyzer, &parse, None))
             })
         });
+
+        // The Phase-3 keystroke path: incremental reparse (block splice) +
+        // cached diagnose. Simulates typing one digit mid-file.
+        let at = src.len() / 2 + src[src.len() / 2..].find("= 40.0").unwrap() + 2;
+        let edited = format!("{}9{}", &src[..at], &src[at..]);
+        group.bench_with_input(
+            BenchmarkId::new("keystroke_incremental", lines),
+            &(&src, &edited, &parse),
+            |b, (src, edited, parse)| {
+                let mut cache = DiagnosticsCache::new();
+                // Warm the cache as the server would have after the open.
+                diagnostics::diagnose_with_cache(&analyzer, parse, None, &mut cache);
+                let edit = Edit { start: at, old_end: at, new_len: 1 };
+                b.iter(|| {
+                    let (inc, strategy) = analyzer.reparse(parse, src, edited, edit);
+                    assert_eq!(strategy, Strategy::Spliced);
+                    black_box(diagnostics::diagnose_with_cache(
+                        &analyzer, &inc, None, &mut cache,
+                    ))
+                })
+            },
+        );
     }
     group.finish();
 }
 
+/// Same Phase-3 keystroke path over the largest real corpus file, when the
+/// corpus has been fetched (silently skipped otherwise).
+fn bench_corpus_keystroke(c: &mut Criterion) {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../corpus/GeneralsGamePatch2/GeneralsZH/Data/INI/ParticleSystem.ini");
+    let Ok(bytes) = std::fs::read(&path) else {
+        return;
+    };
+    let src = String::from_utf8_lossy(&bytes).into_owned();
+    let analyzer = Analyzer::embedded();
+    let parse = analyzer.parse(&src);
+
+    let at = src.len() / 2 + src[src.len() / 2..].find('=').unwrap() + 1;
+    let edited = format!("{} 9{}", &src[..at], &src[at..]);
+    let edit = Edit { start: at, old_end: at, new_len: 2 };
+
+    let mut group = c.benchmark_group("corpus");
+    group.sample_size(30);
+    group.bench_function("keystroke_full_ParticleSystem", |b| {
+        b.iter(|| {
+            let p = analyzer.parse(&edited);
+            black_box(diagnostics::diagnose(&analyzer, &p, None))
+        })
+    });
+    group.bench_function("keystroke_incremental_ParticleSystem", |b| {
+        let mut cache = DiagnosticsCache::new();
+        diagnostics::diagnose_with_cache(&analyzer, &parse, None, &mut cache);
+        b.iter(|| {
+            let (inc, strategy) = analyzer.reparse(&parse, &src, &edited, edit);
+            assert_eq!(strategy, Strategy::Spliced);
+            black_box(diagnostics::diagnose_with_cache(&analyzer, &inc, None, &mut cache))
+        })
+    });
+    group.bench_function("semantic_tokens_range_ParticleSystem", |b| {
+        // A ~60-line viewport in the middle of the file.
+        let start = (src.len() / 2) as u32;
+        let span = genparser_analysis::Span::new(start, start + 2_000);
+        b.iter(|| black_box(semantic::semantic_tokens_range(&analyzer, &parse, span)))
+    });
+    group.finish();
+}
+
+criterion_group!(corpus_benches, bench_corpus_keystroke);
+
 criterion_group!(benches, bench_analyze);
-criterion_main!(benches);
+criterion_main!(benches, corpus_benches);

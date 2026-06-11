@@ -34,6 +34,14 @@ pub trait OpenerOracle {
     /// `head` is the first bare token on the line; `has_equals` is whether the
     /// line contains an `=`.
     fn opens_scope(&self, enclosing: Option<&str>, head: &str, has_equals: bool) -> bool;
+
+    /// Whether a *file-scope* line with this head opens an `End`-terminated
+    /// block. Defaults to true (the engine reads every file-scope head as a
+    /// block type); single-line directives (`BenchProfile`, `ReallyLowMHz`)
+    /// return false and are parsed as fields.
+    fn opens_at_file_scope(&self, _head: &str) -> bool {
+        true
+    }
 }
 
 /// An oracle backed by explicit keyword sets. Block keywords open scopes
@@ -80,9 +88,25 @@ pub struct SyntaxError {
     pub message: String,
     pub start: usize,
     pub end: usize,
+    pub kind: SyntaxErrorKind,
+}
+
+/// The structural class of a [`SyntaxError`]. Incremental reparse keys off
+/// this: a fragment containing an [`UnterminatedBlock`](Self::UnterminatedBlock)
+/// would swallow the text after it, so it cannot be spliced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyntaxErrorKind {
+    /// A scope was still open at end of input.
+    UnterminatedBlock,
+    /// An `End` line with no scope to close.
+    StrayEnd,
 }
 
 impl Parse {
+    pub(crate) fn from_parts(green: rowan::GreenNode, errors: Vec<SyntaxError>) -> Parse {
+        Parse { green, errors }
+    }
+
     /// The typed root node of the tree.
     pub fn syntax(&self) -> SyntaxNode {
         SyntaxNode::new_root(self.green.clone())
@@ -145,8 +169,18 @@ impl<'a> Parser<'a> {
             } else if self.open_scopes.is_empty() {
                 // At file scope the engine reads every line's first token as a
                 // block type, so any non-`End` line opens a block (an unknown
-                // keyword is then reported as an unknown block, not a stray field).
-                self.open_scope(line);
+                // keyword is then reported as an unknown block, not a stray
+                // field) — except single-line directives the oracle knows are
+                // not `End`-terminated.
+                let inline = line
+                    .head
+                    .as_ref()
+                    .is_some_and(|(_, h)| !oracle.opens_at_file_scope(h));
+                if inline {
+                    self.field(line);
+                } else {
+                    self.open_scope(line);
+                }
             } else if line
                 .head
                 .as_ref()
@@ -168,6 +202,7 @@ impl<'a> Parser<'a> {
                 message: "block is not terminated with `End`".into(),
                 start,
                 end: self.src.len(),
+                kind: SyntaxErrorKind::UnterminatedBlock,
             });
             self.builder.finish_node();
         }
@@ -253,6 +288,7 @@ impl<'a> Parser<'a> {
                 message: "`End` without a matching block".into(),
                 start: self.tokens[line.start].start,
                 end: self.tokens[line.end - 1].end,
+                kind: SyntaxErrorKind::StrayEnd,
             });
             return;
         }

@@ -133,7 +133,8 @@ def main() -> int:
     assert "PrimaryDamage" in labels, f"expected PrimaryDamage in {labels[:10]}..."
     print(f"OK: completion returned {len(labels)} items incl. field names")
 
-    # 4) semantic tokens.
+    # 4) semantic tokens (full + range; the server must advertise range).
+    assert caps["semanticTokensProvider"].get("range") is True, "range tokens not advertised"
     send({"jsonrpc": "2.0", "id": 3, "method": "textDocument/semanticTokens/full",
           "params": {"textDocument": {"uri": uri}}})
     sem = wait_for(lambda m: m.get("id") == 3 and "result" in m, "semantic tokens result")
@@ -141,6 +142,16 @@ def main() -> int:
     data = sem["result"]["data"]
     assert len(data) % 5 == 0 and len(data) > 0, "malformed semantic token data"
     print(f"OK: semantic tokens returned {len(data)//5} tokens")
+
+    # The whole-document range must encode exactly the same data as full.
+    send({"jsonrpc": "2.0", "id": 4, "method": "textDocument/semanticTokens/range",
+          "params": {"textDocument": {"uri": uri},
+                     "range": {"start": {"line": 0, "character": 0},
+                               "end": {"line": 3, "character": 0}}}})
+    sem_r = wait_for(lambda m: m.get("id") == 4 and "result" in m, "range tokens result")
+    assert sem_r and sem_r["result"], "no range semantic tokens"
+    assert sem_r["result"]["data"] == data, "range(whole doc) differs from full"
+    print("OK: semanticTokens/range(whole doc) == full")
 
     # 5) incremental deltas must produce the same diagnostics as the full text.
     def norm(diags):
@@ -199,6 +210,11 @@ def main() -> int:
          [({"start": {"line": 1, "character": 0}, "end": {"line": 3, "character": 0}},
            "")],
          "Weapon A\nEnd\n"),
+        ("delete an End line (splice fallback path)",
+         "Weapon A\n  PrimaryDamage = 1\nEnd\nWeapon B\nEnd\n",
+         [({"start": {"line": 2, "character": 0}, "end": {"line": 3, "character": 0}},
+           "")],
+         "Weapon A\n  PrimaryDamage = 1\nWeapon B\nEnd\n"),
     ]
     for i, (name, initial, changes, final) in enumerate(cases):
         inc_uri = f"file:///test/inc{i}.ini"

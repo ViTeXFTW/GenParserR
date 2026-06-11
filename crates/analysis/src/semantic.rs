@@ -47,14 +47,25 @@ pub struct SemToken {
 /// Produce semantic tokens for the whole document, sorted by start offset and
 /// non-overlapping (one classification per token).
 pub fn semantic_tokens(analyzer: &Analyzer, parse: &Parse) -> Vec<SemToken> {
+    semantic_tokens_range(analyzer, parse, Span::new(0, u32::MAX))
+}
+
+/// Produce semantic tokens for the top-level children intersecting `span`
+/// (the LSP `semanticTokens/range` viewport path). Works block-granular, so
+/// the result may extend past `span` — the LSP allows returning a superset.
+pub fn semantic_tokens_range(analyzer: &Analyzer, parse: &Parse, span: Span) -> Vec<SemToken> {
     let mut sem = Sem {
         analyzer,
         by_start: BTreeMap::new(),
     };
     let root = parse.syntax();
+    let intersects = |node: &SyntaxNode| {
+        let r = node.text_range();
+        u32::from(r.start()) <= span.end && u32::from(r.end()) >= span.start
+    };
 
     // Structured pass: headers and field values, schema-aware.
-    for node in root.children() {
+    for node in root.children().filter(|n| intersects(n)) {
         match node.kind() {
             SyntaxKind::BLOCK => {
                 let schema = scope_schema(analyzer, &node);
@@ -66,18 +77,33 @@ pub fn semantic_tokens(analyzer: &Analyzer, parse: &Parse) -> Vec<SemToken> {
         }
     }
 
-    // Lexical pass: comments, `=`, `End`, and any uncovered strings.
-    for el in root.descendants_with_tokens() {
-        if let Some(tok) = el.as_token() {
-            match tok.kind() {
-                SyntaxKind::COMMENT => sem.set(tok, SemKind::Comment),
-                SyntaxKind::EQUALS => sem.set(tok, SemKind::Operator),
-                SyntaxKind::WORD if tok.text().eq_ignore_ascii_case("End") => {
-                    sem.set(tok, SemKind::Keyword)
+    // Lexical pass: comments, `=`, `End`, and any uncovered strings — over the
+    // intersecting children plus ROOT's own trivia tokens in range.
+    let mut lexical = |tok: &SyntaxToken| match tok.kind() {
+        SyntaxKind::COMMENT => sem.set(tok, SemKind::Comment),
+        SyntaxKind::EQUALS => sem.set(tok, SemKind::Operator),
+        SyntaxKind::WORD if tok.text().eq_ignore_ascii_case("End") => {
+            sem.set(tok, SemKind::Keyword)
+        }
+        SyntaxKind::STRING => sem.set_if_absent(tok, SemKind::StringLit),
+        _ => {}
+    };
+    for el in root.children_with_tokens() {
+        match el {
+            rowan::NodeOrToken::Node(node) if intersects(&node) => {
+                for inner in node.descendants_with_tokens() {
+                    if let Some(tok) = inner.as_token() {
+                        lexical(tok);
+                    }
                 }
-                SyntaxKind::STRING => sem.set_if_absent(tok, SemKind::StringLit),
-                _ => {}
             }
+            rowan::NodeOrToken::Token(tok) => {
+                let r = tok.text_range();
+                if u32::from(r.start()) <= span.end && u32::from(r.end()) >= span.start {
+                    lexical(&tok);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -227,6 +253,31 @@ mod tests {
         let t = toks(src);
         assert!(t.iter().any(|(k, s)| *k == SemKind::Module && s == "ActiveBody"));
         assert!(t.iter().any(|(k, s)| *k == SemKind::Number && s == "100"));
+    }
+
+    #[test]
+    fn range_tokens_cover_exactly_the_intersecting_blocks() {
+        let a = Analyzer::embedded();
+        let src = "Weapon A\nEnd\nWeapon B\n  ClipSize = 1\nEnd\nWeapon C\nEnd\n";
+        let parse = a.parse(src);
+        let all = semantic_tokens(&a, &parse);
+
+        // A span inside block B only: tokens must include B's and none of C's
+        // (block-granular, so a superset of the span itself is fine).
+        let b_start = src.find("Weapon B").unwrap() as u32;
+        let ranged = semantic_tokens_range(&a, &parse, Span::new(b_start + 2, b_start + 3));
+        assert!(ranged.iter().all(|t| all.contains(t)), "subset of full");
+        let text = |t: &SemToken| &src[t.span.start as usize..t.span.end as usize];
+        assert!(ranged.iter().any(|t| text(t) == "B"));
+        assert!(ranged.iter().any(|t| text(t) == "ClipSize"));
+        assert!(!ranged.iter().any(|t| text(t) == "A"));
+        assert!(!ranged.iter().any(|t| text(t) == "C"));
+
+        // The whole-document range equals the full pass.
+        assert_eq!(
+            semantic_tokens_range(&a, &parse, Span::new(0, src.len() as u32)),
+            all
+        );
     }
 
     #[test]

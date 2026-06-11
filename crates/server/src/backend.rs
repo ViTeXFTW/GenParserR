@@ -10,22 +10,29 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use dashmap::DashMap;
+use genparser_analysis::diagnostics::DiagnosticsCache;
 use genparser_analysis::index::{definitions_in, WorkspaceIndex};
 use genparser_analysis::nav::{hover_at, reference_at, HoverInfo};
 use genparser_analysis::{completion, diagnostics, semantic, Analyzer};
-use genparser_syntax::Parse;
+use genparser_syntax::{Edit, Parse};
 use ropey::Rope;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{jsonrpc::Result, Client, LanguageServer};
 
 use crate::convert::{self, PositionEnc};
 
-/// An open document: its text and the parse of that exact text. `refresh` is
-/// the only place a new parse is produced for an open document.
+/// An open document: its text (as both a rope for position math and a string
+/// for the parser) and the parse of that exact text. `did_open`/`did_change`
+/// are the only places a new parse is produced for an open document;
+/// `did_change` reparses incrementally by splicing at block boundaries.
 struct DocumentState {
     rope: Rope,
+    /// The same text as `rope`; the source the cached `parse` was built from.
+    text: Arc<str>,
     parse: Arc<Parse>,
     version: i32,
+    /// Per-block diagnostics, reused across edits for unchanged blocks.
+    diag_cache: DiagnosticsCache,
 }
 
 pub struct Backend {
@@ -64,30 +71,26 @@ impl Backend {
         self.encoding.get().copied().unwrap_or_default()
     }
 
-    /// Re-parse the document's current text, cache the parse, and publish.
-    /// Skips publishing if a newer version landed while parsing.
+    /// Update the cross-file index from the document's cached parse, run
+    /// diagnostics (via the per-block cache), and publish. The parse itself is
+    /// maintained synchronously by `did_open`/`did_change`.
     async fn refresh(&self, uri: &Url) {
-        let Some((rope, version)) = self
-            .docs
-            .get(uri)
-            .map(|d| (d.rope.clone(), d.version))
-        else {
+        // Take the cache out so diagnostics run without holding the doc entry
+        // (avoids lock-order entanglement with the index RwLock).
+        let Some((rope, parse, version, mut cache)) = self.docs.get_mut(uri).map(|mut d| {
+            (
+                d.rope.clone(),
+                d.parse.clone(),
+                d.version,
+                std::mem::take(&mut d.diag_cache),
+            )
+        }) else {
             return;
         };
-        let parse = Arc::new(self.analyzer.parse(&rope.to_string()));
-        {
-            let Some(mut entry) = self.docs.get_mut(uri) else { return };
-            if entry.version != version {
-                return; // superseded; the newer change runs its own refresh
-            }
-            entry.parse = parse.clone();
-        }
-        self.publish(uri, &rope, &parse, version).await;
-    }
 
-    /// Update the cross-file index from `parse` and publish diagnostics.
-    async fn publish(&self, uri: &Url, rope: &Rope, parse: &Parse, version: i32) {
-        let defs = definitions_in(&self.analyzer, parse, uri.as_str());
+        // `set_file` bumps the index generation only when definition *names*
+        // changed, so ordinary keystrokes keep diagnostics caches warm.
+        let defs = definitions_in(&self.analyzer, &parse, uri.as_str());
         if let Ok(mut idx) = self.index.write() {
             idx.set_file(uri.as_str(), defs);
         }
@@ -95,12 +98,23 @@ impl Backend {
         let enc = self.enc();
         let lsp_diags: Vec<Diagnostic> = {
             let idx = self.index.read().ok();
-            let diags = diagnostics::diagnose(&self.analyzer, parse, idx.as_deref());
+            let diags =
+                diagnostics::diagnose_with_cache(&self.analyzer, &parse, idx.as_deref(), &mut cache);
             diags
                 .iter()
-                .map(|d| convert::to_lsp_diagnostic(rope, d, enc))
+                .map(|d| convert::to_lsp_diagnostic(&rope, d, enc))
                 .collect()
         };
+
+        // Hand the warmed cache back unless a newer change superseded us (the
+        // newer change runs its own refresh against its own parse).
+        {
+            let Some(mut entry) = self.docs.get_mut(uri) else { return };
+            if entry.version != version {
+                return;
+            }
+            entry.diag_cache = cache;
+        }
         self.client
             .publish_diagnostics(uri.clone(), lsp_diags, Some(version))
             .await;
@@ -187,7 +201,7 @@ impl LanguageServer for Backend {
                         SemanticTokensOptions {
                             legend: convert::semantic_legend(),
                             full: Some(SemanticTokensFullOptions::Bool(true)),
-                            range: Some(false),
+                            range: Some(true),
                             ..Default::default()
                         },
                     ),
@@ -204,13 +218,9 @@ impl LanguageServer for Backend {
         // Re-publish diagnostics for any already-open docs now that the index
         // is populated (so cross-file references resolve). The cached parse is
         // still valid — only the index changed.
-        let open: Vec<(Url, Rope, Arc<Parse>, i32)> = self
-            .docs
-            .iter()
-            .map(|e| (e.key().clone(), e.rope.clone(), e.parse.clone(), e.version))
-            .collect();
-        for (uri, rope, parse, version) in open {
-            self.publish(&uri, &rope, &parse, version).await;
+        let open: Vec<Url> = self.docs.iter().map(|e| e.key().clone()).collect();
+        for uri in open {
+            self.refresh(&uri).await;
         }
         self.client
             .log_message(MessageType::INFO, "genparser language server ready")
@@ -223,18 +233,21 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
-        let rope = Rope::from_str(&params.text_document.text);
-        let parse = Arc::new(self.analyzer.parse(&params.text_document.text));
+        let text: Arc<str> = params.text_document.text.into();
+        let rope = Rope::from_str(&text);
+        let parse = Arc::new(self.analyzer.parse(&text));
         let version = params.text_document.version;
         self.docs.insert(
             uri.clone(),
             DocumentState {
-                rope: rope.clone(),
-                parse: parse.clone(),
+                rope,
+                text,
+                parse,
                 version,
+                diag_cache: DiagnosticsCache::new(),
             },
         );
-        self.publish(&uri, &rope, &parse, version).await;
+        self.refresh(&uri).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -243,9 +256,35 @@ impl LanguageServer for Backend {
         let enc = self.enc();
         {
             let Some(mut entry) = self.docs.get_mut(&uri) else { return };
+            let entry = entry.value_mut();
             // Each change applies to the text produced by the previous one.
+            // The parse is kept in lockstep via incremental reparse, so the
+            // cost per keystroke is the edited block, not the whole file.
             for change in params.content_changes {
-                convert::apply_change(&mut entry.rope, change.range, &change.text, enc);
+                match change.range {
+                    Some(range) => {
+                        let start = convert::position_to_offset(&entry.rope, range.start, enc);
+                        let old_end = convert::position_to_offset(&entry.rope, range.end, enc);
+                        convert::apply_change(&mut entry.rope, Some(range), &change.text, enc);
+                        let new_text: Arc<str> = entry.rope.to_string().into();
+                        let edit = Edit {
+                            start: start as usize,
+                            old_end: old_end as usize,
+                            new_len: change.text.len(),
+                        };
+                        let (parse, _strategy) =
+                            self.analyzer
+                                .reparse(&entry.parse, &entry.text, &new_text, edit);
+                        entry.parse = Arc::new(parse);
+                        entry.text = new_text;
+                    }
+                    None => {
+                        // Full-document replacement.
+                        entry.rope = Rope::from_str(&change.text);
+                        entry.text = change.text.into();
+                        entry.parse = Arc::new(self.analyzer.parse(&entry.text));
+                    }
+                }
             }
             entry.version = version;
         }
@@ -285,6 +324,29 @@ impl LanguageServer for Backend {
         let tokens = semantic::semantic_tokens(&self.analyzer, &parse);
         let data = convert::to_lsp_semantic_tokens(&rope, &tokens, self.enc());
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+            result_id: None,
+            data,
+        })))
+    }
+
+    async fn semantic_tokens_range(
+        &self,
+        params: SemanticTokensRangeParams,
+    ) -> Result<Option<SemanticTokensRangeResult>> {
+        let uri = params.text_document.uri;
+        let Some((rope, parse)) = self.doc(&uri) else {
+            return Ok(None);
+        };
+        let enc = self.enc();
+        let start = convert::position_to_offset(&rope, params.range.start, enc);
+        let end = convert::position_to_offset(&rope, params.range.end, enc);
+        let tokens = semantic::semantic_tokens_range(
+            &self.analyzer,
+            &parse,
+            genparser_analysis::Span::new(start, end),
+        );
+        let data = convert::to_lsp_semantic_tokens(&rope, &tokens, enc);
+        Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
             result_id: None,
             data,
         })))

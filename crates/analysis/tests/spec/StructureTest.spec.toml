@@ -1,0 +1,13 @@
+# Expected behavior for StructureTest.ini.
+#
+# Pins the Phase 2 structural schema: every engine sub-block scope
+# (FXList/OCL nuggets, SideSounds, Prerequisites, InheritableModule,
+# UnitSpecificFX, decal templates) opens correctly, ObjectReskin accepts a
+# full Object body, and single-line directives (BenchProfile, ReallyLowMHz,
+# LODPreset) are neither unterminated blocks nor stray fields.
+#
+# unknown-module / unknown-field warnings are fine here (the module long tail
+# is later schema work); what may never appear is an error: syntax,
+# unknown-block, or stray-field.
+
+no_errors = true

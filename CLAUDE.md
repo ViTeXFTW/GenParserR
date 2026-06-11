@@ -33,13 +33,23 @@ cargo test -p genparser-analysis opens_scope
 # end-to-end (drives the real binary over stdio):
 cargo build -p genparser-server
 python crates/server/tests/e2e.py target/debug/genparser-lsp.exe   # .exe on Windows
+
+# real-corpus gate (fetch once, then run): zero panics, zero syntax /
+# unknown-block diagnostics over the full ZH game data; the printed warning
+# histogram is the schema-coverage backlog.
+pwsh scripts/fetch-corpus.ps1            # or scripts/fetch-corpus.sh
+cargo test --release -p genparser-analysis --test corpus -- --ignored --nocapture
+
+cargo bench                              # parse/analysis benchmarks (criterion)
 ```
 
 Editing the schema is a manual workflow: hand-edit `crates/schema/schema.json`,
 then run `cargo test -p genparser-schema` (validates the embedded JSON parses
 and contains the core blocks) and the spec test below (catches new false
 positives and pins intended behavior). Cross-check new entries against the
-relevant `FieldParse` table in `GeneralsCode/`.
+relevant `FieldParse` table in `GeneralsCode/`. Run the corpus gate after any
+schema or oracle change — a single missing sub-block keyword shows up there as
+`syntax` / `unknown-block` noise.
 
 ### Spec-first behavior tests
 
@@ -89,30 +99,56 @@ schema.json ──embedded──▶ schema ──▶ analysis ──▶ server
   lossless CST with error recovery. The parser is **line-oriented**: a line
   either sets a field or opens an `End`-terminated scope. Whether a line opens a
   scope is delegated to the `OpenerOracle` trait (decoupling grammar from
-  schema).
+  schema). `incremental.rs` adds **block-splice incremental reparse**
+  (`reparse(old, old_text, new_text, edit, oracle)`): the edited top-level
+  children are reparsed as a fragment and spliced, unchanged blocks keep
+  pointer-identical green nodes, and it falls back to a full parse when the
+  fragment ends with an open scope while text follows (`Strategy::Full`).
+  Equivalence with a full parse is fuzz-tested (`tests/incremental_fuzz.rs`
+  and `analysis/tests/incremental.rs`); any lexer/parser change must keep
+  those suites green.
 - **`analysis`** — IDE-agnostic logic over a shared `Analyzer` (owns the
   schema + lookup maps). Modules: `diagnostics`, `completion`, `semantic`
   (tokens), `nav` (hover/go-to-def), `index` (`WorkspaceIndex` cross-file
   reference table), `model` (resolves the schema scope at a CST position).
   All positions are **byte offsets**; the server converts to LSP line/char.
+  Per-block diagnostics are cached (`diagnose_with_cache` +
+  `DiagnosticsCache`): keyed on green-node pointer identity with
+  block-relative spans, invalidated by `WorkspaceIndex::generation()` (bumps
+  only when a file's definition *names* change). Consequence: a root child's
+  diagnostics must never depend on sibling blocks. `semantic_tokens_range`
+  serves viewport-only tokens.
 - **`server`** — `tower-lsp` over stdio. `backend.rs` holds open docs as
-  `DocumentState`s (`ropey` rope + cached parse + version; INCREMENTAL sync —
-  deltas applied to the rope, one re-parse per change batch in `refresh`,
-  read-only requests reuse the cached parse), the shared `Analyzer`, and the
-  `WorkspaceIndex`. `convert.rs` does byte-offset ↔ LSP position mapping in
-  the position encoding negotiated at `initialize` (UTF-8 when the client
-  offers it, else the UTF-16 baseline).
+  `DocumentState`s (`ropey` rope + matching `text: Arc<str>` + cached parse +
+  version + diagnostics cache; INCREMENTAL sync — `did_change` applies each
+  delta to the rope and keeps the parse in lockstep via `Analyzer::reparse`,
+  so a keystroke costs the edited block, not the file; `refresh` only runs
+  cached diagnostics and publishes; read-only requests reuse the cached
+  parse), the shared `Analyzer`, and the `WorkspaceIndex`. `convert.rs` does
+  byte-offset ↔ LSP position mapping in the position encoding negotiated at
+  `initialize` (UTF-8 when the client offers it, else the UTF-16 baseline).
+  Advertises `semanticTokens` `full` **and** `range`. Phase-3 numbers
+  (`docs/phase3-incremental.md`): keystroke on the 61k-line
+  ParticleSystem.ini ≈ 147 µs vs 44 ms full reparse.
 
 ### Two concepts worth understanding before editing
 
 **The `OpenerOracle` (the scope-opening decision).** `analysis::SchemaOpeners`
 implements it context-sensitively: a nested line opens an `End`-terminated scope
-only if its head keyword is a module slot declared by the *enclosing* block, or
-one of the `CURATED_SUBBLOCKS` (ConditionState, ArmorSet, WeaponSet, …). This
-context-sensitivity is what stops a field whose first token equals a block
-keyword (e.g. `Armor = TankArmor` inside an `ArmorSet`) from being misparsed as
-a new block. New engine sub-block keywords are added to `CURATED_SUBBLOCKS` in
-`crates/analysis/src/lib.rs`.
+only if its head keyword is a child of the *enclosing* scope — a module slot or
+a `sub_blocks` entry declared in `schema.json` (e.g. `FXList` → `ParticleSystem`
+nugget, `Object` → `Prerequisites`; sub-blocks nest and are keyed by the
+enclosing head keyword) — or one of the global `CURATED_SUBBLOCKS`
+(ConditionState, ArmorSet, decal templates, …) in `crates/analysis/src/lib.rs`.
+This context-sensitivity is what stops a field whose first token equals a block
+keyword (e.g. `Armor = TankArmor` inside an `ArmorSet`, or `ParticleSystem =
+BlackTrail` inside a `CreateDebris` nugget) from being misparsed as a new
+block. Prefer declaring sub-blocks in the schema (context-keyed); use
+`CURATED_SUBBLOCKS` only for keywords that appear inside module scopes, where
+the oracle sees the slot keyword (`Behavior`/`Draw`) as the enclosing head.
+Blocks with `"terminated": false` (BenchProfile, ReallyLowMHz, LODPreset) are
+single-line directives: the parser emits them as file-scope fields, not
+blocks.
 
 **Diagnostics are intentionally stricter than the engine** (the project's
 goal). Two layers in `diagnostics.rs`: engine-faithful *errors* (unknown

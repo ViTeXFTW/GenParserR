@@ -34,6 +34,9 @@ pub struct WorkspaceIndex {
     by_kind: HashMap<RefKind, HashMap<String, Vec<Location>>>,
     /// Reverse map so a file's old entries can be removed on update.
     files: HashMap<String, Vec<(RefKind, String)>>,
+    /// Bumped whenever the *name set* changes (not mere span shifts), so
+    /// consumers (the per-block diagnostics cache) can invalidate cheaply.
+    generation: u64,
 }
 
 impl WorkspaceIndex {
@@ -41,10 +44,27 @@ impl WorkspaceIndex {
         Self::default()
     }
 
+    /// A counter that changes whenever reference resolution could change.
+    /// Re-indexing a file with the same definition names does **not** bump it,
+    /// so a keystroke that doesn't touch a block header keeps caches warm.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
     /// Replace all definitions contributed by `file` with `defs`.
     pub fn set_file(&mut self, file: &str, defs: Vec<Definition>) {
-        self.remove_file(file);
-        let mut owned = Vec::new();
+        let names: Vec<(RefKind, String)> = defs
+            .iter()
+            .map(|d| (d.kind, d.name.clone()))
+            .collect();
+        let changed = match self.files.get(file) {
+            Some(old) => *old != names,
+            None => !names.is_empty(),
+        };
+        if changed {
+            self.generation += 1;
+        }
+        self.remove_entries(file);
         for def in defs {
             self.by_kind
                 .entry(def.kind)
@@ -55,13 +75,19 @@ impl WorkspaceIndex {
                     file: file.to_string(),
                     span: def.span,
                 });
-            owned.push((def.kind, def.name));
         }
-        self.files.insert(file.to_string(), owned);
+        self.files.insert(file.to_string(), names);
     }
 
     /// Drop all definitions contributed by `file`.
     pub fn remove_file(&mut self, file: &str) {
+        if self.files.get(file).is_some_and(|v| !v.is_empty()) {
+            self.generation += 1;
+        }
+        self.remove_entries(file);
+    }
+
+    fn remove_entries(&mut self, file: &str) {
         if let Some(entries) = self.files.remove(file) {
             for (kind, name) in entries {
                 if let Some(names) = self.by_kind.get_mut(&kind) {
@@ -144,6 +170,31 @@ mod tests {
         assert!(idx.is_defined(RefKind::Weapon, "AK47"));
         assert!(idx.is_defined(RefKind::Object, "Tank"));
         assert!(!idx.is_defined(RefKind::Weapon, "Nonexistent"));
+    }
+
+    #[test]
+    fn generation_tracks_name_changes_only() {
+        let a = Analyzer::embedded();
+        let mut idx = WorkspaceIndex::new();
+        let g0 = idx.generation();
+        idx.set_file("f.ini", definitions_in(&a, &a.parse("Weapon AK47\nEnd\n"), "f.ini"));
+        let g1 = idx.generation();
+        assert_ne!(g0, g1, "new definitions bump the generation");
+
+        // Same names at shifted spans (e.g. a comment typed above): no bump.
+        idx.set_file("f.ini", definitions_in(&a, &a.parse("; c\nWeapon AK47\nEnd\n"), "f.ini"));
+        assert_eq!(idx.generation(), g1);
+
+        // Renaming a definition bumps.
+        idx.set_file("f.ini", definitions_in(&a, &a.parse("Weapon M16\nEnd\n"), "f.ini"));
+        assert_ne!(idx.generation(), g1);
+
+        // A file with no definitions, set repeatedly: no bumps after removal.
+        let g2 = idx.generation();
+        idx.set_file("empty.ini", vec![]);
+        assert_eq!(idx.generation(), g2);
+        idx.remove_file("empty.ini");
+        assert_eq!(idx.generation(), g2);
     }
 
     #[test]

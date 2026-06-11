@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet};
 
 use genparser_schema::{BlockType, ModuleType, Schema, ValueSet};
-use genparser_syntax::{parse, OpenerOracle, Parse};
+use genparser_syntax::{parse, Edit, OpenerOracle, Parse, Strategy};
 
 pub mod completion;
 pub mod diagnostics;
@@ -98,6 +98,19 @@ impl Analyzer {
         parse(src, &self.openers)
     }
 
+    /// Incrementally reparse after an edit (see [`genparser_syntax::reparse`]):
+    /// splices the reparsed region into `old` when possible, falling back to a
+    /// full parse. Always identical to `self.parse(new_text)`.
+    pub fn reparse(
+        &self,
+        old: &Parse,
+        old_text: &str,
+        new_text: &str,
+        edit: Edit,
+    ) -> (Parse, Strategy) {
+        genparser_syntax::reparse(old, old_text, new_text, edit, &self.openers)
+    }
+
     pub fn block(&self, name: &str) -> Option<&BlockType> {
         self.block_by_name.get(name).map(|&i| &self.schema.blocks[i])
     }
@@ -133,10 +146,15 @@ impl Analyzer {
 /// `ArmorSet`, or `Animation foo.bar` inside a `ConditionState`) from being
 /// mistaken for a new block.
 pub struct SchemaOpeners {
-    /// Block keyword -> the set of module-slot keywords it declares.
-    block_slots: HashMap<String, HashSet<String>>,
+    /// Scope head keyword -> the set of child keywords that open nested scopes
+    /// inside it: a block's module slots and declared sub-blocks, and each
+    /// sub-block's own nested sub-blocks (keyed by the sub-block keyword).
+    scope_children: HashMap<String, HashSet<String>>,
     /// Curated sub-block keywords valid inside any scope.
     subblocks: HashSet<String>,
+    /// Block keywords that are single-line directives, not `End`-terminated
+    /// (`terminated: false` in the schema).
+    inline_blocks: HashSet<String>,
 }
 
 /// Sub-block keywords the engine parses as nested `End`-terminated scopes via
@@ -155,28 +173,56 @@ const CURATED_SUBBLOCKS: &[&str] = &[
     "Turret",
     "AltTurret",
     "UnitSpecificSounds",
+    "UnitSpecificSound",
+    "UnitSpecificFX",
     "InheritableModule",
     "OverrideableByLikeKind",
+    // RadiusDecalTemplate scopes inside Behavior modules (deployment updates).
+    "AttackAreaDecal",
+    "TargetingReticleDecal",
+    "DeliveryDecal",
+    "GridDecalTemplate",
 ];
 
 impl SchemaOpeners {
     pub fn from_schema(schema: &Schema) -> Self {
-        let block_slots = schema
+        let mut scope_children: HashMap<String, HashSet<String>> = HashMap::new();
+
+        // Sub-block keywords can repeat across parents (e.g. `ImagePart` under
+        // both `ControlBarScheme` and `AnimatingPart`); children sets merge.
+        fn add_subblocks(
+            map: &mut HashMap<String, HashSet<String>>,
+            parent: &str,
+            subs: &[genparser_schema::SubBlock],
+        ) {
+            for sub in subs {
+                map.entry(parent.to_string())
+                    .or_default()
+                    .insert(sub.keyword.clone());
+                add_subblocks(map, &sub.keyword, &sub.sub_blocks);
+            }
+        }
+
+        for block in &schema.blocks {
+            let entry = scope_children.entry(block.name.clone()).or_default();
+            entry.extend(block.module_slots.iter().map(|s| s.keyword.clone()));
+            add_subblocks(&mut scope_children, &block.name, &block.sub_blocks);
+        }
+        for module in &schema.modules {
+            add_subblocks(&mut scope_children, &module.name, &module.sub_blocks);
+        }
+
+        let subblocks = CURATED_SUBBLOCKS.iter().map(|s| s.to_string()).collect();
+        let inline_blocks = schema
             .blocks
             .iter()
-            .map(|block| {
-                let slots = block
-                    .module_slots
-                    .iter()
-                    .map(|s| s.keyword.clone())
-                    .collect();
-                (block.name.clone(), slots)
-            })
+            .filter(|b| !b.terminated)
+            .map(|b| b.name.clone())
             .collect();
-        let subblocks = CURATED_SUBBLOCKS.iter().map(|s| s.to_string()).collect();
         SchemaOpeners {
-            block_slots,
+            scope_children,
             subblocks,
+            inline_blocks,
         }
     }
 }
@@ -188,15 +234,19 @@ impl OpenerOracle for SchemaOpeners {
             // line), so this is only a defensive fallback.
             None => false,
             // Inside a scope, a child opens only if it is a curated sub-block or
-            // a module slot declared by the enclosing block.
+            // a module slot / declared sub-block of the enclosing scope.
             Some(scope_head) => {
                 self.subblocks.contains(head)
                     || self
-                        .block_slots
+                        .scope_children
                         .get(scope_head)
-                        .is_some_and(|slots| slots.contains(head))
+                        .is_some_and(|children| children.contains(head))
             }
         }
+    }
+
+    fn opens_at_file_scope(&self, head: &str) -> bool {
+        !self.inline_blocks.contains(head)
     }
 }
 

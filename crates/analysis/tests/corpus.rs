@@ -8,9 +8,12 @@
 //! cargo test --release -p genparser-analysis --test corpus -- --ignored --nocapture
 //! ```
 //!
-//! Phase 0 (roadmap): smoke pass — zero panics, timing percentiles, and a
-//! diagnostic histogram that seeds the schema backlog. Phase 2 hardens this
-//! into a gate (zero `syntax`-code diagnostics across the corpus).
+//! This is a permanent gate (roadmap Phase 2): zero panics, zero `syntax`
+//! diagnostics, and zero `unknown-block` diagnostics across the real game
+//! data. A `syntax` or `unknown-block` hit on the corpus is an OpenerOracle /
+//! schema-structure gap (one missing sub-block keyword cascades into dozens
+//! of bogus diagnostics downstream). The printed histogram of the remaining
+//! warning codes is the schema-coverage backlog, ordered by frequency.
 
 use std::collections::BTreeMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -121,8 +124,17 @@ fn corpus_smoke() {
         for d in &diags {
             *histogram.entry(d.code).or_default() += 1;
             *by_message.entry(d.message.clone()).or_default() += 1;
-            if d.code == "syntax" {
+            if d.code == "syntax" || d.code == "unknown-block" {
                 *syntax_files.entry(rel.clone()).or_default() += 1;
+                let line = text[..d.span.start as usize].lines().count();
+                let snippet: String = text[d.span.start as usize..]
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .chars()
+                    .take(80)
+                    .collect();
+                println!("  [{}] {}:{line}: {} | {snippet}", d.code, rel, d.message);
             }
         }
         parse_times.push(parse_t);
@@ -172,4 +184,12 @@ fn corpus_smoke() {
     }
 
     assert!(panics.is_empty(), "panics on corpus files: {panics:?}");
+    let syntax = histogram.get("syntax").copied().unwrap_or(0);
+    let unknown_block = histogram.get("unknown-block").copied().unwrap_or(0);
+    assert_eq!(
+        (syntax, unknown_block),
+        (0, 0),
+        "oracle/schema-structure gap: {syntax} syntax + {unknown_block} \
+         unknown-block diagnostics on real game data (see [..] lines above)"
+    );
 }

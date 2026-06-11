@@ -44,6 +44,11 @@ pub struct BlockType {
     /// Whether the block is named (`Object Foo`) or anonymous (`GameData`).
     #[serde(default = "default_true")]
     pub named: bool,
+    /// Whether the block is `End`-terminated. A few typeTable entries are
+    /// single-line directives (`BenchProfile = ...`, `ReallyLowMHz = 600`)
+    /// whose parse functions consume only their own line.
+    #[serde(default = "default_true")]
+    pub terminated: bool,
     /// The kind of symbol a named block of this type defines, for the cross-file
     /// reference index. `None` means it is not referenceable by name.
     #[serde(default)]
@@ -54,7 +59,29 @@ pub struct BlockType {
     /// `Behavior`, ...). Empty for leaf blocks.
     #[serde(default)]
     pub module_slots: Vec<ModuleSlot>,
+    /// Structural sub-block scopes the engine parses recursively inside this
+    /// block via custom parse functions (e.g. `FXList`'s `ParticleSystem`
+    /// nugget). These open `End`-terminated scopes only inside their declaring
+    /// scope — unlike module slots they carry no module name after `=`.
+    #[serde(default)]
+    pub sub_blocks: Vec<SubBlock>,
     /// Optional human-readable documentation.
+    #[serde(default)]
+    pub doc: Option<String>,
+}
+
+/// A structural sub-block scope (see [`BlockType::sub_blocks`]). Sub-blocks
+/// nest: e.g. `AIData` → `SideInfo` → `SkillSet1`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubBlock {
+    /// The keyword opening the scope (`Sound`, `CreateObject`, `Mission`, ...).
+    pub keyword: String,
+    /// Fields legal inside this sub-block (empty = lenient, not yet modeled).
+    #[serde(default)]
+    pub fields: Vec<Field>,
+    /// Sub-blocks nested inside this one.
+    #[serde(default)]
+    pub sub_blocks: Vec<SubBlock>,
     #[serde(default)]
     pub doc: Option<String>,
 }
@@ -81,6 +108,10 @@ pub struct ModuleType {
     pub interfaces: Vec<String>,
     /// Fields legal inside this module.
     pub fields: Vec<Field>,
+    /// Structural sub-block scopes inside this module (e.g. `W3DModelDraw`'s
+    /// `ConditionState`).
+    #[serde(default)]
+    pub sub_blocks: Vec<SubBlock>,
     #[serde(default)]
     pub doc: Option<String>,
 }
@@ -265,6 +296,7 @@ mod tests {
                 name: "Weapon".into(),
                 parse_fn: "parseWeaponTemplateDefinition".into(),
                 named: true,
+                terminated: true,
                 defines: Some(RefKind::Weapon),
                 fields: vec![Field {
                     name: "PrimaryDamage".into(),
@@ -273,6 +305,7 @@ mod tests {
                     doc: None,
                 }],
                 module_slots: vec![],
+                sub_blocks: vec![],
                 doc: None,
             }],
             modules: vec![],

@@ -3,6 +3,723 @@
   "engine_revision": "handwritten-initial",
   "blocks": [
     {
+      "name": "AIData",
+      "parse_fn": "INI::parseAIDataDefinition",
+      "named": false,
+      "defines": null,
+      "doc": null,
+      "fields": [],
+      "sub_blocks": [
+        {
+          "keyword": "SideInfo",
+          "sub_blocks": [
+            {
+              "keyword": "SkillSet1"
+            },
+            {
+              "keyword": "SkillSet2"
+            },
+            {
+              "keyword": "SkillSet3"
+            },
+            {
+              "keyword": "SkillSet4"
+            },
+            {
+              "keyword": "SkillSet5"
+            }
+          ]
+        },
+        {
+          "keyword": "SkirmishBuildList",
+          "sub_blocks": [
+            {
+              "keyword": "Structure"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Animation",
+      "parse_fn": "INI::parseAnim2DDefinition",
+      "named": true,
+      "defines": "anim2_d",
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "Armor",
+      "parse_fn": "INI::parseArmorDefinition",
+      "named": true,
+      "defines": "armor",
+      "doc": "Armor template: damage coefficients per damage type. Each `Armor =` line is a `<DamageType> <Percent>` pair (DEFAULT sets the fallthrough).",
+      "fields": [
+        {
+          "name": "Armor",
+          "value_type": {
+            "kind": "ascii_string_list"
+          },
+          "parse_fn": "ArmorTemplate::parseArmorCoefficients",
+          "doc": "`<DamageType> <Percent>` \u2014 damage multiplier for that damage type."
+        }
+      ],
+      "module_slots": []
+    },
+    {
+      "name": "AudioEvent",
+      "parse_fn": "INI::parseAudioEventDefinition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "AudioSettings",
+      "parse_fn": "INI::parseAudioSettingsDefinition",
+      "named": false,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "BenchProfile",
+      "parse_fn": "INI::parseBenchProfile",
+      "named": false,
+      "defines": null,
+      "doc": null,
+      "fields": [],
+      "terminated": false
+    },
+    {
+      "name": "Bridge",
+      "parse_fn": "INI::parseTerrainBridgeDefinition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "ButtonSet",
+      "parse_fn": "(GeneralsGamePatch2 community addition; not in retail typeTable)",
+      "named": true,
+      "defines": null,
+      "doc": "Community-patch block grouping command-button rows (Data/INI/Default/ButtonSets.ini).",
+      "fields": []
+    },
+    {
+      "name": "Campaign",
+      "parse_fn": "INI::parseCampaignDefinition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": [],
+      "sub_blocks": [
+        {
+          "keyword": "Mission"
+        }
+      ]
+    },
+    {
+      "name": "ChallengeGenerals",
+      "parse_fn": "INI::parseChallengeModeDefinition",
+      "named": false,
+      "defines": null,
+      "doc": null,
+      "fields": [],
+      "sub_blocks": [
+        {
+          "keyword": "GeneralPersona0"
+        },
+        {
+          "keyword": "GeneralPersona1"
+        },
+        {
+          "keyword": "GeneralPersona2"
+        },
+        {
+          "keyword": "GeneralPersona3"
+        },
+        {
+          "keyword": "GeneralPersona4"
+        },
+        {
+          "keyword": "GeneralPersona5"
+        },
+        {
+          "keyword": "GeneralPersona6"
+        },
+        {
+          "keyword": "GeneralPersona7"
+        },
+        {
+          "keyword": "GeneralPersona8"
+        },
+        {
+          "keyword": "GeneralPersona9"
+        },
+        {
+          "keyword": "GeneralPersona10"
+        },
+        {
+          "keyword": "GeneralPersona11"
+        }
+      ]
+    },
+    {
+      "name": "CommandButton",
+      "parse_fn": "INI::parseCommandButtonDefinition",
+      "named": true,
+      "defines": "command_button",
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "CommandMap",
+      "parse_fn": "INI::parseMetaMapDefinition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "CommandSet",
+      "parse_fn": "INI::parseCommandSetDefinition",
+      "named": true,
+      "defines": "command_set",
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "ControlBarResizer",
+      "parse_fn": "INI::parseControlBarResizerDefinition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "ControlBarScheme",
+      "parse_fn": "INI::parseControlBarSchemeDefinition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": [],
+      "sub_blocks": [
+        {
+          "keyword": "ImagePart"
+        },
+        {
+          "keyword": "AnimatingPart",
+          "sub_blocks": [
+            {
+              "keyword": "ImagePart"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "CrateData",
+      "parse_fn": "INI::parseCrateTemplateDefinition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "Credits",
+      "parse_fn": "INI::parseCredits",
+      "named": false,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "DamageFX",
+      "parse_fn": "INI::parseDamageFXDefinition",
+      "named": true,
+      "defines": "damage_fx",
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "DialogEvent",
+      "parse_fn": "INI::parseDialogDefinition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "DrawGroupInfo",
+      "parse_fn": "INI::parseDrawGroupNumberDefinition",
+      "named": false,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "DynamicGameLOD",
+      "parse_fn": "INI::parseDynamicGameLODDefinition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "EvaEvent",
+      "parse_fn": "INI::parseEvaEvent",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": [],
+      "sub_blocks": [
+        {
+          "keyword": "SideSounds"
+        }
+      ]
+    },
+    {
+      "name": "FXList",
+      "parse_fn": "INI::parseFXListDefinition",
+      "named": true,
+      "defines": "fx_list",
+      "doc": null,
+      "fields": [],
+      "sub_blocks": [
+        {
+          "keyword": "Sound"
+        },
+        {
+          "keyword": "RayEffect"
+        },
+        {
+          "keyword": "Tracer"
+        },
+        {
+          "keyword": "LightPulse"
+        },
+        {
+          "keyword": "ViewShake"
+        },
+        {
+          "keyword": "TerrainScorch"
+        },
+        {
+          "keyword": "ParticleSystem"
+        },
+        {
+          "keyword": "FXListAtBonePos"
+        }
+      ]
+    },
+    {
+      "name": "GameData",
+      "parse_fn": "INI::parseGameDataDefinition",
+      "named": false,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "HeaderTemplate",
+      "parse_fn": "INI::parseHeaderTemplateDefinition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "InGameUI",
+      "parse_fn": "INI::parseInGameUIDefinition",
+      "named": false,
+      "defines": null,
+      "doc": null,
+      "fields": [],
+      "sub_blocks": [
+        {
+          "keyword": "A10StrikeRadiusCursor"
+        },
+        {
+          "keyword": "AmbulanceRadiusCursor"
+        },
+        {
+          "keyword": "AmbushRadiusCursor"
+        },
+        {
+          "keyword": "AnthraxBombRadiusCursor"
+        },
+        {
+          "keyword": "ArtilleryRadiusCursor"
+        },
+        {
+          "keyword": "AttackContinueAreaRadiusCursor"
+        },
+        {
+          "keyword": "AttackDamageAreaRadiusCursor"
+        },
+        {
+          "keyword": "AttackScatterAreaRadiusCursor"
+        },
+        {
+          "keyword": "CarpetBombRadiusCursor"
+        },
+        {
+          "keyword": "ClearMinesRadiusCursor"
+        },
+        {
+          "keyword": "ClusterMinesRadiusCursor"
+        },
+        {
+          "keyword": "DaisyCutterRadiusCursor"
+        },
+        {
+          "keyword": "EMPPulseRadiusCursor"
+        },
+        {
+          "keyword": "EmergencyRepairRadiusCursor"
+        },
+        {
+          "keyword": "FrenzyRadiusCursor"
+        },
+        {
+          "keyword": "FriendlySpecialPowerRadiusCursor"
+        },
+        {
+          "keyword": "GuardAreaRadiusCursor"
+        },
+        {
+          "keyword": "HelixNapalmBombRadiusCursor"
+        },
+        {
+          "keyword": "NapalmStrikeRadiusCursor"
+        },
+        {
+          "keyword": "NuclearMissileRadiusCursor"
+        },
+        {
+          "keyword": "OffensiveSpecialPowerRadiusCursor"
+        },
+        {
+          "keyword": "ParadropRadiusCursor"
+        },
+        {
+          "keyword": "ParticleCannonRadiusCursor"
+        },
+        {
+          "keyword": "RadarRadiusCursor"
+        },
+        {
+          "keyword": "ScudStormRadiusCursor"
+        },
+        {
+          "keyword": "SpectreGunshipRadiusCursor"
+        },
+        {
+          "keyword": "SpyDroneRadiusCursor"
+        },
+        {
+          "keyword": "SpySatelliteRadiusCursor"
+        },
+        {
+          "keyword": "SuperweaponScatterAreaRadiusCursor"
+        }
+      ]
+    },
+    {
+      "name": "LODPreset",
+      "parse_fn": "INI::parseLODPreset",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": [],
+      "terminated": false
+    },
+    {
+      "name": "Language",
+      "parse_fn": "INI::parseLanguageDefinition",
+      "named": false,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "Locomotor",
+      "parse_fn": "INI::parseLocomotorTemplateDefinition",
+      "named": true,
+      "defines": "locomotor",
+      "doc": "Movement template controlling speed, turning and physics for a locomotor set.",
+      "fields": [
+        {
+          "name": "Surfaces",
+          "value_type": {
+            "kind": "unknown",
+            "parse_fn": "INI::parseBitString32"
+          },
+          "parse_fn": "INI::parseBitString32",
+          "doc": "Surface-type flags (set not yet enumerated)."
+        },
+        {
+          "name": "Speed",
+          "value_type": {
+            "kind": "velocity"
+          },
+          "parse_fn": "INI::parseVelocityReal",
+          "doc": null
+        },
+        {
+          "name": "SpeedDamaged",
+          "value_type": {
+            "kind": "velocity"
+          },
+          "parse_fn": "INI::parseVelocityReal",
+          "doc": null
+        },
+        {
+          "name": "TurnRate",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseAngularVelocityReal",
+          "doc": null
+        },
+        {
+          "name": "TurnRateDamaged",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseAngularVelocityReal",
+          "doc": null
+        },
+        {
+          "name": "Acceleration",
+          "value_type": {
+            "kind": "acceleration"
+          },
+          "parse_fn": "INI::parseAccelerationReal",
+          "doc": null
+        },
+        {
+          "name": "AccelerationDamaged",
+          "value_type": {
+            "kind": "acceleration"
+          },
+          "parse_fn": "INI::parseAccelerationReal",
+          "doc": null
+        },
+        {
+          "name": "Lift",
+          "value_type": {
+            "kind": "acceleration"
+          },
+          "parse_fn": "INI::parseAccelerationReal",
+          "doc": null
+        },
+        {
+          "name": "LiftDamaged",
+          "value_type": {
+            "kind": "acceleration"
+          },
+          "parse_fn": "INI::parseAccelerationReal",
+          "doc": null
+        },
+        {
+          "name": "Braking",
+          "value_type": {
+            "kind": "acceleration"
+          },
+          "parse_fn": "INI::parseAccelerationReal",
+          "doc": null
+        },
+        {
+          "name": "MinSpeed",
+          "value_type": {
+            "kind": "velocity"
+          },
+          "parse_fn": "INI::parseVelocityReal",
+          "doc": null
+        },
+        {
+          "name": "MinTurnSpeed",
+          "value_type": {
+            "kind": "velocity"
+          },
+          "parse_fn": "INI::parseVelocityReal",
+          "doc": null
+        },
+        {
+          "name": "PreferredHeight",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "PreferredHeightDamping",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "CirclingRadius",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "SpeedLimitZ",
+          "value_type": {
+            "kind": "velocity"
+          },
+          "parse_fn": "INI::parseVelocityReal",
+          "doc": null
+        },
+        {
+          "name": "MaxThrustAngle",
+          "value_type": {
+            "kind": "angle_real"
+          },
+          "parse_fn": "INI::parseAngleReal",
+          "doc": null
+        },
+        {
+          "name": "AccelerationPitchLimit",
+          "value_type": {
+            "kind": "angle_real"
+          },
+          "parse_fn": "INI::parseAngleReal",
+          "doc": null
+        },
+        {
+          "name": "DecelerationPitchLimit",
+          "value_type": {
+            "kind": "angle_real"
+          },
+          "parse_fn": "INI::parseAngleReal",
+          "doc": null
+        },
+        {
+          "name": "PitchStiffness",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "RollStiffness",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "PitchDamping",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "RollDamping",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        }
+      ],
+      "module_slots": []
+    },
+    {
+      "name": "MapCache",
+      "parse_fn": "INI::parseMapCacheDefinition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "MapData",
+      "parse_fn": "INI::parseMapDataDefinition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "MappedImage",
+      "parse_fn": "INI::parseMappedImageDefinition",
+      "named": true,
+      "defines": "mapped_image",
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "MiscAudio",
+      "parse_fn": "INI::parseMiscAudio",
+      "named": false,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "Mouse",
+      "parse_fn": "INI::parseMouseDefinition",
+      "named": false,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "MouseCursor",
+      "parse_fn": "INI::parseMouseCursorDefinition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "MultiplayerColor",
+      "parse_fn": "INI::parseMultiplayerColorDefinition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "MultiplayerSettings",
+      "parse_fn": "INI::parseMultiplayerSettingsDefinition",
+      "named": false,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "MultiplayerStartingMoneyChoice",
+      "parse_fn": "INI::parseMultiplayerStartingMoneyChoiceDefinition",
+      "named": false,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "MusicTrack",
+      "parse_fn": "INI::parseMusicTrackDefinition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
       "name": "Object",
       "parse_fn": "INI::parseObjectDefinition",
       "named": true,
@@ -398,7 +1115,340 @@
           "interface": "ClientUpdate",
           "doc": "Client-side update module."
         }
+      ],
+      "sub_blocks": [
+        {
+          "keyword": "Prerequisites"
+        },
+        {
+          "keyword": "InheritableModule",
+          "sub_blocks": [
+            {
+              "keyword": "Behavior"
+            },
+            {
+              "keyword": "Draw"
+            },
+            {
+              "keyword": "Body"
+            },
+            {
+              "keyword": "ClientUpdate"
+            }
+          ],
+          "doc": "Wrapper marking default modules that survive template copies."
+        },
+        {
+          "keyword": "OverrideableByLikeKind",
+          "sub_blocks": [
+            {
+              "keyword": "Behavior"
+            },
+            {
+              "keyword": "Draw"
+            },
+            {
+              "keyword": "Body"
+            },
+            {
+              "keyword": "ClientUpdate"
+            }
+          ],
+          "doc": "Wrapper marking default modules replaceable by same-class modules."
+        }
       ]
+    },
+    {
+      "name": "ObjectCreationList",
+      "parse_fn": "INI::parseObjectCreationListDefinition",
+      "named": true,
+      "defines": "object_creation_list",
+      "doc": null,
+      "fields": [],
+      "sub_blocks": [
+        {
+          "keyword": "CreateObject"
+        },
+        {
+          "keyword": "CreateDebris"
+        },
+        {
+          "keyword": "ApplyRandomForce"
+        },
+        {
+          "keyword": "DeliverPayload",
+          "sub_blocks": [
+            {
+              "keyword": "DeliveryDecal"
+            }
+          ]
+        },
+        {
+          "keyword": "FireWeapon"
+        },
+        {
+          "keyword": "Attack"
+        }
+      ]
+    },
+    {
+      "name": "ObjectReskin",
+      "parse_fn": "INI::parseObjectReskinDefinition",
+      "named": true,
+      "defines": "object",
+      "doc": "Clones an existing Object under a new name, then applies overrides with the full Object parse table.",
+      "fields": [],
+      "module_slots": [
+        {
+          "keyword": "Draw",
+          "interface": "Draw",
+          "doc": "Rendering module (e.g. W3DModelDraw)."
+        },
+        {
+          "keyword": "Body",
+          "interface": "Body",
+          "doc": "Health/body module (e.g. ActiveBody)."
+        },
+        {
+          "keyword": "Behavior",
+          "interface": "Behavior",
+          "doc": "Behavior/update/upgrade module."
+        },
+        {
+          "keyword": "ClientUpdate",
+          "interface": "ClientUpdate",
+          "doc": "Client-side update module."
+        }
+      ],
+      "sub_blocks": [
+        {
+          "keyword": "Prerequisites"
+        },
+        {
+          "keyword": "InheritableModule",
+          "sub_blocks": [
+            {
+              "keyword": "Behavior"
+            },
+            {
+              "keyword": "Draw"
+            },
+            {
+              "keyword": "Body"
+            },
+            {
+              "keyword": "ClientUpdate"
+            }
+          ],
+          "doc": "Wrapper marking default modules that survive template copies."
+        },
+        {
+          "keyword": "OverrideableByLikeKind",
+          "sub_blocks": [
+            {
+              "keyword": "Behavior"
+            },
+            {
+              "keyword": "Draw"
+            },
+            {
+              "keyword": "Body"
+            },
+            {
+              "keyword": "ClientUpdate"
+            }
+          ],
+          "doc": "Wrapper marking default modules replaceable by same-class modules."
+        }
+      ]
+    },
+    {
+      "name": "OnlineChatColors",
+      "parse_fn": "INI::parseOnlineChatColorDefinition",
+      "named": false,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "ParticleSystem",
+      "parse_fn": "INI::parseParticleSystemDefinition",
+      "named": true,
+      "defines": "particle_system",
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "PlayerTemplate",
+      "parse_fn": "INI::parsePlayerTemplateDefinition",
+      "named": true,
+      "defines": "player_template",
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "Rank",
+      "parse_fn": "INI::parseRankDefinition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "ReallyLowMHz",
+      "parse_fn": "parseReallyLowMHz",
+      "named": false,
+      "defines": null,
+      "doc": null,
+      "fields": [],
+      "terminated": false
+    },
+    {
+      "name": "Road",
+      "parse_fn": "INI::parseTerrainRoadDefinition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "Science",
+      "parse_fn": "INI::parseScienceDefinition",
+      "named": true,
+      "defines": "science",
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "ScriptAction",
+      "parse_fn": "ScriptEngine::parseScriptAction",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "ScriptCondition",
+      "parse_fn": "ScriptEngine::parseScriptCondition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "ShellMenuScheme",
+      "parse_fn": "INI::parseShellMenuSchemeDefinition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": [],
+      "sub_blocks": [
+        {
+          "keyword": "ImagePart"
+        },
+        {
+          "keyword": "LinePart"
+        }
+      ]
+    },
+    {
+      "name": "SpecialPower",
+      "parse_fn": "INI::parseSpecialPowerDefinition",
+      "named": true,
+      "defines": "special_power",
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "StaticGameLOD",
+      "parse_fn": "INI::parseStaticGameLODDefinition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "Terrain",
+      "parse_fn": "INI::parseTerrainDefinition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "Upgrade",
+      "parse_fn": "INI::parseUpgradeDefinition",
+      "named": true,
+      "defines": "upgrade",
+      "doc": "A purchasable/researchable upgrade definition.",
+      "fields": [
+        {
+          "name": "DisplayName",
+          "value_type": {
+            "kind": "ascii_string"
+          },
+          "parse_fn": "INI::parseAsciiString",
+          "doc": null
+        },
+        {
+          "name": "Type",
+          "value_type": {
+            "kind": "enum",
+            "value_set": "upgrade_type"
+          },
+          "parse_fn": "INI::parseIndexList",
+          "doc": "PLAYER- or OBJECT-scoped."
+        },
+        {
+          "name": "BuildTime",
+          "value_type": {
+            "kind": "real"
+          },
+          "parse_fn": "INI::parseReal",
+          "doc": null
+        },
+        {
+          "name": "BuildCost",
+          "value_type": {
+            "kind": "int"
+          },
+          "parse_fn": "INI::parseInt",
+          "doc": null
+        },
+        {
+          "name": "ButtonImage",
+          "value_type": {
+            "kind": "ascii_string"
+          },
+          "parse_fn": "INI::parseAsciiString",
+          "doc": null
+        }
+      ],
+      "module_slots": []
+    },
+    {
+      "name": "Video",
+      "parse_fn": "INI::parseVideoDefinition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "WaterSet",
+      "parse_fn": "INI::parseWaterSettingDefinition",
+      "named": true,
+      "defines": null,
+      "doc": null,
+      "fields": []
+    },
+    {
+      "name": "WaterTransparency",
+      "parse_fn": "INI::parseWaterTransparencyDefinition",
+      "named": false,
+      "defines": null,
+      "doc": null,
+      "fields": []
     },
     {
       "name": "Weapon",
@@ -815,268 +1865,33 @@
       "module_slots": []
     },
     {
-      "name": "Armor",
-      "parse_fn": "INI::parseArmorDefinition",
-      "named": true,
-      "defines": "armor",
-      "doc": "Armor template: damage coefficients per damage type. Each `Armor =` line is a `<DamageType> <Percent>` pair (DEFAULT sets the fallthrough).",
-      "fields": [
-        {
-          "name": "Armor",
-          "value_type": {
-            "kind": "ascii_string_list"
-          },
-          "parse_fn": "ArmorTemplate::parseArmorCoefficients",
-          "doc": "`<DamageType> <Percent>` — damage multiplier for that damage type."
-        }
-      ],
-      "module_slots": []
+      "name": "Weather",
+      "parse_fn": "INI::parseWeatherDefinition",
+      "named": false,
+      "defines": null,
+      "doc": null,
+      "fields": []
     },
     {
-      "name": "Locomotor",
-      "parse_fn": "INI::parseLocomotorTemplateDefinition",
+      "name": "WebpageURL",
+      "parse_fn": "INI::parseWebpageURLDefinition",
       "named": true,
-      "defines": "locomotor",
-      "doc": "Movement template controlling speed, turning and physics for a locomotor set.",
-      "fields": [
-        {
-          "name": "Surfaces",
-          "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
-          },
-          "parse_fn": "INI::parseBitString32",
-          "doc": "Surface-type flags (set not yet enumerated)."
-        },
-        {
-          "name": "Speed",
-          "value_type": {
-            "kind": "velocity"
-          },
-          "parse_fn": "INI::parseVelocityReal",
-          "doc": null
-        },
-        {
-          "name": "SpeedDamaged",
-          "value_type": {
-            "kind": "velocity"
-          },
-          "parse_fn": "INI::parseVelocityReal",
-          "doc": null
-        },
-        {
-          "name": "TurnRate",
-          "value_type": {
-            "kind": "real"
-          },
-          "parse_fn": "INI::parseAngularVelocityReal",
-          "doc": null
-        },
-        {
-          "name": "TurnRateDamaged",
-          "value_type": {
-            "kind": "real"
-          },
-          "parse_fn": "INI::parseAngularVelocityReal",
-          "doc": null
-        },
-        {
-          "name": "Acceleration",
-          "value_type": {
-            "kind": "acceleration"
-          },
-          "parse_fn": "INI::parseAccelerationReal",
-          "doc": null
-        },
-        {
-          "name": "AccelerationDamaged",
-          "value_type": {
-            "kind": "acceleration"
-          },
-          "parse_fn": "INI::parseAccelerationReal",
-          "doc": null
-        },
-        {
-          "name": "Lift",
-          "value_type": {
-            "kind": "acceleration"
-          },
-          "parse_fn": "INI::parseAccelerationReal",
-          "doc": null
-        },
-        {
-          "name": "LiftDamaged",
-          "value_type": {
-            "kind": "acceleration"
-          },
-          "parse_fn": "INI::parseAccelerationReal",
-          "doc": null
-        },
-        {
-          "name": "Braking",
-          "value_type": {
-            "kind": "acceleration"
-          },
-          "parse_fn": "INI::parseAccelerationReal",
-          "doc": null
-        },
-        {
-          "name": "MinSpeed",
-          "value_type": {
-            "kind": "velocity"
-          },
-          "parse_fn": "INI::parseVelocityReal",
-          "doc": null
-        },
-        {
-          "name": "MinTurnSpeed",
-          "value_type": {
-            "kind": "velocity"
-          },
-          "parse_fn": "INI::parseVelocityReal",
-          "doc": null
-        },
-        {
-          "name": "PreferredHeight",
-          "value_type": {
-            "kind": "real"
-          },
-          "parse_fn": "INI::parseReal",
-          "doc": null
-        },
-        {
-          "name": "PreferredHeightDamping",
-          "value_type": {
-            "kind": "real"
-          },
-          "parse_fn": "INI::parseReal",
-          "doc": null
-        },
-        {
-          "name": "CirclingRadius",
-          "value_type": {
-            "kind": "real"
-          },
-          "parse_fn": "INI::parseReal",
-          "doc": null
-        },
-        {
-          "name": "SpeedLimitZ",
-          "value_type": {
-            "kind": "velocity"
-          },
-          "parse_fn": "INI::parseVelocityReal",
-          "doc": null
-        },
-        {
-          "name": "MaxThrustAngle",
-          "value_type": {
-            "kind": "angle_real"
-          },
-          "parse_fn": "INI::parseAngleReal",
-          "doc": null
-        },
-        {
-          "name": "AccelerationPitchLimit",
-          "value_type": {
-            "kind": "angle_real"
-          },
-          "parse_fn": "INI::parseAngleReal",
-          "doc": null
-        },
-        {
-          "name": "DecelerationPitchLimit",
-          "value_type": {
-            "kind": "angle_real"
-          },
-          "parse_fn": "INI::parseAngleReal",
-          "doc": null
-        },
-        {
-          "name": "PitchStiffness",
-          "value_type": {
-            "kind": "real"
-          },
-          "parse_fn": "INI::parseReal",
-          "doc": null
-        },
-        {
-          "name": "RollStiffness",
-          "value_type": {
-            "kind": "real"
-          },
-          "parse_fn": "INI::parseReal",
-          "doc": null
-        },
-        {
-          "name": "PitchDamping",
-          "value_type": {
-            "kind": "real"
-          },
-          "parse_fn": "INI::parseReal",
-          "doc": null
-        },
-        {
-          "name": "RollDamping",
-          "value_type": {
-            "kind": "real"
-          },
-          "parse_fn": "INI::parseReal",
-          "doc": null
-        }
-      ],
-      "module_slots": []
+      "defines": null,
+      "doc": null,
+      "fields": []
     },
     {
-      "name": "Upgrade",
-      "parse_fn": "INI::parseUpgradeDefinition",
+      "name": "WindowTransition",
+      "parse_fn": "INI::parseWindowTransitions",
       "named": true,
-      "defines": "upgrade",
-      "doc": "A purchasable/researchable upgrade definition.",
-      "fields": [
+      "defines": null,
+      "doc": null,
+      "fields": [],
+      "sub_blocks": [
         {
-          "name": "DisplayName",
-          "value_type": {
-            "kind": "ascii_string"
-          },
-          "parse_fn": "INI::parseAsciiString",
-          "doc": null
-        },
-        {
-          "name": "Type",
-          "value_type": {
-            "kind": "enum",
-            "value_set": "upgrade_type"
-          },
-          "parse_fn": "INI::parseIndexList",
-          "doc": "PLAYER- or OBJECT-scoped."
-        },
-        {
-          "name": "BuildTime",
-          "value_type": {
-            "kind": "real"
-          },
-          "parse_fn": "INI::parseReal",
-          "doc": null
-        },
-        {
-          "name": "BuildCost",
-          "value_type": {
-            "kind": "int"
-          },
-          "parse_fn": "INI::parseInt",
-          "doc": null
-        },
-        {
-          "name": "ButtonImage",
-          "value_type": {
-            "kind": "ascii_string"
-          },
-          "parse_fn": "INI::parseAsciiString",
-          "doc": null
+          "keyword": "Window"
         }
-      ],
-      "module_slots": []
+      ]
     }
   ],
   "modules": [

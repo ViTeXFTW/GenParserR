@@ -6,6 +6,9 @@
 //!   bad enum/bitflag member, unterminated block;
 //! * stricter warnings/hints — unknown module, unresolved cross-file reference.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use genparser_schema::{RefKind, ValueType};
 use genparser_syntax::ast::{Block, Field, Module};
 use genparser_syntax::{Parse, SyntaxKind, SyntaxNode, SyntaxToken};
@@ -38,29 +41,53 @@ pub fn diagnose(
     parse: &Parse,
     index: Option<&WorkspaceIndex>,
 ) -> Vec<Diagnostic> {
+    let mut out = parser_errors(parse);
+    for node in parse.syntax().children() {
+        out.extend(diagnose_root_child(analyzer, index, &node));
+    }
+    out
+}
+
+/// Structural errors from the parser (unterminated blocks, stray `End`).
+fn parser_errors(parse: &Parse) -> Vec<Diagnostic> {
+    parse
+        .errors
+        .iter()
+        .map(|err| Diagnostic {
+            span: Span::new(err.start as u32, err.end as u32),
+            severity: Severity::Error,
+            code: "syntax",
+            message: err.message.clone(),
+        })
+        .collect()
+}
+
+/// All schema diagnostics for one direct child of ROOT, with absolute spans.
+/// Depends only on the child's own subtree, the schema, and the index — never
+/// on siblings — which is what makes per-block caching sound.
+fn diagnose_root_child(
+    analyzer: &Analyzer,
+    index: Option<&WorkspaceIndex>,
+    node: &SyntaxNode,
+) -> Vec<Diagnostic> {
     let mut ctx = Ctx {
         analyzer,
         index,
         out: Vec::new(),
     };
-
-    // Structural errors from the parser (unterminated blocks, stray `End`).
-    for err in &parse.errors {
-        ctx.out.push(Diagnostic {
-            span: Span::new(err.start as u32, err.end as u32),
-            severity: Severity::Error,
-            code: "syntax",
-            message: err.message.clone(),
-        });
-    }
-
-    let root = parse.syntax();
-    for node in root.children() {
-        match node.kind() {
-            SyntaxKind::BLOCK => ctx.block(&node),
-            SyntaxKind::FIELD => {
-                // A field at file scope is meaningless to the engine.
-                if let Some(key) = Field(node.clone()).key() {
+    match node.kind() {
+        SyntaxKind::BLOCK => ctx.block(node),
+        SyntaxKind::FIELD => {
+            // A field at file scope is meaningless to the engine — unless
+            // it is a single-line directive block (`BenchProfile`,
+            // `ReallyLowMHz`), which the parser deliberately emits as a
+            // field.
+            if let Some(key) = Field(node.clone()).key() {
+                let is_inline_block = ctx
+                    .analyzer
+                    .block(key.text())
+                    .is_some_and(|b| !b.terminated);
+                if !is_inline_block {
                     ctx.error(
                         &key,
                         "stray-field",
@@ -68,11 +95,100 @@ pub fn diagnose(
                     );
                 }
             }
-            _ => {}
         }
+        _ => {}
+    }
+    ctx.out
+}
+
+/// A per-document cache of block-level diagnostics, keyed on green-node
+/// identity. After an incremental reparse, unchanged top-level blocks keep
+/// pointer-identical green nodes, so their diagnostics are reused (spans are
+/// stored block-relative and rebased to the block's new offset).
+///
+/// Reference diagnostics depend on the [`WorkspaceIndex`], so the cache is
+/// cleared whenever the index [`generation`](WorkspaceIndex::generation)
+/// changes.
+#[derive(Default)]
+pub struct DiagnosticsCache {
+    index_generation: Option<u64>,
+    map: HashMap<usize, CacheEntry>,
+    hits: u64,
+    misses: u64,
+}
+
+struct CacheEntry {
+    /// Keeps the green allocation alive so the pointer key can't be reused by
+    /// a new allocation while this entry exists.
+    _green: rowan::GreenNode,
+    /// Diagnostics with spans relative to the block's start offset.
+    diags: Arc<Vec<Diagnostic>>,
+}
+
+impl DiagnosticsCache {
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    ctx.out
+    /// Cumulative (hits, misses) over the cache's lifetime.
+    pub fn stats(&self) -> (u64, u64) {
+        (self.hits, self.misses)
+    }
+}
+
+/// Like [`diagnose`], but reuses per-block results from `cache` for top-level
+/// children whose green nodes are unchanged. Always returns exactly what
+/// [`diagnose`] would (equivalence is tested); the cache only saves work.
+pub fn diagnose_with_cache(
+    analyzer: &Analyzer,
+    parse: &Parse,
+    index: Option<&WorkspaceIndex>,
+    cache: &mut DiagnosticsCache,
+) -> Vec<Diagnostic> {
+    let generation = index.map(|i| i.generation());
+    if cache.index_generation != generation {
+        cache.map.clear();
+        cache.index_generation = generation;
+    }
+
+    let mut out = parser_errors(parse);
+    let mut next: HashMap<usize, CacheEntry> = HashMap::with_capacity(cache.map.len() + 8);
+    for node in parse.syntax().children() {
+        let offset = u32::from(node.text_range().start());
+        let green = node.green().into_owned();
+        let key = &*green as *const rowan::GreenNodeData as usize;
+
+        let diags = if let Some(entry) = cache.map.get(&key) {
+            cache.hits += 1;
+            entry.diags.clone()
+        } else {
+            cache.misses += 1;
+            let absolute = diagnose_root_child(analyzer, index, &node);
+            Arc::new(
+                absolute
+                    .into_iter()
+                    .map(|d| Diagnostic {
+                        span: Span::new(d.span.start - offset, d.span.end - offset),
+                        ..d
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        };
+        out.extend(diags.iter().map(|d| Diagnostic {
+            span: Span::new(d.span.start + offset, d.span.end + offset),
+            ..d.clone()
+        }));
+        next.insert(
+            key,
+            CacheEntry {
+                _green: green,
+                diags,
+            },
+        );
+    }
+    // Entries for children no longer in the tree are dropped here.
+    cache.map = next;
+    out
 }
 
 struct Ctx<'a> {
@@ -400,6 +516,51 @@ End
     fn unknown_module_warns() {
         let src = "Object Tank\n  Body = NotARealModule Tag01\n  End\nEnd\n";
         assert!(codes(src).contains(&"unknown-module"));
+    }
+
+    #[test]
+    fn cached_diagnose_matches_and_reuses_blocks() {
+        let a = Analyzer::embedded();
+        let src = "Weapon AK47\n  ClipSize = lots\nEnd\nWeapon B\nEnd\nWeapon C\nEnd\nWeapon D\n  PrimaryDamg = 1\nEnd\n";
+        let parse = a.parse(src);
+        let mut cache = DiagnosticsCache::new();
+        assert_eq!(diagnose_with_cache(&a, &parse, None, &mut cache), diagnose(&a, &parse, None));
+        assert_eq!(cache.stats().0, 0, "first run is all misses");
+
+        // Edit inside the *last* block; the splice widens one sibling, so the
+        // first two blocks keep pointer-identical green nodes and their
+        // diagnostics must come from the cache.
+        let edited = src.replace("PrimaryDamg = 1", "PrimaryDamg = 2");
+        let at = src.find('1').unwrap();
+        let (inc, strategy) = a.reparse(
+            &parse,
+            src,
+            &edited,
+            genparser_syntax::Edit { start: at, old_end: at + 1, new_len: 1 },
+        );
+        assert_eq!(strategy, genparser_syntax::Strategy::Spliced);
+        assert_eq!(diagnose_with_cache(&a, &inc, None, &mut cache), diagnose(&a, &inc, None));
+        assert!(cache.stats().0 >= 1, "unchanged block must hit the cache");
+    }
+
+    #[test]
+    fn cache_invalidates_when_index_generation_changes() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        // Weapon block referencing a projectile-like name via an Object field
+        // isn't trivial to stage; instead verify the mechanism: same parse,
+        // index gains a definition between runs, output must follow suit.
+        let src = "Weapon AK47\n  ClipSize = 30\nEnd\n";
+        let parse = a.parse(src);
+        let mut cache = DiagnosticsCache::new();
+        let g0 = index.generation();
+        let first = diagnose_with_cache(&a, &parse, Some(&index), &mut cache);
+        index.set_file("other.ini", crate::index::definitions_in(&a, &a.parse("Object X\nEnd\n"), "other.ini"));
+        assert_ne!(index.generation(), g0);
+        let second = diagnose_with_cache(&a, &parse, Some(&index), &mut cache);
+        assert_eq!(first, second); // no reference fields here; same result
+        let (hits, _) = cache.stats();
+        assert_eq!(hits, 0, "generation bump must clear the cache");
     }
 
     #[test]
