@@ -1,22 +1,20 @@
 # Expected behavior for ArmorTest.ini.
 #
-# The `Armor` field is currently typed `ascii_string_list`, so per-token enum /
-# percentage validation and value completion are not produced yet — those
-# assertions are marked `xfail` and document the intended behavior.
+# The `Armor` field is a `token_list` (`<DamageType|Default> <percent>`,
+# Armor.cpp parseArmorCoefficients): each token validates against its own
+# element type, and value completion offers the damage-type members.
 
 # `test` should be rejected as an unknown armor damage-type.
 [[diag]]
 severity = "error"
 code = "bad-enum"
 on = "test"
-xfail = true
 
 # `2` should be rejected: the second token must be a percentage.
 [[diag]]
 severity = "error"
 code = "bad-percent"
 on = "2"
-xfail = true
 
 # `asd` is not a field the Armor block declares. Engine-faithful: a warning.
 [[diag]]
@@ -29,8 +27,7 @@ on = "asd"
 at = "$1"
 includes = ["Armor"]
 
-# After `Armor =` -> offer armor damage-type values (not yet modeled).
+# After `Armor =` -> offer armor damage-type values.
 [[complete]]
 at = "$2"
 includes = ["ARMOR_PIERCING"]
-xfail = true

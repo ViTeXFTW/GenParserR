@@ -122,7 +122,11 @@ fn blank_comments(src: &str) -> String {
             in_comment = false;
             out.push(ch);
         } else if in_comment {
-            out.push(' ');
+            // One space per *byte*, so offsets stay exact even when a
+            // comment contains multi-byte characters.
+            for _ in 0..ch.len_utf8() {
+                out.push(' ');
+            }
         } else if ch == ';' {
             in_comment = true;
             out.push(' ');

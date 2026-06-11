@@ -1,5 +1,5 @@
 {
-  "format_version": 1,
+  "format_version": 2,
   "engine_revision": "handwritten-initial",
   "blocks": [
     {
@@ -58,7 +58,16 @@
         {
           "name": "Armor",
           "value_type": {
-            "kind": "ascii_string_list"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "enum",
+                "value_set": "armor_damage_type"
+              },
+              {
+                "kind": "percent"
+              }
+            ]
           },
           "parse_fn": "ArmorTemplate::parseArmorCoefficients",
           "doc": "`<DamageType> <Percent>` \u2014 damage multiplier for that damage type."
@@ -295,7 +304,73 @@
           "keyword": "RayEffect"
         },
         {
-          "keyword": "Tracer"
+          "keyword": "Tracer",
+          "fields": [
+            {
+              "name": "TracerName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "BoneName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Speed",
+              "value_type": {
+                "kind": "velocity"
+              },
+              "parse_fn": "INI::parseVelocityReal",
+              "doc": null
+            },
+            {
+              "name": "DecayAt",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal",
+              "doc": null
+            },
+            {
+              "name": "Length",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal",
+              "doc": null
+            },
+            {
+              "name": "Width",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseRGBColor",
+              "doc": null
+            },
+            {
+              "name": "Probability",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal",
+              "doc": null
+            }
+          ]
         },
         {
           "keyword": "LightPulse"
@@ -693,7 +768,32 @@
       "named": true,
       "defines": null,
       "doc": null,
-      "fields": []
+      "fields": [
+        {
+          "name": "TooltipName",
+          "value_type": {
+            "kind": "ascii_string"
+          },
+          "parse_fn": "INI::parseAsciiString",
+          "doc": null
+        },
+        {
+          "name": "RGBColor",
+          "value_type": {
+            "kind": "color"
+          },
+          "parse_fn": "INI::parseRGBColor",
+          "doc": null
+        },
+        {
+          "name": "RGBNightColor",
+          "value_type": {
+            "kind": "color"
+          },
+          "parse_fn": "INI::parseRGBColor",
+          "doc": null
+        }
+      ]
     },
     {
       "name": "MultiplayerSettings",
@@ -1155,6 +1255,108 @@
             }
           ],
           "doc": "Wrapper marking default modules replaceable by same-class modules."
+        },
+        {
+          "keyword": "WeaponSet",
+          "doc": "A conditional weapon loadout (WeaponSet.cpp parseWeaponTemplateSet).",
+          "fields": [
+            {
+              "name": "Conditions",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "weapon_set_conditions"
+              },
+              "parse_fn": "WeaponSetFlags::parseFromINI",
+              "doc": null
+            },
+            {
+              "name": "Weapon",
+              "value_type": {
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "reference",
+                    "ref_kind": "weapon"
+                  }
+                ]
+              },
+              "parse_fn": "WeaponTemplateSet::parseWeapon",
+              "doc": null
+            },
+            {
+              "name": "AutoChooseSources",
+              "value_type": {
+                "kind": "unknown",
+                "parse_fn": "WeaponTemplateSet::parseAutoChoose"
+              },
+              "parse_fn": "WeaponTemplateSet::parseAutoChoose",
+              "doc": null
+            },
+            {
+              "name": "PreferredAgainst",
+              "value_type": {
+                "kind": "unknown",
+                "parse_fn": "WeaponTemplateSet::parsePreferredAgainst"
+              },
+              "parse_fn": "WeaponTemplateSet::parsePreferredAgainst",
+              "doc": null
+            },
+            {
+              "name": "ShareWeaponReloadTime",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            },
+            {
+              "name": "WeaponLockSharedAcrossSets",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ],
+          "sub_blocks": []
+        },
+        {
+          "keyword": "ArmorSet",
+          "doc": "A conditional armor selection (ThingTemplate.cpp parseArmorTemplateSet).",
+          "fields": [
+            {
+              "name": "Conditions",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "armor_set_conditions"
+              },
+              "parse_fn": "ArmorSetFlags::parseFromINI",
+              "doc": null
+            },
+            {
+              "name": "Armor",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "armor"
+              },
+              "parse_fn": "ArmorStore::parseArmorTemplate",
+              "doc": null
+            },
+            {
+              "name": "DamageFX",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "damage_fx"
+              },
+              "parse_fn": "DamageFXStore::parseDamageFX",
+              "doc": null
+            }
+          ],
+          "sub_blocks": []
         }
       ]
     },
@@ -1259,6 +1461,108 @@
             }
           ],
           "doc": "Wrapper marking default modules replaceable by same-class modules."
+        },
+        {
+          "keyword": "WeaponSet",
+          "doc": "A conditional weapon loadout (WeaponSet.cpp parseWeaponTemplateSet).",
+          "fields": [
+            {
+              "name": "Conditions",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "weapon_set_conditions"
+              },
+              "parse_fn": "WeaponSetFlags::parseFromINI",
+              "doc": null
+            },
+            {
+              "name": "Weapon",
+              "value_type": {
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "reference",
+                    "ref_kind": "weapon"
+                  }
+                ]
+              },
+              "parse_fn": "WeaponTemplateSet::parseWeapon",
+              "doc": null
+            },
+            {
+              "name": "AutoChooseSources",
+              "value_type": {
+                "kind": "unknown",
+                "parse_fn": "WeaponTemplateSet::parseAutoChoose"
+              },
+              "parse_fn": "WeaponTemplateSet::parseAutoChoose",
+              "doc": null
+            },
+            {
+              "name": "PreferredAgainst",
+              "value_type": {
+                "kind": "unknown",
+                "parse_fn": "WeaponTemplateSet::parsePreferredAgainst"
+              },
+              "parse_fn": "WeaponTemplateSet::parsePreferredAgainst",
+              "doc": null
+            },
+            {
+              "name": "ShareWeaponReloadTime",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            },
+            {
+              "name": "WeaponLockSharedAcrossSets",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ],
+          "sub_blocks": []
+        },
+        {
+          "keyword": "ArmorSet",
+          "doc": "A conditional armor selection (ThingTemplate.cpp parseArmorTemplateSet).",
+          "fields": [
+            {
+              "name": "Conditions",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "armor_set_conditions"
+              },
+              "parse_fn": "ArmorSetFlags::parseFromINI",
+              "doc": null
+            },
+            {
+              "name": "Armor",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "armor"
+              },
+              "parse_fn": "ArmorStore::parseArmorTemplate",
+              "doc": null
+            },
+            {
+              "name": "DamageFX",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "damage_fx"
+              },
+              "parse_fn": "DamageFXStore::parseDamageFX",
+              "doc": null
+            }
+          ],
+          "sub_blocks": []
         }
       ]
     },
@@ -1860,6 +2164,14 @@
           },
           "parse_fn": "INI::parseWeaponTemplate",
           "doc": null
+        },
+        {
+          "name": "ScatterTarget",
+          "value_type": {
+            "kind": "coord2_d"
+          },
+          "parse_fn": "WeaponTemplate::parseScatterTarget",
+          "doc": "A scatter offset (repeatable); X:/Y: coordinate."
         }
       ],
       "module_slots": []
@@ -2264,6 +2576,298 @@
         {
           "name": "OBJECT",
           "value": 1
+        }
+      ]
+    },
+    {
+      "id": "armor_damage_type",
+      "members": [
+        {
+          "name": "Default",
+          "value": -1
+        },
+        {
+          "name": "EXPLOSION",
+          "value": 0
+        },
+        {
+          "name": "CRUSH",
+          "value": 1
+        },
+        {
+          "name": "ARMOR_PIERCING",
+          "value": 2
+        },
+        {
+          "name": "SMALL_ARMS",
+          "value": 3
+        },
+        {
+          "name": "GATTLING",
+          "value": 4
+        },
+        {
+          "name": "RADIATION",
+          "value": 5
+        },
+        {
+          "name": "FLAME",
+          "value": 6
+        },
+        {
+          "name": "LASER",
+          "value": 7
+        },
+        {
+          "name": "SNIPER",
+          "value": 8
+        },
+        {
+          "name": "POISON",
+          "value": 9
+        },
+        {
+          "name": "HEALING",
+          "value": 10
+        },
+        {
+          "name": "UNRESISTABLE",
+          "value": 11
+        },
+        {
+          "name": "WATER",
+          "value": 12
+        },
+        {
+          "name": "DEPLOY",
+          "value": 13
+        },
+        {
+          "name": "SURRENDER",
+          "value": 14
+        },
+        {
+          "name": "HACK",
+          "value": 15
+        },
+        {
+          "name": "KILL_PILOT",
+          "value": 16
+        },
+        {
+          "name": "PENALTY",
+          "value": 17
+        },
+        {
+          "name": "FALLING",
+          "value": 18
+        },
+        {
+          "name": "MELEE",
+          "value": 19
+        },
+        {
+          "name": "DISARM",
+          "value": 20
+        },
+        {
+          "name": "HAZARD_CLEANUP",
+          "value": 21
+        },
+        {
+          "name": "PARTICLE_BEAM",
+          "value": 22
+        },
+        {
+          "name": "TOPPLING",
+          "value": 23
+        },
+        {
+          "name": "INFANTRY_MISSILE",
+          "value": 24
+        },
+        {
+          "name": "AURORA_BOMB",
+          "value": 25
+        },
+        {
+          "name": "LAND_MINE",
+          "value": 26
+        },
+        {
+          "name": "JET_MISSILES",
+          "value": 27
+        },
+        {
+          "name": "STEALTHJET_MISSILES",
+          "value": 28
+        },
+        {
+          "name": "MOLOTOV_COCKTAIL",
+          "value": 29
+        },
+        {
+          "name": "COMANCHE_VULCAN",
+          "value": 30
+        },
+        {
+          "name": "FLESHY_SNIPER",
+          "value": 31
+        },
+        {
+          "name": "SUBDUAL_MISSILE",
+          "value": 32
+        },
+        {
+          "name": "SUBDUAL_VEHICLE",
+          "value": 33
+        },
+        {
+          "name": "SUBDUAL_BUILDING",
+          "value": 34
+        },
+        {
+          "name": "SUBDUAL_UNRESISTABLE",
+          "value": 35
+        },
+        {
+          "name": "MICROWAVE",
+          "value": 36
+        },
+        {
+          "name": "KILL_GARRISONED",
+          "value": 37
+        },
+        {
+          "name": "STATUS",
+          "value": 38
+        }
+      ]
+    },
+    {
+      "id": "weapon_set_conditions",
+      "members": [
+        {
+          "name": "VETERAN",
+          "value": 0
+        },
+        {
+          "name": "ELITE",
+          "value": 1
+        },
+        {
+          "name": "HERO",
+          "value": 2
+        },
+        {
+          "name": "PLAYER_UPGRADE",
+          "value": 3
+        },
+        {
+          "name": "CRATEUPGRADE_ONE",
+          "value": 4
+        },
+        {
+          "name": "CRATEUPGRADE_TWO",
+          "value": 5
+        },
+        {
+          "name": "VEHICLE_HIJACK",
+          "value": 6
+        },
+        {
+          "name": "CARBOMB",
+          "value": 7
+        },
+        {
+          "name": "MINE_CLEARING_DETAIL",
+          "value": 8
+        },
+        {
+          "name": "WEAPON_RIDER1",
+          "value": 9
+        },
+        {
+          "name": "WEAPON_RIDER2",
+          "value": 10
+        },
+        {
+          "name": "WEAPON_RIDER3",
+          "value": 11
+        },
+        {
+          "name": "WEAPON_RIDER4",
+          "value": 12
+        },
+        {
+          "name": "WEAPON_RIDER5",
+          "value": 13
+        },
+        {
+          "name": "WEAPON_RIDER6",
+          "value": 14
+        },
+        {
+          "name": "WEAPON_RIDER7",
+          "value": 15
+        },
+        {
+          "name": "WEAPON_RIDER8",
+          "value": 16
+        }
+      ]
+    },
+    {
+      "id": "armor_set_conditions",
+      "members": [
+        {
+          "name": "VETERAN",
+          "value": 0
+        },
+        {
+          "name": "ELITE",
+          "value": 1
+        },
+        {
+          "name": "HERO",
+          "value": 2
+        },
+        {
+          "name": "PLAYER_UPGRADE",
+          "value": 3
+        },
+        {
+          "name": "WEAK_VERSUS_BASEDEFENSES",
+          "value": 4
+        },
+        {
+          "name": "SECOND_LIFE",
+          "value": 5
+        },
+        {
+          "name": "CRATE_UPGRADE_ONE",
+          "value": 6
+        },
+        {
+          "name": "CRATE_UPGRADE_TWO",
+          "value": 7
+        }
+      ]
+    },
+    {
+      "id": "weapon_slot",
+      "members": [
+        {
+          "name": "PRIMARY",
+          "value": 0
+        },
+        {
+          "name": "SECONDARY",
+          "value": 1
+        },
+        {
+          "name": "TERTIARY",
+          "value": 2
         }
       ]
     }

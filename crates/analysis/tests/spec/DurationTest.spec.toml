@@ -1,0 +1,12 @@
+# Expected behavior for DurationTest.ini. Good values live in
+# ValueGoodTest.ini.
+
+[[diag]]
+severity = "error"
+code = "bad-number"
+on = "soon"
+
+[[diag]]
+severity = "error"
+code = "bad-percent"
+on = "2.5"

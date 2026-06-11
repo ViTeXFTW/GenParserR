@@ -1,7 +1,7 @@
 //! Bridges the syntax tree to the schema: given a scope node (a `BLOCK` or
 //! `MODULE`), determine which schema entity it is and look up fields / slots.
 
-use genparser_schema::{BlockType, Field, ModuleSlot, ModuleType};
+use genparser_schema::{BlockType, Field, ModuleSlot, ModuleType, SubBlock};
 use genparser_syntax::ast::{Block, Module};
 use genparser_syntax::{SyntaxKind, SyntaxNode};
 
@@ -13,6 +13,9 @@ pub enum ScopeSchema<'a> {
     Block(&'a BlockType),
     /// A nested module with a known schema.
     Module(&'a ModuleType),
+    /// A structural sub-block declared by the enclosing scope (e.g. `Object`'s
+    /// `WeaponSet`, `FXList`'s `Tracer` nugget).
+    SubBlock(&'a SubBlock),
     /// A scope we have no schema for (unknown block/module, or an anonymous
     /// sub-block such as `DefaultConditionState`). Validation is lenient here:
     /// fields are not flagged as unknown.
@@ -25,6 +28,7 @@ impl<'a> ScopeSchema<'a> {
         match self {
             ScopeSchema::Block(b) => &b.fields,
             ScopeSchema::Module(m) => &m.fields,
+            ScopeSchema::SubBlock(s) => &s.fields,
             ScopeSchema::Unknown => &[],
         }
     }
@@ -42,6 +46,16 @@ impl<'a> ScopeSchema<'a> {
         }
     }
 
+    /// Structural sub-blocks declared by this scope.
+    pub fn sub_blocks(&self) -> &'a [SubBlock] {
+        match self {
+            ScopeSchema::Block(b) => &b.sub_blocks,
+            ScopeSchema::Module(m) => &m.sub_blocks,
+            ScopeSchema::SubBlock(s) => &s.sub_blocks,
+            ScopeSchema::Unknown => &[],
+        }
+    }
+
     /// Whether we have a field schema at all (drives unknown-field diagnostics).
     pub fn has_field_schema(&self) -> bool {
         !matches!(self, ScopeSchema::Unknown) && !self.fields().is_empty()
@@ -52,12 +66,18 @@ impl<'a> ScopeSchema<'a> {
         match self {
             ScopeSchema::Block(b) => format!("block `{}`", b.name),
             ScopeSchema::Module(m) => format!("module `{}`", m.name),
+            ScopeSchema::SubBlock(s) => format!("`{}`", s.keyword),
             ScopeSchema::Unknown => "this block".to_string(),
         }
     }
 }
 
 /// Resolve the schema for a `BLOCK` or `MODULE` node.
+///
+/// MODULE nodes resolve first by module name (`Body = ActiveBody ...`), then —
+/// for nameless / sub-block scopes — by looking the head keyword up in the
+/// enclosing scope's declared `sub_blocks` (recursively through the parents,
+/// mirroring how the `OpenerOracle` decided to open the scope).
 pub fn scope_schema<'a>(analyzer: &'a Analyzer, node: &SyntaxNode) -> ScopeSchema<'a> {
     match node.kind() {
         SyntaxKind::BLOCK => {
@@ -70,11 +90,29 @@ pub fn scope_schema<'a>(analyzer: &'a Analyzer, node: &SyntaxNode) -> ScopeSchem
             }
         }
         SyntaxKind::MODULE => {
-            let name = Module(node.clone())
+            let module = Module(node.clone());
+            if let Some(m) = module
                 .module_name()
-                .map(|t| t.text().to_string());
-            match name.and_then(|n| analyzer.module(&n)) {
-                Some(m) => ScopeSchema::Module(m),
+                .and_then(|n| analyzer.module(n.text()))
+            {
+                return ScopeSchema::Module(m);
+            }
+            let Some(slot) = module.slot() else {
+                return ScopeSchema::Unknown;
+            };
+            let Some(parent) = node
+                .ancestors()
+                .skip(1)
+                .find(|n| matches!(n.kind(), SyntaxKind::BLOCK | SyntaxKind::MODULE))
+            else {
+                return ScopeSchema::Unknown;
+            };
+            match scope_schema(analyzer, &parent)
+                .sub_blocks()
+                .iter()
+                .find(|s| s.keyword == slot.text())
+            {
+                Some(sb) => ScopeSchema::SubBlock(sb),
                 None => ScopeSchema::Unknown,
             }
         }

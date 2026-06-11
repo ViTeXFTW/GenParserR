@@ -262,7 +262,21 @@ impl<'a> Ctx<'a> {
         let inner = if is_real_module {
             if let Some(name) = module.module_name() {
                 match self.analyzer.module(name.text()) {
-                    Some(_) => scope_schema(self.analyzer, node),
+                    Some(_) => {
+                        // ThingTemplate.cpp: "there must be a module tag
+                        // present, and it must be unique across all modules".
+                        if module.tag().is_none() {
+                            self.warning(
+                                &name,
+                                "missing-module-tag",
+                                format!(
+                                    "module `{}` has no module tag (e.g. `ModuleTag_01`)",
+                                    name.text()
+                                ),
+                            );
+                        }
+                        scope_schema(self.analyzer, node)
+                    }
                     None => {
                         self.warning(
                             &name,
@@ -276,8 +290,28 @@ impl<'a> Ctx<'a> {
                 ScopeSchema::Unknown
             }
         } else {
-            ScopeSchema::Unknown
+            // Sub-block declared by the enclosing scope (WeaponSet, FX
+            // nuggets, ...) — resolves to its field schema when modeled.
+            scope_schema(self.analyzer, node)
         };
+
+        // A WeaponSet without `Conditions` silently becomes the *default* set
+        // (empty flags). Real game data spells `Conditions = None` out in all
+        // but 5 of 862 cases, so the omission is almost always an accident.
+        // (Not checked for ArmorSet: omitting it there is common practice.)
+        if let ScopeSchema::SubBlock(sb) = &inner {
+            if sb.keyword == "WeaponSet" && !has_direct_field(node, "Conditions") {
+                if let Some(slot) = module.slot() {
+                    self.warning(
+                        &slot,
+                        "missing-condition",
+                        "`WeaponSet` has no `Conditions` field, making it the default set; \
+                         use `Conditions = None` if that is intended"
+                            .into(),
+                    );
+                }
+            }
+        }
 
         self.walk(node, &inner);
     }
@@ -294,38 +328,7 @@ impl<'a> Ctx<'a> {
             }
             return;
         }
-        let first = &tokens[0];
         match ty {
-            ValueType::Bool => {
-                let v = unquote(first.text()).to_ascii_lowercase();
-                if v != "yes" && v != "no" {
-                    self.error(first, "bad-bool", format!("expected `Yes` or `No`, found `{}`", first.text()));
-                }
-            }
-            ValueType::Int => self.check_number(first, NumKind::Int),
-            ValueType::UInt => self.check_number(first, NumKind::UInt),
-            ValueType::Real
-            | ValueType::AngleReal
-            | ValueType::Velocity
-            | ValueType::Acceleration
-            | ValueType::Duration => self.check_number(first, NumKind::Real),
-            ValueType::PositiveReal => {
-                self.check_number(first, NumKind::Real);
-                if let Ok(n) = first.text().parse::<f64>() {
-                    if n <= 0.0 {
-                        self.warning(first, "non-positive", format!("`{}` should be greater than 0", first.text()));
-                    }
-                }
-            }
-            ValueType::Percent => {
-                let t = first.text().trim_end_matches('%');
-                if t.parse::<f64>().is_err() {
-                    self.error(first, "bad-percent", format!("expected a percentage, found `{}`", first.text()));
-                }
-            }
-            ValueType::Enum { value_set } => {
-                self.check_enum_member(value_set, first);
-            }
             ValueType::BitFlags { value_set } => {
                 for tok in &tokens {
                     let raw = tok.text().trim_start_matches(['+', '-']);
@@ -335,17 +338,187 @@ impl<'a> Ctx<'a> {
                     self.check_bitflag_member(value_set, tok, raw);
                 }
             }
-            ValueType::Reference { ref_kind } => {
-                self.check_reference(*ref_kind, first);
+            // A fixed sequence of typed tokens; each listed token is required
+            // (the engine's parse function calls getNextToken for each).
+            ValueType::TokenList { tokens: specs } => {
+                for (i, spec) in specs.iter().enumerate() {
+                    match tokens.get(i) {
+                        Some(tok) => self.check_token(tok, spec),
+                        None => {
+                            if let Some(key) = field.key() {
+                                self.warning(
+                                    &key,
+                                    "missing-value",
+                                    format!(
+                                        "`{}` expects {} values, found {}",
+                                        key.text(),
+                                        specs.len(),
+                                        tokens.len()
+                                    ),
+                                );
+                            }
+                            break;
+                        }
+                    }
+                }
             }
-            // No value-level validation for these (yet).
+            // `R:0 G:0 B:0 [A:255]` — components are ints in 0..=255, the `A`
+            // component is optional (INI.cpp parseRGBColor / parseColorInt).
+            ValueType::Color => self.check_axes(field, &tokens, &["R", "G", "B"], Some("A"), true),
+            // `X:0 Y:0 [Z:0]` — reals (INI.cpp parseCoord2D / parseCoord3D).
+            ValueType::Coord2D => self.check_axes(field, &tokens, &["X", "Y"], None, false),
+            ValueType::Coord3D => self.check_axes(field, &tokens, &["X", "Y", "Z"], None, false),
+            single => self.check_token(&tokens[0], single),
+        }
+    }
+
+    /// Validate one value token against a single-token type.
+    fn check_token(&mut self, tok: &SyntaxToken, ty: &ValueType) {
+        match ty {
+            ValueType::Bool => {
+                let v = unquote(tok.text()).to_ascii_lowercase();
+                if v != "yes" && v != "no" {
+                    self.error(tok, "bad-bool", format!("expected `Yes` or `No`, found `{}`", tok.text()));
+                }
+            }
+            ValueType::Int => self.check_number(tok, NumKind::Int),
+            ValueType::UInt => self.check_number(tok, NumKind::UInt),
+            ValueType::Real
+            | ValueType::AngleReal
+            | ValueType::Velocity
+            | ValueType::Acceleration
+            | ValueType::Duration => self.check_number(tok, NumKind::Real),
+            ValueType::PositiveReal => {
+                self.check_number(tok, NumKind::Real);
+                if let Ok(n) = tok.text().parse::<f64>() {
+                    if n <= 0.0 {
+                        self.warning(tok, "non-positive", format!("`{}` should be greater than 0", tok.text()));
+                    }
+                }
+            }
+            // Stricter than the engine (which reads a bare real): require the
+            // `%` sign, because `Armor = X 2` almost never means 2 percent.
+            ValueType::Percent => {
+                let ok = tok
+                    .text()
+                    .strip_suffix('%')
+                    .is_some_and(|n| n.parse::<f64>().is_ok());
+                if !ok {
+                    self.error(
+                        tok,
+                        "bad-percent",
+                        format!("expected a percentage like `100%`, found `{}`", tok.text()),
+                    );
+                }
+            }
+            ValueType::Enum { value_set } => self.check_enum_member(value_set, tok),
+            ValueType::BitFlags { value_set } => {
+                let raw = tok.text().trim_start_matches(['+', '-']);
+                if !raw.eq_ignore_ascii_case("NONE") && !raw.eq_ignore_ascii_case("ALL") {
+                    self.check_bitflag_member(value_set, tok, raw);
+                }
+            }
+            ValueType::Reference { ref_kind } => self.check_reference(*ref_kind, tok),
+            // No single-token validation for these.
             ValueType::AsciiString
             | ValueType::QuotedString
             | ValueType::AsciiStringList
             | ValueType::Color
             | ValueType::Coord2D
             | ValueType::Coord3D
+            | ValueType::TokenList { .. }
             | ValueType::Unknown { .. } => {}
+        }
+    }
+
+    /// Validate a tagged-axis value (`R:255 G:0 B:0`, `X:1 Y:2 Z:3`). The
+    /// engine tokenizes with `:` as a separator, so `R:255`, `R: 255` and
+    /// `R : 255` are all accepted; tags match case-insensitively and in order.
+    /// `int_0_255` selects the color rule (ints 0..=255) over reals.
+    fn check_axes(
+        &mut self,
+        field: &Field,
+        tokens: &[SyntaxToken],
+        axes: &[&str],
+        optional: Option<&str>,
+        int_0_255: bool,
+    ) {
+        let code = if int_0_255 { "bad-color" } else { "bad-coord" };
+        let expected = || {
+            axes.iter()
+                .map(|a| format!("{a}:<n>"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        // Flatten to (subtoken, source token), splitting each WORD on `:` the
+        // way the engine's separator set does.
+        let mut parts: Vec<(&str, &SyntaxToken)> = Vec::new();
+        for tok in tokens {
+            for part in tok.text().split(':') {
+                if !part.is_empty() {
+                    parts.push((part, tok));
+                }
+            }
+        }
+        let mut i = 0;
+        let mut take = |this: &mut Self, axis: &str, required: bool| -> bool {
+            let Some(&(tag, tag_tok)) = parts.get(i) else {
+                if required {
+                    if let Some(key) = field.key() {
+                        this.error(
+                            &key,
+                            code,
+                            format!("`{}` expects `{}`", key.text(), expected()),
+                        );
+                    }
+                }
+                return false;
+            };
+            if !tag.eq_ignore_ascii_case(axis) {
+                if required {
+                    this.error(
+                        tag_tok,
+                        code,
+                        format!("expected `{axis}:`, found `{tag}` (format: `{}`)", expected()),
+                    );
+                }
+                return false;
+            }
+            let Some(&(value, value_tok)) = parts.get(i + 1) else {
+                this.error(tag_tok, code, format!("`{axis}:` is missing its value"));
+                return false;
+            };
+            if int_0_255 {
+                match value.parse::<i64>() {
+                    Ok(n) if (0..=255).contains(&n) => {}
+                    Ok(n) => this.error(
+                        value_tok,
+                        code,
+                        format!("`{axis}:{n}` is out of range (0-255)"),
+                    ),
+                    Err(_) => this.error(
+                        value_tok,
+                        code,
+                        format!("expected an integer for `{axis}:`, found `{value}`"),
+                    ),
+                }
+            } else if value.parse::<f64>().is_err() {
+                this.error(
+                    value_tok,
+                    code,
+                    format!("expected a number for `{axis}:`, found `{value}`"),
+                );
+            }
+            i += 2;
+            true
+        };
+        for axis in axes {
+            if !take(self, axis, true) {
+                return;
+            }
+        }
+        if let Some(axis) = optional {
+            take(self, axis, false);
         }
     }
 
@@ -432,6 +605,14 @@ enum NumKind {
     Int,
     UInt,
     Real,
+}
+
+/// Does `node` directly contain a FIELD line whose key is `name`?
+fn has_direct_field(node: &SyntaxNode, name: &str) -> bool {
+    node.children()
+        .filter(|n| n.kind() == SyntaxKind::FIELD)
+        .filter_map(|n| Field(n).key())
+        .any(|k| k.text() == name)
 }
 
 /// Strip surrounding double quotes from a token's text, if present.

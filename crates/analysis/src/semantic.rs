@@ -148,11 +148,9 @@ impl<'a> Sem<'a> {
                         .map(|s| scope.module_slots().iter().any(|ms| ms.keyword == s.text()))
                         .unwrap_or(false);
                     self.module_header(&child, is_real);
-                    let inner = if is_real {
-                        scope_schema(self.analyzer, &child)
-                    } else {
-                        ScopeSchema::Unknown
-                    };
+                    // Sub-blocks (`WeaponSet`, FX nuggets, ...) resolve to
+                    // their declared field schema too.
+                    let inner = scope_schema(self.analyzer, &child);
                     self.walk(&child, &inner);
                 }
                 SyntaxKind::BLOCK => {
@@ -173,9 +171,13 @@ impl<'a> Sem<'a> {
             .key()
             .and_then(|k| scope.field(k.text()))
             .map(|f| f.value_type.clone());
-        for tok in field.value_tokens() {
-            let kind = value_token_kind(&tok, ty.as_ref());
-            self.set(&tok, kind);
+        for (i, tok) in field.value_tokens().iter().enumerate() {
+            // Token lists classify each position by its own element type.
+            let elem = match &ty {
+                Some(ValueType::TokenList { tokens }) => tokens.get(i),
+                other => other.as_ref(),
+            };
+            self.set(tok, value_token_kind(tok, elem));
         }
     }
 

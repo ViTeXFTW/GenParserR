@@ -51,9 +51,11 @@ pub fn complete(
             })
             .collect(),
         PosContext::FieldKey(scope_node) => field_key_completions(analyzer, &scope_node),
-        PosContext::FieldValue { scope_node, key } => {
-            field_value_completions(analyzer, &scope_node, &key, index)
-        }
+        PosContext::FieldValue {
+            scope_node,
+            key,
+            value_index,
+        } => field_value_completions(analyzer, &scope_node, &key, value_index, index),
         PosContext::ModuleName => module_name_completions(analyzer),
     }
 }
@@ -62,8 +64,14 @@ enum PosContext {
     TopLevel,
     /// Completing a field/slot keyword inside this scope node.
     FieldKey(SyntaxNode),
-    /// Completing the value of `key` inside this scope node.
-    FieldValue { scope_node: SyntaxNode, key: String },
+    /// Completing the value of `key` inside this scope node; `value_index` is
+    /// how many value tokens already precede the cursor (the position within
+    /// a token-list value).
+    FieldValue {
+        scope_node: SyntaxNode,
+        key: String,
+        value_index: usize,
+    },
     /// Completing a module type name after a slot `=`.
     ModuleName,
 }
@@ -80,13 +88,17 @@ fn classify_position(analyzer: &Analyzer, root: &SyntaxNode, offset: u32) -> Pos
     if let Some(field_node) = ancestor_of_kind(&node, SyntaxKind::FIELD) {
         let scope_node = enclosing_scope(&field_node);
         if after_equals(&field_node, offset) {
-            let key = Field(field_node.clone())
-                .key()
-                .map(|k| k.text().to_string())
-                .unwrap_or_default();
+            let field = Field(field_node.clone());
+            let key = field.key().map(|k| k.text().to_string()).unwrap_or_default();
+            let value_index = field
+                .value_tokens()
+                .iter()
+                .filter(|t| u32::from(t.text_range().end()) <= offset)
+                .count();
             return PosContext::FieldValue {
                 scope_node: scope_node.unwrap_or_else(|| root.clone()),
                 key,
+                value_index,
             };
         }
         return match scope_node {
@@ -153,13 +165,28 @@ fn field_value_completions(
     analyzer: &Analyzer,
     scope_node: &SyntaxNode,
     key: &str,
+    value_index: usize,
     index: Option<&WorkspaceIndex>,
 ) -> Vec<Completion> {
     let scope = scope_schema(analyzer, scope_node);
     let Some(field) = scope.field(key) else {
         return Vec::new();
     };
-    match &field.value_type {
+    completions_for_type(analyzer, &field.value_type, value_index, index)
+}
+
+fn completions_for_type(
+    analyzer: &Analyzer,
+    ty: &ValueType,
+    value_index: usize,
+    index: Option<&WorkspaceIndex>,
+) -> Vec<Completion> {
+    match ty {
+        // Token lists complete the element at the cursor's position.
+        ValueType::TokenList { tokens } => tokens
+            .get(value_index)
+            .map(|elem| completions_for_type(analyzer, elem, 0, index))
+            .unwrap_or_default(),
         ValueType::Bool => ["Yes", "No"]
             .iter()
             .map(|v| Completion {

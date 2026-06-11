@@ -177,6 +177,12 @@ pub enum ValueType {
     BitFlags { value_set: String },
     /// A reference to a named definition elsewhere (cross-file index target).
     Reference { ref_kind: RefKind },
+    /// A fixed sequence of individually-typed tokens, for engine parse
+    /// functions that consume several tokens in order (e.g. Armor
+    /// coefficients: `Armor = <DamageType> <percent>`, or WeaponSet's
+    /// `Weapon = <slot> <weapon name>`). Each listed token is required;
+    /// tokens beyond the list are ignored (lenient).
+    TokenList { tokens: Vec<ValueType> },
     /// Anything we could not map precisely; treated leniently (token soup).
     /// Carries the originating parse-fn so it can be refined later.
     Unknown { parse_fn: String },

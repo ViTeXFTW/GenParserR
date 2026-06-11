@@ -13,7 +13,7 @@ Phase 2.
 | 1 | Server data-path hygiene | ✅ done (2026-06-10) |
 | 2 | Corpus harness as a permanent gate | ✅ done (2026-06-10) |
 | 3 | Incremental reparse + incremental analysis | ✅ done (2026-06-11) |
-| 4 | Value-type validation completion | 🔲 planned |
+| 4 | Value-type validation completion | ✅ done (2026-06-11) |
 | 5 | Schema scale-out | 🔲 planned (continuous) |
 | 6 | LSP breadth | 🔲 planned |
 | 7 | Distribution | 🔲 planned |
@@ -140,30 +140,52 @@ an `End`-deletion fallback.
 **44 ms → 147 µs** (~300×); synthetic 50k lines 35.1 ms → 283 µs; viewport
 semantic tokens 173 µs vs ~50 ms full. Budget met with ~70× headroom.
 
-## Phase 4 — Value-type validation completion 🔲
+## Phase 4 — Value-type validation completion ✅
 
 **Goal:** implement the per-token value validators still stubbed out in
 `diagnostics.rs`, clearing all 6 `xfail` assertions in
 `ArmorTest.spec.toml` / `ObjectTest.spec.toml`.
 
-**Planned:**
+**Implemented:**
 
-- Validators cross-checked against the engine functions in `INI.cpp`:
-  `parsePercentToReal` (:898), `parseRGBColor` (:1002), `parseColorInt`
-  (:1081), `parseCoord3D` (:1128), `parseDurationReal` (:1781),
-  `parseVelocityReal` / `parseAccelerationReal` (:1805/:1814).
-- Color `R:255 G:0 B:0 [A:n]` and Coord `X:/Y:/Z:` validation: split WORD
-  tokens on `:` (the lexer keeps them whole by design), validate tags and
-  ranges; numeric checks for Duration/Velocity/Acceleration.
-- Typed token lists (the Armor case: `Armor = <DamageType enum> <percent>`):
-  the smallest schema change that clears the xfails — a `TokenPattern`-style
-  `ValueType` variant or parse-fn keying.
-- Armor value completion (the completion xfail).
+- **`ValueType::TokenList { tokens }`** (schema `format_version` 2): a fixed
+  sequence of individually-typed tokens, used for Armor coefficients
+  (`Armor = <DamageType|Default> <percent>`, Armor.cpp
+  `parseArmorCoefficients`) and WeaponSet's `Weapon = <slot> <weapon ref>`.
+  Diagnostics validate each position; completion offers the element at the
+  cursor's token index; semantic tokens classify per element.
+- **Sub-block field schemas**: `ScopeSchema::SubBlock` — a `MODULE` node
+  with no module name now resolves against the enclosing scope's declared
+  `sub_blocks`, so sub-block fields validate and complete. Populated from
+  the engine: `Object`/`ObjectReskin` → `WeaponSet` (Conditions/Weapon/
+  AutoChooseSources/PreferredAgainst/ShareWeaponReloadTime/
+  WeaponLockSharedAcrossSets) and `ArmorSet` (Conditions/Armor/DamageFX);
+  `FXList` → `Tracer` nugget (fully typed incl. a Color field);
+  `MultiplayerColor` block fully typed; `Weapon.ScatterTarget` (Coord2D).
+  New value sets: `armor_damage_type` (damage types + `Default`),
+  `weapon_slot`, `weapon_set_conditions`, `armor_set_conditions` — all
+  transcribed from the engine name tables.
+- **Validators** (engine-faithful): Color `R:<int> G:<int> B:<int> [A:<int>]`
+  with 0–255 range, tags in order, case-insensitive, `:`-separated
+  (`parseRGBColor`/`parseColorInt`); Coord2D/3D `X: Y: [Z:]` reals;
+  Percent now *requires* the `%` sign (stricter than the engine's bare
+  `scanReal` — `Armor = X 2` almost never means 2%). New codes:
+  `bad-color`, `bad-coord`.
+- **Structure warnings**: `missing-module-tag` (ThingTemplate.cpp requires a
+  tag per module) and `missing-condition` (a WeaponSet without `Conditions`
+  silently becomes the default set; real game data omits it in only 5 of
+  862 WeaponSets — not warned for ArmorSet, where omission is idiomatic at
+  118 of 1,382).
+- Fixed a latent `ast::Module` bug exposed by the tag check: header-argument
+  scanning ran past the header line, reading the closing `End` as the
+  module name/tag.
 
-**Exit criteria:** all 6 `xfail = true` flags dropped (the spec harness
-forces this — an xfail that passes fails the suite); new spec pairs
-(ColorTest, CoordTest, DurationTest); a corpus re-run showing **zero new
-false positives** — stricter validators are exactly where they sneak in.
+**Verified by:** all 6 xfail flags dropped (harness-forced); new spec pairs
+`ColorTest`, `CoordTest`, `DurationTest`, `ValueGoodTest` (every validator's
+good values under `no_errors`); corpus re-run: **zero new error-severity
+diagnostics** across all 135 real files, `missing-condition` hit exactly the
+5 predicted WeaponSets, unknown-field dropped by 56 from the newly typed
+scopes.
 
 ## Phase 5 — Schema scale-out 🔲 (continuous)
 

@@ -1,8 +1,8 @@
 # Expected behavior for ObjectTest.ini.
 #
-# Reference resolution and draw-module completion already work; the
-# module-tag / WeaponSet-condition warnings and weapon-slot completion are not
-# built yet and are marked `xfail`.
+# Reference resolution, draw-module completion, the module-tag /
+# WeaponSet-condition warnings, and weapon-slot completion (WeaponSet's
+# `Weapon` field is a `token_list` of `<slot> <weapon>`).
 
 # Undefined upgrade reference -> unresolved (a stricter, modder-helpful warning).
 [[diag]]
@@ -10,27 +10,25 @@ severity = "warning"
 code = "unresolved-reference"
 on = "unkonwnUpgrade"
 
-# Missing ModuleTag after a module name should be flagged (not built yet).
+# Missing ModuleTag after a module name is flagged (ThingTemplate.cpp:
+# "there must be a module tag present, and it must be unique").
 [[diag]]
 severity = "warning"
 code = "missing-module-tag"
 on = "W3DModelDraw"
-xfail = true
 
-# A WeaponSet without a Condition should warn (not built yet).
+# A WeaponSet without a Conditions field silently becomes the default set.
 [[diag]]
 severity = "warning"
 code = "missing-condition"
 on = "WeaponSet"
-xfail = true
 
 # After `Draw =` -> offer draw modules.
 [[complete]]
 at = "$1"
 includes = ["W3DModelDraw"]
 
-# After `Weapon =` inside a WeaponSet -> offer the weapon slot enums (not built).
+# After `Weapon =` inside a WeaponSet -> offer the weapon slot enums.
 [[complete]]
 at = "$2"
 includes = ["PRIMARY", "SECONDARY", "TERTIARY"]
-xfail = true

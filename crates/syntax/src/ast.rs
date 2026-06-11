@@ -72,12 +72,32 @@ impl Module {
     /// The module type name following `=` (`PhysicsBehavior`). For sub-blocks
     /// written without `=` (e.g. `DefaultConditionState`) this is `None`.
     pub fn module_name(&self) -> Option<SyntaxToken> {
+        self.word_after_equals(0)
+    }
+
+    /// The module tag following the module name (`ModuleTag_01`), i.e. the
+    /// second word after `=`. The engine requires one per module, unique
+    /// within the object.
+    pub fn tag(&self) -> Option<SyntaxToken> {
+        self.word_after_equals(1)
+    }
+
+    fn word_after_equals(&self, nth: usize) -> Option<SyntaxToken> {
         let mut seen_equals = false;
+        let mut skip = nth;
         for el in self.0.children_with_tokens() {
             if let Some(t) = el.as_token() {
                 match token_kind(t) {
                     SyntaxKind::EQUALS => seen_equals = true,
-                    SyntaxKind::WORD if seen_equals => return Some(t.clone()),
+                    // The header ends at the first newline: later direct
+                    // tokens (e.g. the closing `End` line) are not arguments.
+                    SyntaxKind::NEWLINE => break,
+                    SyntaxKind::WORD if seen_equals => {
+                        if skip == 0 {
+                            return Some(t.clone());
+                        }
+                        skip -= 1;
+                    }
                     _ => {}
                 }
             } else {

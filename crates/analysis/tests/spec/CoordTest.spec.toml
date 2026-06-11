@@ -1,0 +1,19 @@
+# Expected behavior for CoordTest.ini: engine-faithful coordinate validation
+# (INI.cpp parseCoord2D). Good values live in ValueGoodTest.ini.
+
+[[diag]]
+severity = "error"
+code = "bad-coord"
+on = "Q:2"
+
+[[diag]]
+severity = "error"
+code = "bad-coord"
+on = "X:abc"
+
+# Missing Y axis (span: the field key of the third ScatterTarget).
+[[diag]]
+severity = "error"
+code = "bad-coord"
+on = "ScatterTarget"
+nth = 3

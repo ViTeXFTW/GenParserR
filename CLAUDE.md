@@ -148,7 +148,13 @@ block. Prefer declaring sub-blocks in the schema (context-keyed); use
 the oracle sees the slot keyword (`Behavior`/`Draw`) as the enclosing head.
 Blocks with `"terminated": false` (BenchProfile, ReallyLowMHz, LODPreset) are
 single-line directives: the parser emits them as file-scope fields, not
-blocks.
+blocks. Sub-blocks may declare `fields` of their own (e.g. `WeaponSet`,
+`FXList`'s `Tracer` nugget): `model::scope_schema` resolves a nameless
+`MODULE` node against the enclosing scope's `sub_blocks`, so those fields
+validate and complete like block fields. Multi-token engine parse functions
+are typed `token_list` (e.g. `Armor = <DamageType|Default> <percent>`,
+`Weapon = <slot> <weapon>`), validating/completing each token position by
+its own element type.
 
 **Diagnostics are intentionally stricter than the engine** (the project's
 goal). Two layers in `diagnostics.rs`: engine-faithful *errors* (unknown

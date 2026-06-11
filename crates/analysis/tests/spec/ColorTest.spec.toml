@@ -1,0 +1,28 @@
+# Expected behavior for ColorTest.ini: engine-faithful color validation
+# (INI.cpp parseRGBColor / parseColorInt — tags R/G/B[/A] in order,
+# case-insensitive, ints 0-255). Good values live in ValueGoodTest.ini.
+
+# `Q:` is not a color component tag.
+[[diag]]
+severity = "error"
+code = "bad-color"
+on = "Q:255"
+
+# 999 is out of the 0-255 component range.
+[[diag]]
+severity = "error"
+code = "bad-color"
+on = "R:999"
+
+# The blue component is missing entirely (span: the field key).
+[[diag]]
+severity = "error"
+code = "bad-color"
+on = "RGBColor"
+nth = 4
+
+# Sub-block fields validate too: the Tracer nugget's Color.
+[[diag]]
+severity = "error"
+code = "bad-color"
+on = "B:bad"
