@@ -1,0 +1,30 @@
+# Expected behavior for ReferenceTest.ini: fields that name other
+# definitions are Reference-typed, so the index drives completion and the
+# unresolved-reference warning. Case-insensitivity of name resolution is
+# pinned by the index unit tests.
+
+# A bogus image name is flagged.
+[[diag]]
+severity = "warning"
+code = "unresolved-reference"
+on = "NoSuchImage"
+
+# `ButtonImage =` offers the workspace's mapped images.
+[[complete]]
+at = "$1"
+includes = ["TestButtonImage"]
+
+# `FireFX =` offers FX lists.
+[[complete]]
+at = "$2"
+includes = ["FX_TestFire"]
+
+# `FireSound =` offers audio events.
+[[complete]]
+at = "$3"
+includes = ["TestFireSound"]
+
+# A CommandSet slot offers command buttons.
+[[complete]]
+at = "$4"
+includes = ["Command_RefTest"]

@@ -8,7 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use genparser_schema::{BlockType, ModuleType, Schema, ValueSet};
+use genparser_schema::{BlockType, ModuleType, RefKind, Schema, ValueSet};
 use genparser_syntax::{parse, Edit, OpenerOracle, Parse, Strategy};
 
 pub mod completion;
@@ -50,6 +50,9 @@ pub struct Analyzer {
     block_by_name: HashMap<String, usize>,
     module_by_name: HashMap<String, usize>,
     value_set_by_id: HashMap<String, usize>,
+    /// Engine-synthesized definitions ((kind, lowercased name)) that resolve
+    /// without appearing in any file.
+    builtins: std::collections::HashSet<(RefKind, String)>,
     openers: SchemaOpeners,
 }
 
@@ -74,12 +77,18 @@ impl Analyzer {
             .enumerate()
             .map(|(i, v)| (v.id.clone(), i))
             .collect();
+        let builtins = schema
+            .builtins
+            .iter()
+            .map(|b| (b.ref_kind, b.name.to_ascii_lowercase()))
+            .collect();
         let openers = SchemaOpeners::from_schema(&schema);
         Analyzer {
             schema,
             block_by_name,
             module_by_name,
             value_set_by_id,
+            builtins,
             openers,
         }
     }
@@ -131,6 +140,20 @@ impl Analyzer {
     pub fn block_names(&self) -> impl Iterator<Item = &str> {
         self.schema.blocks.iter().map(|b| b.name.as_str())
     }
+
+    /// Is `name` an engine-synthesized definition of `kind` (case-insensitive)?
+    pub fn is_builtin(&self, kind: RefKind, name: &str) -> bool {
+        self.builtins.contains(&(kind, name.to_ascii_lowercase()))
+    }
+
+    /// Engine-synthesized definition names of `kind` (for completion).
+    pub fn builtin_names(&self, kind: RefKind) -> impl Iterator<Item = &str> {
+        self.schema
+            .builtins
+            .iter()
+            .filter(move |b| b.ref_kind == kind)
+            .map(|b| b.name.as_str())
+    }
 }
 
 /// An [`OpenerOracle`] backed by the schema. Scope-opening is *context-aware*,
@@ -160,6 +183,11 @@ pub struct SchemaOpeners {
 /// Sub-block keywords the engine parses as nested `End`-terminated scopes via
 /// custom parse functions (so they aren't visible as module slots in the
 /// schema). Curated and easily extended.
+/// Keep this list minimal: a curated keyword opens a scope inside *any*
+/// enclosing scope, so a field with the same name elsewhere is misparsed as a
+/// block (the `Turret = <bone>` vs `Turret`-scope collision). Prefer
+/// schema-declared `sub_blocks` — on blocks (context-keyed by block keyword)
+/// or on modules (keyed under the hosting slot keyword, e.g. `Behavior`).
 const CURATED_SUBBLOCKS: &[&str] = &[
     "ConditionState",
     "DefaultConditionState",
@@ -170,11 +198,6 @@ const CURATED_SUBBLOCKS: &[&str] = &[
     "ArmorSet",
     "WeaponSet",
     "AttackContactPoint",
-    "Turret",
-    "AltTurret",
-    "UnitSpecificSounds",
-    "UnitSpecificSound",
-    "UnitSpecificFX",
     "InheritableModule",
     "OverrideableByLikeKind",
     // RadiusDecalTemplate scopes inside Behavior modules (deployment updates).
@@ -208,8 +231,19 @@ impl SchemaOpeners {
             entry.extend(block.module_slots.iter().map(|s| s.keyword.clone()));
             add_subblocks(&mut scope_children, &block.name, &block.sub_blocks);
         }
+        // Module sub-blocks (e.g. AIUpdate's `Turret`) open inside module
+        // scopes, where the oracle's enclosing head is the hosting *slot*
+        // keyword (`Behavior = AIUpdateInterface ...` opens a scope headed
+        // "Behavior") — so key them under every declared slot keyword.
+        let slot_keywords: HashSet<String> = schema
+            .blocks
+            .iter()
+            .flat_map(|b| b.module_slots.iter().map(|s| s.keyword.clone()))
+            .collect();
         for module in &schema.modules {
-            add_subblocks(&mut scope_children, &module.name, &module.sub_blocks);
+            for slot in &slot_keywords {
+                add_subblocks(&mut scope_children, slot, &module.sub_blocks);
+            }
         }
 
         let subblocks = CURATED_SUBBLOCKS.iter().map(|s| s.to_string()).collect();

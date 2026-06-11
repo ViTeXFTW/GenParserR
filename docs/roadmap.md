@@ -14,7 +14,7 @@ Phase 2.
 | 2 | Corpus harness as a permanent gate | ✅ done (2026-06-10) |
 | 3 | Incremental reparse + incremental analysis | ✅ done (2026-06-11) |
 | 4 | Value-type validation completion | ✅ done (2026-06-11) |
-| 5 | Schema scale-out | 🔲 planned (continuous) |
+| 5 | Schema scale-out | 🔄 in progress (batches 1–3 done 2026-06-11; milestones M1–M4 reached) |
 | 6 | LSP breadth | 🔲 planned |
 | 7 | Distribution | 🔲 planned |
 
@@ -187,31 +187,132 @@ diagnostics** across all 135 real files, `missing-condition` hit exactly the
 5 predicted WeaponSets, unknown-field dropped by 56 from the newly typed
 scopes.
 
-## Phase 5 — Schema scale-out 🔲 (continuous)
+## Phase 5 — Schema scale-out 🔄 (continuous; batches 1–3 done)
 
 **Goal:** drive the corpus warning backlog (~17.7k `unknown-field`, ~12.1k
-`unknown-module`) toward zero, in corpus-frequency order.
+`unknown-module` at Phase 4 exit) toward zero, in corpus-frequency order.
 
-**Planned:**
+**Batch 1 (2026-06-11) implemented:**
 
-- Backlog order from the corpus histogram: Object fields first
-  (EditorSorting ~1.7k, Shadow, the Geometry* family, RadarPriority,
-  Voice*), then the module long tail (SlowDeathBehavior ~1.4k, FXListDie
-  ~1.1k, FlammableUpdate, DestroyDie, TransitionDamageFX, PhysicsBehavior,
-  CreateObjectDie, AIUpdateInterface), then Weapon fields
-  (DelayBetweenShots, RadiusDamageAffects).
-- Per-block checklist (codifies the CLAUDE.md workflow): find the
-  `FieldParse` table in `GeneralsCode/` → translate entries to `ValueType`
-  (lenient `Unknown { parse_fn }` when unclear) → `defines`/RefKind +
-  module_slots → spec pair → schema + spec tests → corpus confirms that
-  block's unknown hits drop to ~0.
-- A coverage report (script or `#[ignore]` test) diffing engine `FieldParse`
-  tables against schema entries, giving one tracked number for the README.
+- **Module skeletons** (`scripts/add_module_skeletons.py`): every module the
+  engine's `ModuleFactory` registers — 223 across the base and W3D factories,
+  with interfaces from the registration sections — exists as an empty-field
+  (lenient) `ModuleType`. `unknown-module`: 12,146 → **0**, while typo
+  detection is preserved (unregistered names still warn).
+- **Object (ThingTemplate) field table completed** (+51 fields,
+  `scripts/phase5_batch1.py`): Geometry*/Shadow*/Voice*/Sound*/Editor
+  fields, with engine name arrays extracted into value sets
+  (`kind_of` ~100 flags, `editor_sorting`, `shadow_type`, `geometry_type`,
+  `radar_priority`, `buildable_status`, `build_completion`,
+  `locomotor_set`); `KindOf` upgraded to typed bitflags, `Locomotor` to a
+  `token_list` of `<set> <locomotor ref>`. ObjectReskin mirrors Object
+  (the engine keeps both tables in tandem).
+- **Weapon (+25), Locomotor (+37), Upgrade (+3) fields** auto-translated
+  from their `FieldParse` tables with `unknown{parse_fn}` fallback
+  (`scripts/phase5_batch2.py`).
+- **Curated-keyword collisions fixed** (`scripts/phase5_fix_curated.py`):
+  `Turret`/`AltTurret` moved from the global curated set to schema
+  sub-blocks of the 15 AIUpdate-family modules (oracle keys module
+  sub-blocks under the hosting slot keyword), `UnitSpecificSounds`/`-FX`
+  to Object sub-blocks, `UnitSpecificSound` (an Upgrade/CommandButton
+  *field*, never a scope) removed outright. This killed the last silent
+  cascades — swallowed `Upgrade`/`ObjectReskin` headers — and with them 66
+  bogus unresolved-references.
+
+**Corpus after batch 1: 13 diagnostics total** — zero `unknown-block` /
+`unknown-module` / `unknown-field`; the remaining 5 `missing-condition` and
+8 `unresolved-reference` hits are *genuine* data findings (e.g.
+`Upgrade_AmericaHallfireDrone`, a dead reference in the shipped game data).
+StructureTest pins the scope/field disambiguation cases.
+
+**Batch 2 (2026-06-11) implemented — depth + references:**
+
+- **Reference typing** (`scripts/phase5_batch3.py`): every field that names
+  another definition is `Reference`-typed, so the workspace index drives
+  completion and unresolved warnings (the `UpgradeCameo1` treatment,
+  everywhere): `ButtonImage`/`SelectPortrait` → mapped images, Weapon's
+  FX/OCL/particle-exhaust families (incl. per-veterancy `token_list`
+  forms), every `Voice*`/`Sound*` → the new `RefKind::AudioEvent` (defined
+  by `AudioEvent`/`DialogEvent`/`MusicTrack`; `NoSound` is the null value),
+  the full CommandButton table (Object/Upgrade/SpecialPower/image/audio
+  refs), and CommandSet's numbered slots → command buttons. Schema
+  `format_version` 3. ReferenceTest spec pins the completions.
+- **Case-insensitive index**: shipped data references `SAPathFinder1` as
+  `SAPathfinder1` and the engine resolves it; `WorkspaceIndex` now matches
+  case-insensitively (display casing preserved for completion). This
+  eliminated 64 would-be false positives.
+- **Module field depth** (`scripts/extract_module_fields.py`): a general
+  extractor parses every `<Module>ModuleData::buildFieldParse` in the
+  engine (out-of-line and in-class), resolves the ModuleData inheritance
+  chain *and* mix-in tables (`p.add(DieMuxData/UpgradeMuxData::
+  getFieldParse(), …)` — the DeathTypes/TriggeredBy families), and
+  translates ~2,500 fields across 188 modules (reference parse functions
+  → typed references; `unknown{parse_fn}` fallback). The 35 modules with
+  no own ModuleData class stay lenient.
+
+**Corpus after batch 2: the same 13 genuine diagnostics**, now with module
+fields strictly validated and reference completion working inside modules
+too. Keystroke path unchanged (146 µs on ParticleSystem.ini).
+
+**Batch 2 follow-ups (user-reported, 2026-06-11):**
+
+- `scan_workspace` now matches the `.ini` extension case-insensitively —
+  real game data ships `*.INI` (the MappedImages files), which were silently
+  missing from the index, starving `ButtonImage` completion. E2E-pinned with
+  an uppercase-`.INI` workspace fixture.
+- Modules without their own ModuleData class inherit it through the C++
+  class chain (`WeaponSetUpgrade` → `UpgradeModule` → `UpgradeModuleData`):
+  217/223 modules now field-typed; only 6 fieldless client/draw modules
+  remain lenient.
+- New `ValueType::ReferenceList`: `TriggeredBy`/`ConflictsWith`/
+  `RemovesUpgrades` (84 module fields), `Science` vectors, and Object
+  `Prerequisites` resolve and complete **every** token against the index.
+- New `Schema::builtins`: engine-synthesized definitions
+  (`Upgrade_Veterancy_*`, Upgrade.cpp) resolve without existing in any file
+  and appear in completion as "engine builtin". Schema `format_version` 4.
+- **map.ini override syntax** (absent from the game-data corpus, used by
+  map-shipped INIs): `AddModule … End` and `ReplaceModule <tag> … End` are
+  Object/ObjectReskin sub-block wrappers re-entering the module slots;
+  `RemoveModule <tag>` is a single-line field. Pinned by MapIniTest
+  (incl. module-field completion inside an `AddModule`).
+
+**Batch 3 (2026-06-11) — module enum/bitflag value sets:**
+
+- `scripts/phase5_value_sets.py`: extracts the engine's `s_bitNameList`
+  tables (`ObjectStatusTypes.cpp`, `BitFlags.cpp`, `GameLOD.cpp` — the
+  `#ifdef ALLOW_SURRENDER` member is stripped, retail doesn't compile it)
+  and retypes 213 fields by parse fn: `ObjectStatusMaskType::parseFromINI`
+  (82) and `ModelConditionFlags::parseFromINI` (11) → `bit_flags`;
+  `INI::parseDeathTypeFlags`/`parseVeterancyLevelFlags`/
+  `parseDamageTypeFlags` (87, the `ALL`/`NONE`/`+x`/`-x` form — the
+  validator already accepts prefix ops) → `bit_flags` over existing sets;
+  `parseStaticGameLODLevel` → enum; `parseAsciiStringLC` → `ascii_string`.
+- `scripts/phase5_index_lists.py`: the 18 remaining `INI::parseIndexList`
+  fields each carry their name array as FieldParse userData — extracted
+  into 12 new value sets (Locomotor appearance/Z-behavior/priority, weapon
+  reload/prefire/bonus-condition, radius cursor, academy classify, OCL and
+  gunship create-locations, max-health change, horde action); 4 reuse
+  existing sets (`death_type`, `veterancy_level`, `locomotor_set`,
+  `model_condition`). 31 value sets total.
+- Pinned by `ValueSetTest` (bad-flag on a bogus ObjectStatus member,
+  bad-enum on a bogus index-list member, completion from
+  `max_health_change`); **corpus unchanged at the same 13 genuine
+  diagnostics** — zero false positives from 231 retypes.
+- Coverage number (now in the README): 3,656 fields across 63 blocks +
+  223 modules, **86% concretely typed**, 510 lenient `unknown`.
+
+**Remaining (continuous):**
+
+- The ~510 `unknown` fields use multi-token engine parse functions
+  (TransitionDamageFX/BoneFX `Loc: X: Y: Z: … FXList:` tagged forms,
+  `parseTWS`, RadiusDecal templates, …) that need a tagged-pair value-type
+  shape to model — defer until a corpus of mod data shows they matter.
 - Split `schema.json` per-domain only when its size actually hurts.
 
-**Milestones:** M1 zero `unknown-block` corpus hits (already reached in
-Phase 2) → M2 top-20 blocks fully field-typed with value sets → M3 module
-long tail below an agreed `unknown-field` threshold.
+**Milestones:** M1 zero `unknown-block` (Phase 2) ✅ → M2 zero corpus
+warning noise (batch 1) ✅ → M3 module field tables typed from the engine
+(batch 2, 188/223 modules) ✅ → M4 value sets for the module enum/flag long
+tail (batch 3, 31 sets, 86% of fields concretely typed) ✅.
 
 ## Phase 6 — LSP breadth 🔲
 
@@ -227,6 +328,24 @@ long tail below an agreed `unknown-field` threshold.
    synchronous in `initialized`, which hurts on full-mod folders).
 4. Last: formatting (indent normalizer over the lossless CST) and code
    actions (insert missing `End`, did-you-mean for enum members).
+
+### Dead-code / consistency diagnostics (new sub-track)
+
+Modder-helpful reachability warnings, in two tiers:
+
+- **Block-local (no new infrastructure):** a `WeaponSet` whose `Conditions`
+  include `PLAYER_UPGRADE` on an object with no `WeaponSetUpgrade` behavior
+  is unreachable (and the reverse: a `WeaponSetUpgrade` with no
+  upgrade-conditioned set does nothing); same pairing for `ArmorSet` /
+  `ArmorUpgrade`. Per-flag rules transcribed from the engine: only
+  `PLAYER_UPGRADE` is module-triggered — `VETERAN`/`ELITE`/`HERO` (XP),
+  `CRATEUPGRADE_*` (crates), and `WEAPON_RIDER*` (RiderChangeContain) fire
+  externally and must not warn. Calibrate against the corpus like every
+  other check.
+- **Workspace-wide (needs item 2's reference sites):** definitions nothing
+  references — an `Upgrade` no CommandButton/science grants, a `Weapon` /
+  `FXList` nothing names. *Hints*, not warnings: maps and `.scb` scripts can
+  reference INI entities outside the indexed workspace.
 
 Each feature lands spec-first for the analysis layer plus an `e2e.py`
 assertion for the wire handler. Before this phase: reassess the pinned,

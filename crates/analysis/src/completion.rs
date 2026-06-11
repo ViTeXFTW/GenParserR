@@ -208,17 +208,27 @@ fn completions_for_type(
                     .collect()
             })
             .unwrap_or_default(),
-        ValueType::Reference { ref_kind } => index
-            .map(|idx| {
-                idx.names(*ref_kind)
-                    .map(|n| Completion {
-                        label: n.to_string(),
-                        kind: CompletionKind::Reference,
-                        detail: Some(format!("{ref_kind:?}")),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default(),
+        ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } => {
+            let mut out: Vec<Completion> = index
+                .map(|idx| {
+                    idx.names(*ref_kind)
+                        .map(|n| Completion {
+                            label: n.to_string(),
+                            kind: CompletionKind::Reference,
+                            detail: Some(format!("{ref_kind:?}")),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            // Engine-synthesized names (e.g. Upgrade_Veterancy_*) are valid
+            // targets that appear in no file.
+            out.extend(analyzer.builtin_names(*ref_kind).map(|n| Completion {
+                label: n.to_string(),
+                kind: CompletionKind::Reference,
+                detail: Some(format!("{ref_kind:?} (engine builtin)")),
+            }));
+            out
+        }
         _ => Vec::new(),
     }
 }

@@ -338,6 +338,12 @@ impl<'a> Ctx<'a> {
                     self.check_bitflag_member(value_set, tok, raw);
                 }
             }
+            // Every token names a definition of the same kind.
+            ValueType::ReferenceList { ref_kind } => {
+                for tok in &tokens {
+                    self.check_reference(*ref_kind, tok);
+                }
+            }
             // A fixed sequence of typed tokens; each listed token is required
             // (the engine's parse function calls getNextToken for each).
             ValueType::TokenList { tokens: specs } => {
@@ -418,7 +424,9 @@ impl<'a> Ctx<'a> {
                     self.check_bitflag_member(value_set, tok, raw);
                 }
             }
-            ValueType::Reference { ref_kind } => self.check_reference(*ref_kind, tok),
+            ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } => {
+                self.check_reference(*ref_kind, tok)
+            }
             // No single-token validation for these.
             ValueType::AsciiString
             | ValueType::QuotedString
@@ -571,7 +579,13 @@ impl<'a> Ctx<'a> {
     fn check_reference(&mut self, kind: RefKind, tok: &SyntaxToken) {
         let Some(index) = self.index else { return };
         let name = unquote(tok.text());
-        if name.is_empty() || name.eq_ignore_ascii_case("None") {
+        // `None` is the universal null reference; `NoSound` is the audio one;
+        // builtins (e.g. `Upgrade_Veterancy_*`) exist in no file by design.
+        if name.is_empty()
+            || name.eq_ignore_ascii_case("None")
+            || (kind == RefKind::AudioEvent && name.eq_ignore_ascii_case("NoSound"))
+            || self.analyzer.is_builtin(kind, name)
+        {
             return;
         }
         if !index.is_defined(kind, name) {

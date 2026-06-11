@@ -28,11 +28,22 @@ pub struct Definition {
     pub span: Span,
 }
 
+/// A definition name's entry: display casing plus all its locations.
+struct NameEntry {
+    /// The name as first written (for completion display).
+    display: String,
+    locations: Vec<Location>,
+}
+
 /// Workspace-wide symbol table, grouped by reference kind then name.
+///
+/// Name lookup is **case-insensitive**, mirroring the engine: shipped game
+/// data references `MappedImage SAPathFinder1` as `SAPathfinder1` and the
+/// game resolves it.
 #[derive(Default)]
 pub struct WorkspaceIndex {
-    by_kind: HashMap<RefKind, HashMap<String, Vec<Location>>>,
-    /// Reverse map so a file's old entries can be removed on update.
+    by_kind: HashMap<RefKind, HashMap<String, NameEntry>>,
+    /// Reverse map (lowercased names) so a file's entries can be removed.
     files: HashMap<String, Vec<(RefKind, String)>>,
     /// Bumped whenever the *name set* changes (not mere span shifts), so
     /// consumers (the per-block diagnostics cache) can invalidate cheaply.
@@ -55,7 +66,7 @@ impl WorkspaceIndex {
     pub fn set_file(&mut self, file: &str, defs: Vec<Definition>) {
         let names: Vec<(RefKind, String)> = defs
             .iter()
-            .map(|d| (d.kind, d.name.clone()))
+            .map(|d| (d.kind, d.name.to_ascii_lowercase()))
             .collect();
         let changed = match self.files.get(file) {
             Some(old) => *old != names,
@@ -66,15 +77,19 @@ impl WorkspaceIndex {
         }
         self.remove_entries(file);
         for def in defs {
-            self.by_kind
+            let entry = self
+                .by_kind
                 .entry(def.kind)
                 .or_default()
-                .entry(def.name.clone())
-                .or_default()
-                .push(Location {
-                    file: file.to_string(),
-                    span: def.span,
+                .entry(def.name.to_ascii_lowercase())
+                .or_insert_with(|| NameEntry {
+                    display: def.name.clone(),
+                    locations: Vec::new(),
                 });
+            entry.locations.push(Location {
+                file: file.to_string(),
+                span: def.span,
+            });
         }
         self.files.insert(file.to_string(), names);
     }
@@ -89,12 +104,12 @@ impl WorkspaceIndex {
 
     fn remove_entries(&mut self, file: &str) {
         if let Some(entries) = self.files.remove(file) {
-            for (kind, name) in entries {
+            for (kind, lower) in entries {
                 if let Some(names) = self.by_kind.get_mut(&kind) {
-                    if let Some(locs) = names.get_mut(&name) {
-                        locs.retain(|l| l.file != file);
-                        if locs.is_empty() {
-                            names.remove(&name);
+                    if let Some(entry) = names.get_mut(&lower) {
+                        entry.locations.retain(|l| l.file != file);
+                        if entry.locations.is_empty() {
+                            names.remove(&lower);
                         }
                     }
                 }
@@ -103,28 +118,30 @@ impl WorkspaceIndex {
     }
 
     /// Is `name` defined for `kind` anywhere in the workspace?
+    /// Case-insensitive, like the engine's own name lookups.
     pub fn is_defined(&self, kind: RefKind, name: &str) -> bool {
         self.by_kind
             .get(&kind)
-            .map(|n| n.contains_key(name))
+            .map(|n| n.contains_key(&name.to_ascii_lowercase()))
             .unwrap_or(false)
     }
 
-    /// All definition locations for `name` of `kind`.
+    /// All definition locations for `name` of `kind` (case-insensitive).
     pub fn locations(&self, kind: RefKind, name: &str) -> &[Location] {
         self.by_kind
             .get(&kind)
-            .and_then(|n| n.get(name))
-            .map(|v| v.as_slice())
+            .and_then(|n| n.get(&name.to_ascii_lowercase()))
+            .map(|e| e.locations.as_slice())
             .unwrap_or(&[])
     }
 
-    /// All known names for a kind (for reference completion).
+    /// All known names for a kind (for reference completion), in their
+    /// originally-written casing.
     pub fn names(&self, kind: RefKind) -> impl Iterator<Item = &str> {
         self.by_kind
             .get(&kind)
             .into_iter()
-            .flat_map(|n| n.keys().map(|s| s.as_str()))
+            .flat_map(|n| n.values().map(|e| e.display.as_str()))
     }
 }
 
@@ -169,7 +186,13 @@ mod tests {
         idx.set_file("f.ini", defs);
         assert!(idx.is_defined(RefKind::Weapon, "AK47"));
         assert!(idx.is_defined(RefKind::Object, "Tank"));
+        // The engine resolves names case-insensitively (shipped data relies
+        // on it: `MappedImage SAPathFinder1` vs `ButtonImage = SAPathfinder1`).
+        assert!(idx.is_defined(RefKind::Weapon, "ak47"));
+        assert!(idx.is_defined(RefKind::Object, "TANK"));
         assert!(!idx.is_defined(RefKind::Weapon, "Nonexistent"));
+        // Completion shows the original casing.
+        assert!(idx.names(RefKind::Weapon).any(|n| n == "AK47"));
     }
 
     #[test]

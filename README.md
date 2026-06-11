@@ -138,16 +138,23 @@ stdio transport and a document selector for your INI files.
 The full phase-by-phase plan and status lives in
 [`docs/roadmap.md`](docs/roadmap.md). Current state in brief:
 
-* All 63 of the engine's top-level block types are structurally modeled
-  (scopes nest correctly; zero `syntax` / `unknown-block` diagnostics across
-  the full Zero Hour game data), but most field lists are still skeletons —
-  field/value typing is grown by hand from the engine `FieldParse` tables,
-  highest corpus frequency first (roadmap Phase 5).
-* A few value validators (Color, Coord, Duration, typed token lists like
-  `Armor = <DamageType> <percent>`) are not implemented yet; those fields are
-  treated leniently (roadmap Phase 4).
-* Enum/bitflag value sets that aren't yet enumerated are modeled as `Unknown`
-  (member validation is then skipped, never falsely flagged).
+* All 63 top-level block types and all 223 engine-registered modules are
+  modeled; running the analyzer over the complete Zero Hour game data yields
+  **13 diagnostics, all genuine** (dead references and condition-less
+  WeaponSets in the shipped INIs) — zero unknown-block / unknown-module /
+  unknown-field noise.
+* Value validators cover Bool/Int/Real/Percent/Color/Coord/Duration, enums,
+  bitflags, references, and typed token lists (`Armor = <DamageType>
+  <percent>`). Module field tables are extracted from the engine's
+  `buildFieldParse` chains; fields that name other definitions (images, FX
+  lists, OCLs, audio events, weapons, upgrades, …) are reference-typed, so
+  they complete from the workspace index and warn when unresolved.
+* **Coverage: 3,656 fields across the 63 blocks + 223 modules; 86% carry a
+  concrete value type, validated/completed against 31 engine-extracted value
+  sets** (ObjectStatus, ModelCondition, death/damage/veterancy flags, KindOf,
+  Locomotor appearance, …). The remaining 14% use multi-token engine parse
+  functions not yet modeled and stay `Unknown` (validation is then skipped,
+  never falsely flagged).
 * Editing is incremental end-to-end (block-splice reparse + per-block
   diagnostics cache; a keystroke in a 60k-line file costs ~150 µs), and
   positions honor the negotiated LSP encoding (UTF-8 or UTF-16).

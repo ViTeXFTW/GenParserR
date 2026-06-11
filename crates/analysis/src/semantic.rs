@@ -213,7 +213,9 @@ fn value_token_kind(tok: &SyntaxToken, ty: Option<&ValueType>) -> SemKind {
         | Some(ValueType::Color)
         | Some(ValueType::Coord2D)
         | Some(ValueType::Coord3D) => SemKind::Number,
-        Some(ValueType::Reference { .. }) => SemKind::Reference,
+        Some(ValueType::Reference { .. }) | Some(ValueType::ReferenceList { .. }) => {
+            SemKind::Reference
+        }
         _ => SemKind::StringLit,
     }
 }

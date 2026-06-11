@@ -50,6 +50,16 @@ def reader(stream, q: "queue.Queue"):
 
 def main() -> int:
     exe = sys.argv[1]
+
+    # A throwaway workspace with an *uppercase* .INI definition file: the
+    # scan must index it case-insensitively (real game data mixes casing).
+    import pathlib
+    import tempfile
+
+    workspace = pathlib.Path(tempfile.mkdtemp(prefix="genparser-e2e-"))
+    (workspace / "Images.INI").write_text("MappedImage TestScanImage\nEnd\n")
+    root_uri = workspace.as_uri()
+
     proc = subprocess.Popen(
         [exe],
         stdin=subprocess.PIPE,
@@ -80,9 +90,9 @@ def main() -> int:
         print(f"TIMEOUT waiting for {what}", file=sys.stderr)
         return None
 
-    # 1) initialize
+    # 1) initialize (with a workspace root so scan_workspace runs)
     send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
-          "params": {"capabilities": {}, "workspaceFolders": None, "rootUri": None}})
+          "params": {"capabilities": {}, "workspaceFolders": None, "rootUri": root_uri}})
     init = wait_for(lambda m: m.get("id") == 1 and "result" in m, "initialize result")
     assert init, "no initialize result"
     caps = init["result"]["capabilities"]
@@ -230,7 +240,27 @@ def main() -> int:
         assert got.get("version") == 2, f"[{name}] missing/wrong version stamp"
         print(f"OK: incremental == baseline: {name}")
 
-    # 6) shutdown
+    # 6) workspace-scan references: the uppercase Images.INI was indexed, so
+    #    `ButtonImage = TestScanImage` resolves and completion offers it.
+    scan_uri = "file:///test/scan.ini"
+    scan = open_doc(scan_uri, "Object ScanTest\n  ButtonImage = \nEnd\n")
+    send({"jsonrpc": "2.0", "id": 7, "method": "textDocument/completion",
+          "params": {"textDocument": {"uri": scan_uri},
+                     "position": {"line": 1, "character": 16}}})
+    comp = wait_for(lambda m: m.get("id") == 7 and "result" in m, "scan completion")
+    items = comp["result"]
+    if isinstance(items, dict):
+        items = items.get("items", [])
+    labels = [i["label"] for i in items]
+    assert "TestScanImage" in labels, f"expected TestScanImage from .INI scan, got {labels[:10]}"
+    scan2 = change_doc(scan_uri, 2, [
+        {"range": {"start": {"line": 1, "character": 16}, "end": {"line": 1, "character": 16}},
+         "text": "TestScanImage"}])
+    codes = [d.get("code") for d in scan2["diagnostics"]]
+    assert "unresolved-reference" not in codes, f"scan-indexed image should resolve: {codes}"
+    print("OK: workspace scan indexed uppercase .INI (completion + resolution)")
+
+    # 7) shutdown
     send({"jsonrpc": "2.0", "id": 99, "method": "shutdown", "params": None})
     wait_for(lambda m: m.get("id") == 99, "shutdown")
     send({"jsonrpc": "2.0", "method": "exit", "params": None})

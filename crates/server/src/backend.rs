@@ -131,7 +131,13 @@ impl Backend {
                 .filter_map(|e| e.ok())
             {
                 let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) != Some("ini") {
+                // Real game data mixes extension casing (`*.ini` / `*.INI`,
+                // e.g. the MappedImages files), so compare case-insensitively.
+                if !path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|e| e.eq_ignore_ascii_case("ini"))
+                {
                     continue;
                 }
                 let Some(text) = read_lossy(path) else { continue };

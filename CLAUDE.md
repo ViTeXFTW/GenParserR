@@ -151,10 +151,17 @@ single-line directives: the parser emits them as file-scope fields, not
 blocks. Sub-blocks may declare `fields` of their own (e.g. `WeaponSet`,
 `FXList`'s `Tracer` nugget): `model::scope_schema` resolves a nameless
 `MODULE` node against the enclosing scope's `sub_blocks`, so those fields
-validate and complete like block fields. Multi-token engine parse functions
-are typed `token_list` (e.g. `Armor = <DamageType|Default> <percent>`,
-`Weapon = <slot> <weapon>`), validating/completing each token position by
-its own element type.
+validate and complete like block fields. *Module*-declared sub-blocks (e.g.
+the AIUpdate family's `Turret`/`AltTurret`) are keyed in the oracle under
+every module-slot keyword (`Behavior`, `Draw`, …), because that slot keyword
+is the enclosing head the oracle sees inside a module scope. Keep
+`CURATED_SUBBLOCKS` minimal — a curated keyword opens anywhere, so a field
+with the same name elsewhere gets misparsed (the `Turret = <bone>` inside
+ConditionState vs `Turret` scope collision; `UnitSpecificSound` is a plain
+Upgrade/CommandButton field, never a scope). Multi-token engine parse
+functions are typed `token_list` (e.g. `Armor = <DamageType|Default>
+<percent>`, `Weapon = <slot> <weapon>`), validating/completing each token
+position by its own element type.
 
 **Diagnostics are intentionally stricter than the engine** (the project's
 goal). Two layers in `diagnostics.rs`: engine-faithful *errors* (unknown

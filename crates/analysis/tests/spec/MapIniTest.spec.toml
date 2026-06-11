@@ -1,0 +1,12 @@
+# Expected behavior for MapIniTest.ini: map.ini override syntax parses
+# without structural errors — `AddModule`/`ReplaceModule <tag>` nest properly
+# (their `End`s close the right scopes), `RemoveModule <tag>` is a field, and
+# modules inside the wrappers still validate and complete.
+
+no_errors = true
+
+# Module fields inside an AddModule wrapper resolve their schema: completion
+# after `TriggeredBy =` offers upgrades (incl. the engine builtins).
+[[complete]]
+at = "$1"
+includes = ["Upgrade_MapSpecial", "Upgrade_Veterancy_ELITE"]

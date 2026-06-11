@@ -31,6 +31,20 @@ pub struct Schema {
     pub modules: Vec<ModuleType>,
     /// Named value sets used by enum / bitflag fields, keyed by id.
     pub value_sets: Vec<ValueSet>,
+    /// Definitions the engine synthesizes at runtime rather than reading from
+    /// INI (e.g. the `Upgrade_Veterancy_*` upgrades) — valid reference targets
+    /// that exist in no file.
+    #[serde(default)]
+    pub builtins: Vec<BuiltinDef>,
+}
+
+/// An engine-synthesized definition (see [`Schema::builtins`]).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuiltinDef {
+    pub ref_kind: RefKind,
+    pub name: String,
+    #[serde(default)]
+    pub doc: Option<String>,
 }
 
 /// A top-level INI block, e.g. `Object GLATankMarauder` ... `End`.
@@ -177,6 +191,9 @@ pub enum ValueType {
     BitFlags { value_set: String },
     /// A reference to a named definition elsewhere (cross-file index target).
     Reference { ref_kind: RefKind },
+    /// One or more references of the same kind (e.g. `TriggeredBy` upgrade
+    /// lists, `Science` vectors): every token resolves against the index.
+    ReferenceList { ref_kind: RefKind },
     /// A fixed sequence of individually-typed tokens, for engine parse
     /// functions that consume several tokens in order (e.g. Armor
     /// coefficients: `Armor = <DamageType> <percent>`, or WeaponSet's
@@ -208,6 +225,8 @@ pub enum RefKind {
     MappedImage,
     Anim2D,
     PlayerTemplate,
+    /// A named audio event (`AudioEvent` / `DialogEvent` / `MusicTrack`).
+    AudioEvent,
 }
 
 /// A named set of enum / bitflag members.
@@ -316,6 +335,7 @@ mod tests {
             }],
             modules: vec![],
             value_sets: vec![],
+            builtins: vec![],
         };
         let json = schema.to_json_pretty().unwrap();
         let back = Schema::from_json(&json).unwrap();

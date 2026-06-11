@@ -1,0 +1,21 @@
+# Expected behavior for ValueSetTest.ini: module flag/enum fields validate
+# their members against the engine name tables. Good members — bare, ALL/NONE,
+# and +/- prefixed — pass silently; a misspelled member is an error pointing
+# at exactly that token.
+
+# StatusToClear names a status that is not in ObjectStatusMaskType's table.
+[[diag]]
+severity = "error"
+code = "bad-flag"
+on = "NOT_A_STATUS"
+
+# GroupMovementPriority only accepts MOVES_BACK/MOVES_MIDDLE/MOVES_FRONT.
+[[diag]]
+severity = "error"
+code = "bad-enum"
+on = "MOVES_NEVER"
+
+# `ChangeType =` completes from the engine's MaxHealthChangeType names.
+[[complete]]
+at = "$1"
+includes = ["PRESERVE_RATIO", "FULLY_HEAL"]
