@@ -1,0 +1,21 @@
+# Shared ModuleTag_01 on the second module -> duplicate-module-tag warning.
+[[diag]]
+severity = "warning"
+code = "duplicate-module-tag"
+on = "ModuleTag_01"
+nth = 2
+
+# First occurrence is fine — no warning.
+[[diag]]
+severity = "warning"
+code = "duplicate-module-tag"
+on = "ModuleTag_01"
+nth = 1
+absent = true
+
+# Distinct tags — no duplicate warning on either.
+[[diag]]
+severity = "warning"
+code = "duplicate-module-tag"
+on = "ModuleTag_02"
+absent = true

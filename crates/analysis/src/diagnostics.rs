@@ -88,6 +88,7 @@ pub const KNOWN_CODES: &[&str] = &[
     "unresolved-reference",
     "unknown-suppression",
     "module-wrong-slot",
+    "duplicate-module-tag",
 ];
 
 /// The head word of the in-file suppression pragma comment.
@@ -201,6 +202,7 @@ fn diagnose_root_child(
         index,
         file,
         out: Vec::new(),
+        tag_seen: HashMap::new(),
     };
     match node.kind() {
         SyntaxKind::BLOCK => ctx.block(node),
@@ -326,6 +328,10 @@ struct Ctx<'a> {
     /// The document's name as keyed in `index` (None for single-file analysis).
     file: Option<&'a str>,
     out: Vec<Diagnostic>,
+    /// Module tags seen within the current top-level block walk, mapping tag
+    /// text to the first-occurrence span. Used to detect duplicates.
+    /// (ThingTemplate.cpp: tags "must be unique across all modules".)
+    tag_seen: HashMap<String, Span>,
 }
 
 /// Files the engine loads in `INI_LOAD_CREATE_OVERRIDES` mode: map-shipped
@@ -583,7 +589,24 @@ impl<'a> Ctx<'a> {
                         }
                         // ThingTemplate.cpp: "there must be a module tag
                         // present, and it must be unique across all modules".
-                        if module.tag().is_none() {
+                        if let Some(tag_tok) = module.tag() {
+                            let tag_text = tag_tok.text().to_string();
+                            let tag_span: Span = tag_tok.text_range().into();
+                            if let Some(&first) = self.tag_seen.get(&tag_text) {
+                                self.warning(
+                                    &tag_tok,
+                                    "duplicate-module-tag",
+                                    format!(
+                                        "module tag `{tag_text}` is already used at byte {}; \
+                                         tags must be unique within an object (the engine \
+                                         cannot remove a module by tag if duplicates exist)",
+                                        first.start,
+                                    ),
+                                );
+                            } else {
+                                self.tag_seen.insert(tag_text, tag_span);
+                            }
+                        } else {
                             self.warning(
                                 &name,
                                 "missing-module-tag",
