@@ -259,6 +259,28 @@ fn field_value_completions(
     base
 }
 
+/// Build a single-token snippet placeholder for a value type, used when
+/// generating a full-sequence snippet for TokenList or structured types.
+/// `n` is the tab-stop index (1-based).
+fn type_snippet_placeholder(ty: &ValueType, n: usize) -> String {
+    match ty {
+        ValueType::Bool => format!("${{{n}:Yes}}"),
+        ValueType::Int | ValueType::UInt => format!("${{{n}:0}}"),
+        ValueType::Real | ValueType::PositiveReal | ValueType::AngleReal | ValueType::Velocity
+        | ValueType::Acceleration => format!("${{{n}:0}}"),
+        ValueType::Percent => format!("${{{n}:100%}}"),
+        ValueType::Duration => format!("${{{n}:1000}}"),
+        ValueType::Enum { .. } | ValueType::BitFlags { .. } => format!("${{{n}:NONE}}"),
+        ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } => {
+            format!("${{{n}:{ref_kind:?}}}")
+        }
+        ValueType::AsciiString | ValueType::AsciiStringList | ValueType::QuotedString => {
+            format!("${{{n}:Value}}")
+        }
+        _ => format!("${{{n}:?}}"),
+    }
+}
+
 fn completions_for_type(
     analyzer: &Analyzer,
     ty: &ValueType,
@@ -266,11 +288,51 @@ fn completions_for_type(
     index: Option<&WorkspaceIndex>,
 ) -> Vec<Completion> {
     match ty {
-        // Token lists complete the element at the cursor's position.
-        ValueType::TokenList { tokens } => tokens
-            .get(value_index)
-            .map(|elem| completions_for_type(analyzer, elem, 0, index))
-            .unwrap_or_default(),
+        // Token lists: at position 0 offer a full-sequence snippet plus per-token completions.
+        ValueType::TokenList { tokens } => {
+            let mut out = tokens
+                .get(value_index)
+                .map(|elem| completions_for_type(analyzer, elem, 0, index))
+                .unwrap_or_default();
+            // At the first token, also inject a full-sequence snippet.
+            if value_index == 0 && tokens.len() > 1 {
+                let snippet: String = tokens
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| type_snippet_placeholder(t, i + 1))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                out.insert(
+                    0,
+                    Completion {
+                        label: "<full sequence>".into(),
+                        kind: CompletionKind::Value,
+                        detail: Some(format!("{} tokens", tokens.len())),
+                        insert: Some(snippet),
+                    },
+                );
+            }
+            out
+        }
+        // Structured positional types: offer a single snippet.
+        ValueType::Color => vec![Completion {
+            label: "R: G: B:".into(),
+            kind: CompletionKind::Value,
+            detail: Some("color".into()),
+            insert: Some("R:${1:255} G:${2:255} B:${3:255}".into()),
+        }],
+        ValueType::Coord2D => vec![Completion {
+            label: "X: Y:".into(),
+            kind: CompletionKind::Value,
+            detail: Some("2D coordinate".into()),
+            insert: Some("X:${1:0} Y:${2:0}".into()),
+        }],
+        ValueType::Coord3D => vec![Completion {
+            label: "X: Y: Z:".into(),
+            kind: CompletionKind::Value,
+            detail: Some("3D coordinate".into()),
+            insert: Some("X:${1:0} Y:${2:0} Z:${3:0}".into()),
+        }],
         ValueType::Bool => ["Yes", "No"]
             .iter()
             .map(|v| Completion {
