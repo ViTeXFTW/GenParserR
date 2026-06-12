@@ -172,7 +172,14 @@ block/field, bad value type, bad enum/bitflag member, unterminated block) plus
 modder-helpful *warnings/hints* (unknown module, unresolved cross-file
 reference). Each diagnostic carries a stable string `code` (e.g.
 `unknown-field`, `syntax`) — the spec tests pin these by `code`, so changing a
-code or span requires updating the affected `*.spec.toml` files.
+code or span requires updating the affected `*.spec.toml` files. A file can
+opt out of specific codes with a file-scope pragma comment
+(`; genparser-disable: <code>, …`): the filter runs *after* the per-block
+cache assembles its output (cached entries stay unfiltered, so pragma edits
+apply file-wide while sibling blocks stay cached), every emitted code must be
+registered in `KNOWN_CODES` (a debug-assert in `push` enforces it), and a
+misspelled code gets an `unknown-suppression` hint. Spec `[[diag]]` entries
+take `absent = true` to pin that a diagnostic is *not* emitted.
 
 ### Editor client
 

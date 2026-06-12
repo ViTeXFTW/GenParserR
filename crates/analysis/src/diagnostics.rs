@@ -5,6 +5,13 @@
 //! * engine-faithful errors — unknown block, unknown field, bad value type,
 //!   bad enum/bitflag member, unterminated block;
 //! * stricter warnings/hints — unknown module, unresolved cross-file reference.
+//!
+//! A file can opt out of specific codes with a file-scope pragma comment
+//! (see [`apply_suppressions`]):
+//!
+//! ```ini
+//! ; genparser-disable: unresolved-reference, unreachable-set
+//! ```
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -50,7 +57,103 @@ pub fn diagnose(
     for node in parse.syntax().children() {
         out.extend(diagnose_root_child(analyzer, index, file, &node));
     }
+    apply_suppressions(parse, &mut out);
     out
+}
+
+/// Every stable diagnostic code this module can emit. The suppression pragma
+/// validates against this list so a typo gets an `unknown-suppression` hint
+/// instead of silently suppressing nothing. (`push` debug-asserts membership,
+/// so a new code that forgets to register here fails the test suite.)
+pub const KNOWN_CODES: &[&str] = &[
+    "syntax",
+    "stray-field",
+    "unknown-block",
+    "overrides",
+    "duplicate-definition",
+    "unreachable-set",
+    "unknown-field",
+    "missing-module-tag",
+    "unknown-module",
+    "missing-condition",
+    "missing-value",
+    "bad-bool",
+    "non-positive",
+    "bad-percent",
+    "bad-color",
+    "bad-coord",
+    "bad-number",
+    "bad-enum",
+    "bad-flag",
+    "unresolved-reference",
+    "unknown-suppression",
+];
+
+/// The head word of the in-file suppression pragma comment.
+const PRAGMA: &str = "genparser-disable";
+
+/// Honor file-scope suppression pragmas: a comment line outside any block of
+/// the form `; genparser-disable: code, code …` (colon optional; codes
+/// separated by commas and/or whitespace; multiple pragma comments
+/// accumulate) drops every diagnostic with a listed code from the file's
+/// output. Unrecognized codes produce an `unknown-suppression` hint spanning
+/// the offending word.
+///
+/// Called as the final step of both [`diagnose`] and [`diagnose_with_cache`],
+/// *after* cache assembly: cached per-block entries stay unfiltered, so
+/// editing the pragma takes effect file-wide even while sibling blocks reuse
+/// their cached diagnostics.
+fn apply_suppressions(parse: &Parse, out: &mut Vec<Diagnostic>) {
+    let mut suppressed: Vec<&'static str> = Vec::new();
+    let mut hints: Vec<Diagnostic> = Vec::new();
+    // Comment-only lines at file scope are direct ROOT tokens; comments
+    // inside blocks live in the block's subtree and are deliberately not
+    // scanned (the pragma is a whole-file switch, not a local one).
+    for el in parse.syntax().children_with_tokens() {
+        let Some(tok) = el.as_token() else { continue };
+        if tok.kind() != SyntaxKind::COMMENT {
+            continue;
+        }
+        let text = tok.text();
+        // The pragma word must be the first thing after the `;`s.
+        let body = text.trim_start_matches(';').trim_start();
+        let Some(rest) = body.strip_prefix(PRAGMA) else { continue };
+        let rest = rest.trim_start();
+        let rest = rest.strip_prefix(':').unwrap_or(rest);
+        // Byte offset of `rest` inside the comment token, for hint spans.
+        let base = u32::from(tok.text_range().start()) + (text.len() - rest.len()) as u32;
+        // `\r` because a comment token on a CRLF line includes the carriage
+        // return.
+        let is_sep = |b: u8| matches!(b, b' ' | b'\t' | b',' | b'\r');
+        let bytes = rest.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if is_sep(bytes[i]) {
+                i += 1;
+                continue;
+            }
+            let start = i;
+            while i < bytes.len() && !is_sep(bytes[i]) {
+                i += 1;
+            }
+            let word = &rest[start..i];
+            if let Some(code) = KNOWN_CODES.iter().find(|c| **c == word) {
+                suppressed.push(code);
+            } else {
+                hints.push(Diagnostic {
+                    span: Span::new(base + start as u32, base + i as u32),
+                    severity: Severity::Hint,
+                    code: "unknown-suppression",
+                    message: format!("`{word}` is not a known diagnostic code"),
+                });
+            }
+        }
+    }
+    if suppressed.is_empty() && hints.is_empty() {
+        return;
+    }
+    out.extend(hints);
+    out.retain(|d| !suppressed.contains(&d.code));
 }
 
 /// Structural errors from the parser (unterminated blocks, stray `End`).
@@ -196,6 +299,7 @@ pub fn diagnose_with_cache(
     }
     // Entries for children no longer in the tree are dropped here.
     cache.map = next;
+    apply_suppressions(parse, &mut out);
     out
 }
 
@@ -782,6 +886,10 @@ impl<'a> Ctx<'a> {
     }
 
     fn push(&mut self, tok: &SyntaxToken, severity: Severity, code: &'static str, message: String) {
+        debug_assert!(
+            KNOWN_CODES.contains(&code),
+            "`{code}` is not registered in KNOWN_CODES (suppression pragma)"
+        );
         self.out.push(Diagnostic {
             span: tok.text_range().into(),
             severity,
@@ -928,6 +1036,60 @@ End
     fn unknown_module_warns() {
         let src = "Object Tank\n  Body = NotARealModule Tag01\n  End\nEnd\n";
         assert!(codes(src).contains(&"unknown-module"));
+    }
+
+    #[test]
+    fn pragma_suppresses_listed_codes_file_wide() {
+        let src = "; genparser-disable: bad-bool, unknown-field\nWeapon AK47\n  ScaleWeaponSpeed = Maybe\n  ClipSize = lots\n  PrimaryDamg = 1\nEnd\n";
+        let c = codes(src);
+        assert!(!c.contains(&"bad-bool"), "{c:?}");
+        assert!(!c.contains(&"unknown-field"), "{c:?}");
+        assert!(c.contains(&"bad-number"), "unlisted codes survive: {c:?}");
+    }
+
+    #[test]
+    fn pragma_typo_hints_and_suppresses_nothing() {
+        let src = "; genparser-disable: bad-bol\nWeapon AK47\n  ScaleWeaponSpeed = Maybe\nEnd\n";
+        let d = diags(src);
+        assert!(d.iter().any(|d| d.code == "bad-bool"), "{d:?}");
+        let hint = d
+            .iter()
+            .find(|d| d.code == "unknown-suppression" && d.severity == Severity::Hint)
+            .unwrap_or_else(|| panic!("expected unknown-suppression hint: {d:?}"));
+        assert_eq!(&src[hint.span.start as usize..hint.span.end as usize], "bad-bol");
+    }
+
+    #[test]
+    fn pragma_inside_a_block_is_ignored() {
+        let src = "Weapon AK47\n  ; genparser-disable: bad-bool\n  ScaleWeaponSpeed = Maybe\nEnd\n";
+        assert!(codes(src).contains(&"bad-bool"));
+    }
+
+    #[test]
+    fn pragma_filters_over_cached_blocks() {
+        // Warm the cache without a pragma, then insert one at the top via an
+        // incremental reparse: the untouched second block keeps its cached
+        // (unfiltered) diagnostics, and the filter must still apply to them.
+        let a = Analyzer::embedded();
+        let src = "Weapon A\n  ScaleWeaponSpeed = Maybe\nEnd\nWeapon B\n  ClipSize = lots\nEnd\n";
+        let parse = a.parse(src);
+        let mut cache = DiagnosticsCache::new();
+        let first = diagnose_with_cache(&a, &parse, None, None, &mut cache);
+        assert!(first.iter().any(|d| d.code == "bad-bool"));
+        assert!(first.iter().any(|d| d.code == "bad-number"));
+
+        let pragma = "; genparser-disable: bad-number\n";
+        let edited = format!("{pragma}{src}");
+        let (inc, _strategy) = a.reparse(
+            &parse,
+            src,
+            &edited,
+            genparser_syntax::Edit { start: 0, old_end: 0, new_len: pragma.len() },
+        );
+        let second = diagnose_with_cache(&a, &inc, None, None, &mut cache);
+        assert!(!second.iter().any(|d| d.code == "bad-number"), "{second:?}");
+        assert!(second.iter().any(|d| d.code == "bad-bool"));
+        assert_eq!(second, diagnose(&a, &inc, None, None));
     }
 
     #[test]

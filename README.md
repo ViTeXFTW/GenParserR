@@ -135,6 +135,22 @@ stdio transport and a document selector for your INI files.
   enum/bitflag member, unterminated block) it adds modder-helpful warnings such
   as unresolved cross-file references and unknown modules.
 
+### Suppressing diagnostics per file
+
+If a file intentionally trips a diagnostic (e.g. it references definitions
+that live outside the workspace), opt that file out of specific codes with a
+pragma comment at file scope (outside any block):
+
+```ini
+; genparser-disable: unresolved-reference, unreachable-set
+```
+
+Codes may be separated by commas and/or spaces, the colon is optional, and
+multiple pragma lines accumulate. The code names are exactly what the editor
+shows on each diagnostic (e.g. `genparser(unresolved-reference)` in VS Code's
+hover and Problems panel). A misspelled code is flagged with an
+`unknown-suppression` hint so a typo never silently suppresses nothing.
+
 ### Known limitations / future work
 
 The full phase-by-phase plan and status lives in

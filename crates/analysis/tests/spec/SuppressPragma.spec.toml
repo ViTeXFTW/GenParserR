@@ -1,0 +1,16 @@
+# Expected behavior for SuppressPragma.ini: the `; genparser-disable: <codes>`
+# file-scope pragma drops the listed diagnostic codes from the whole file,
+# while every other code is unaffected.
+
+# `NoSuchImage` would be an unresolved-reference warning — suppressed.
+[[diag]]
+severity = "warning"
+code = "unresolved-reference"
+on = "NoSuchImage"
+absent = true
+
+# A code the pragma does not list still fires.
+[[diag]]
+severity = "warning"
+code = "unknown-field"
+on = "Bogus"

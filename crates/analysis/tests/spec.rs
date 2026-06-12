@@ -17,6 +17,7 @@
 //! code = "bad-enum"           # stable diagnostic code
 //! on = "test"                 # span must cover this *token*...
 //! nth = 1                     # ...its nth occurrence (optional, default 1)
+//! absent = false              # optional: assert the diagnostic is NOT emitted
 //! xfail = false               # optional: currently-expected-to-fail
 //!
 //! [[complete]]                # one expected completion set
@@ -62,6 +63,10 @@ struct DiagSpec {
     on: String,
     #[serde(default = "one")]
     nth: usize,
+    /// Invert the assertion: the diagnostic must *not* cover the token
+    /// (e.g. because a suppression pragma drops it).
+    #[serde(default)]
+    absent: bool,
     #[serde(default)]
     xfail: bool,
 }
@@ -189,10 +194,9 @@ fn check_diag(spec: &DiagSpec, search: &str, diags: &[genparser_analysis::Diagno
             && d.span.start <= target
             && target < d.span.end
     });
-    if hit {
-        Ok(())
-    } else {
-        Err(format!(
+    match (spec.absent, hit) {
+        (false, true) | (true, false) => Ok(()),
+        (false, false) => Err(format!(
             "expected {} `{}` covering `{}` (#{}) at byte {}; got: {}",
             spec.severity,
             spec.code,
@@ -200,7 +204,15 @@ fn check_diag(spec: &DiagSpec, search: &str, diags: &[genparser_analysis::Diagno
             spec.nth,
             target,
             render_diags(diags)
-        ))
+        )),
+        (true, true) => Err(format!(
+            "expected no {} `{}` covering `{}` (#{}), but one is emitted: {}",
+            spec.severity,
+            spec.code,
+            spec.on,
+            spec.nth,
+            render_diags(diags)
+        )),
     }
 }
 
