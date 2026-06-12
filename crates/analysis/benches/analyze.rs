@@ -165,6 +165,9 @@ fn bench_corpus_keystroke(c: &mut Criterion) {
             black_box(diagnostics::diagnose_with_cache(&analyzer, &inc, None, None, &mut cache))
         })
     });
+    group.bench_function("format_edits_ParticleSystem", |b| {
+        b.iter(|| black_box(genparser_analysis::format::format_edits(&parse, &src, "  ")))
+    });
     group.bench_function("semantic_tokens_range_ParticleSystem", |b| {
         // A ~60-line viewport in the middle of the file.
         let start = (src.len() / 2) as u32;

@@ -48,6 +48,11 @@ pub struct Backend {
     roots: Mutex<Vec<PathBuf>>,
     /// Position encoding negotiated at `initialize` (UTF-16 until then).
     encoding: OnceLock<PositionEnc>,
+    /// Whether `textDocument/formatting` is enabled, from the client's
+    /// `initializationOptions` (`{"format": {"enable": true}}`). Off by
+    /// default: format-on-save rewriting a whole hand-indented game file is
+    /// surprising, so formatting is opt-in per editor.
+    format_enabled: OnceLock<bool>,
     /// Monotonic id source for semantic-token results (delta bookkeeping).
     semantic_result_id: std::sync::atomic::AtomicU64,
 }
@@ -103,12 +108,17 @@ impl Backend {
             index: RwLock::new(WorkspaceIndex::new()),
             roots: Mutex::new(Vec::new()),
             encoding: OnceLock::new(),
+            format_enabled: OnceLock::new(),
             semantic_result_id: std::sync::atomic::AtomicU64::new(1),
         }
     }
 
     fn enc(&self) -> PositionEnc {
         self.encoding.get().copied().unwrap_or_default()
+    }
+
+    fn format_enabled(&self) -> bool {
+        self.format_enabled.get().copied().unwrap_or(false)
     }
 
     fn next_semantic_id(&self) -> u64 {
@@ -266,6 +276,18 @@ impl LanguageServer for Backend {
         let (enc, enc_kind) = convert::negotiate_encoding(&params.capabilities);
         let _ = self.encoding.set(enc);
 
+        // Editor-facing settings arrive as `initializationOptions`; a change
+        // requires a client restart (the VS Code extension does this
+        // automatically). Currently just `{"format": {"enable": bool}}`.
+        let format_enabled = params
+            .initialization_options
+            .as_ref()
+            .and_then(|v| v.get("format"))
+            .and_then(|f| f.get("enable"))
+            .and_then(|e| e.as_bool())
+            .unwrap_or(false);
+        let _ = self.format_enabled.set(format_enabled);
+
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "genparser-lsp".into(),
@@ -300,7 +322,9 @@ impl LanguageServer for Backend {
                     prepare_provider: Some(true),
                     work_done_progress_options: Default::default(),
                 })),
-                document_formatting_provider: Some(OneOf::Left(true)),
+                // Only advertised when opted in, so format-on-save in clients
+                // never invokes a formatter the user didn't ask for.
+                document_formatting_provider: format_enabled.then_some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Options(
                     CodeActionOptions {
                         code_action_kinds: Some(vec![CodeActionKind::QUICKFIX]),
@@ -357,36 +381,66 @@ impl LanguageServer for Backend {
         {
             let Some(mut entry) = self.docs.get_mut(&uri) else { return };
             let entry = entry.value_mut();
-            // Each change applies to the text produced by the previous one.
-            // The parse is kept in lockstep via incremental reparse, so the
-            // cost per keystroke is the edited block, not the whole file.
-            for change in params.content_changes {
-                match change.range {
-                    Some(range) => {
-                        let start = convert::position_to_offset(&entry.rope, range.start, enc);
-                        let old_end = convert::position_to_offset(&entry.rope, range.end, enc);
-                        convert::apply_change(&mut entry.rope, Some(range), &change.text, enc);
-                        let new_text: Arc<str> = entry.rope.to_string().into();
-                        let edit = Edit {
-                            start: start as usize,
-                            old_end: old_end as usize,
-                            new_len: change.text.len(),
-                        };
-                        let (parse, _strategy) =
-                            self.analyzer
-                                .reparse(&entry.parse, &entry.text, &new_text, edit);
-                        entry.parse = Arc::new(parse);
-                        entry.text = new_text;
-                    }
-                    None => {
-                        // Full-document replacement.
-                        entry.rope = Rope::from_str(&change.text);
-                        entry.text = change.text.into();
-                        entry.parse = Arc::new(self.analyzer.parse(&entry.text));
+            // Bulk batches (e.g. format-on-save applying coalesced reindent
+            // edits) take a different path: incremental reparse needs the full
+            // old/new text per edit, so running it per change is
+            // O(changes × file). Apply every delta to the rope first, then
+            // rebuild the text and parse once — one full parse beats a pile
+            // of incremental ones. Triggers on many changes or on a
+            // multi-change batch with a large total payload (a few coalesced
+            // format edits can each carry kilobytes).
+            const BULK_CHANGE_THRESHOLD: usize = 8;
+            const BULK_TEXT_BYTES: usize = 32 * 1024;
+            let bulk = params.content_changes.len() > BULK_CHANGE_THRESHOLD
+                || (params.content_changes.len() > 1
+                    && params
+                        .content_changes
+                        .iter()
+                        .map(|c| c.text.len())
+                        .sum::<usize>()
+                        > BULK_TEXT_BYTES);
+            if bulk && params.content_changes.iter().all(|c| c.range.is_some()) {
+                for change in params.content_changes {
+                    convert::apply_change(&mut entry.rope, change.range, &change.text, enc);
+                }
+                entry.text = entry.rope.to_string().into();
+                entry.parse = Arc::new(self.analyzer.parse(&entry.text));
+                entry.version = version;
+            } else {
+                // Each change applies to the text produced by the previous
+                // one. The parse is kept in lockstep via incremental reparse,
+                // so the cost per keystroke is the edited block, not the
+                // whole file.
+                for change in params.content_changes {
+                    match change.range {
+                        Some(range) => {
+                            let start =
+                                convert::position_to_offset(&entry.rope, range.start, enc);
+                            let old_end =
+                                convert::position_to_offset(&entry.rope, range.end, enc);
+                            convert::apply_change(&mut entry.rope, Some(range), &change.text, enc);
+                            let new_text: Arc<str> = entry.rope.to_string().into();
+                            let edit = Edit {
+                                start: start as usize,
+                                old_end: old_end as usize,
+                                new_len: change.text.len(),
+                            };
+                            let (parse, _strategy) =
+                                self.analyzer
+                                    .reparse(&entry.parse, &entry.text, &new_text, edit);
+                            entry.parse = Arc::new(parse);
+                            entry.text = new_text;
+                        }
+                        None => {
+                            // Full-document replacement.
+                            entry.rope = Rope::from_str(&change.text);
+                            entry.text = change.text.into();
+                            entry.parse = Arc::new(self.analyzer.parse(&entry.text));
+                        }
                     }
                 }
+                entry.version = version;
             }
-            entry.version = version;
         }
         self.refresh(&uri).await;
     }
@@ -466,8 +520,19 @@ impl LanguageServer for Backend {
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        // Belt and braces for clients that call despite the capability being
+        // withheld (formatting is opt-in via initializationOptions).
+        if !self.format_enabled() {
+            return Ok(None);
+        }
         let uri = params.text_document.uri;
-        let Some((rope, parse)) = self.doc(&uri) else {
+        // `text` is kept in lockstep with `rope` by did_open/did_change, so no
+        // rope-to-string rebuild is needed here.
+        let Some((rope, text, parse)) = self
+            .docs
+            .get(&uri)
+            .map(|d| (d.rope.clone(), d.text.clone(), d.parse.clone()))
+        else {
             return Ok(None);
         };
         let indent = if params.options.insert_spaces {
@@ -475,7 +540,6 @@ impl LanguageServer for Backend {
         } else {
             "\t".to_string()
         };
-        let text = rope.to_string();
         let enc = self.enc();
         let edits = format::format_edits(&parse, &text, &indent)
             .into_iter()

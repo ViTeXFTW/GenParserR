@@ -83,10 +83,18 @@ validate the JSON and catch new false positives.
 
 The server speaks LSP over stdio, so any LSP-capable editor works.
 
+Document formatting (indentation normalization) is **opt-in**: the server only
+advertises the formatting capability when the client passes
+`initializationOptions = { "format": { "enable": true } }` at `initialize`.
+Real game files are wildly hand-indented, so an editor's format-on-save would
+otherwise rewrite whole files unasked.
+
 ### VS Code
 
 Use the bundled extension in `editors/vscode/` (see its README). It claims the
-`generals-ini` language id for `.ini` files and launches the server.
+`generals-ini` language id for `.ini` files and launches the server. Enable
+formatting with the `genparser.format.enable` setting (the extension restarts
+the server when `genparser.*` settings change).
 
 ### Neovim (nvim-lspconfig)
 
@@ -100,6 +108,7 @@ if not configs.genparser then
       filetypes = { "generals_ini" },     -- map your .ini files to this filetype
       root_dir = lspconfig.util.root_pattern(".git", "*.ini"),
       single_file_support = true,
+      init_options = { format = { enable = false } },  -- true to opt in to formatting
     },
   }
 end
@@ -111,6 +120,8 @@ lspconfig.genparser.setup({})
 ```toml
 [language-server.genparser]
 command = "genparser-lsp"
+# opt in to formatting:
+# config = { format = { enable = true } }
 
 [[language]]
 name = "generals-ini"

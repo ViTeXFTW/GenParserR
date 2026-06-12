@@ -90,9 +90,12 @@ def main() -> int:
         print(f"TIMEOUT waiting for {what}", file=sys.stderr)
         return None
 
-    # 1) initialize (with a workspace root so scan_workspace runs)
+    # 1) initialize (with a workspace root so scan_workspace runs). Formatting
+    #    is opt-in via initializationOptions; this session opts in so the
+    #    formatting checks below run, and step 10 verifies the default is off.
     send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
-          "params": {"capabilities": {}, "workspaceFolders": None, "rootUri": root_uri}})
+          "params": {"capabilities": {}, "workspaceFolders": None, "rootUri": root_uri,
+                     "initializationOptions": {"format": {"enable": True}}}})
     init = wait_for(lambda m: m.get("id") == 1 and "result" in m, "initialize result")
     assert init, "no initialize result"
     caps = init["result"]["capabilities"]
@@ -225,6 +228,13 @@ def main() -> int:
          [({"start": {"line": 2, "character": 0}, "end": {"line": 3, "character": 0}},
            "")],
          "Weapon A\n  PrimaryDamage = 1\nWeapon B\nEnd\n"),
+        # >8 changes takes the server's bulk path (one full reparse instead of
+        # per-change incremental) — the formatter-on-save shape.
+        ("bulk change batch (full-parse path)",
+         "Weapon A\nEnd\n",
+         [({"start": {"line": 1, "character": 0}, "end": {"line": 1, "character": 0}},
+           f"  Bogus{i} = 1\n") for i in range(1, 10)],
+         "Weapon A\n" + "".join(f"  Bogus{i} = 1\n" for i in range(9, 0, -1)) + "End\n"),
     ]
     for i, (name, initial, changes, final) in enumerate(cases):
         inc_uri = f"file:///test/inc{i}.ini"
@@ -357,15 +367,31 @@ def main() -> int:
     print("OK: semanticTokens/full/delta splices (and falls back on stale id)")
 
     # formatting: a misindented doc comes back normalized to scope depth.
+    # Nearby per-line edits are coalesced server-side, so verify by applying
+    # the edits rather than pinning their shapes.
     fmt_uri = "file:///test/fmt.ini"
-    open_doc(fmt_uri, "Object FmtTank\nMaxHealth = 1\n      Behavior = AutoHealBehavior ModuleTag_01\nHealingAmount = 5\n      End\nEnd\n")
+    fmt_src = "Object FmtTank\nMaxHealth = 1\n      Behavior = AutoHealBehavior ModuleTag_01\nHealingAmount = 5\n      End\nEnd\n"
+    open_doc(fmt_uri, fmt_src)
     send({"jsonrpc": "2.0", "id": 23, "method": "textDocument/formatting",
           "params": {"textDocument": {"uri": fmt_uri},
                      "options": {"tabSize": 2, "insertSpaces": True}}})
     fmt = wait_for(lambda m: m.get("id") == 23 and "result" in m, "formatting")
-    starts = sorted((e["range"]["start"]["line"], e["newText"]) for e in fmt["result"])
-    assert starts == [(1, "  "), (2, "  "), (3, "    "), (4, "  ")], starts
-    print("OK: formatting normalizes indentation to scope depth")
+
+    def pos_off(text, pos):  # ASCII docs: utf-16 char == byte offset
+        lines = text.split("\n")
+        return sum(len(l) + 1 for l in lines[:pos["line"]]) + pos["character"]
+
+    fmt_doc = fmt_src
+    for e in sorted(fmt["result"], key=lambda e: pos_off(fmt_src, e["range"]["start"]),
+                    reverse=True):
+        s, t = pos_off(fmt_src, e["range"]["start"]), pos_off(fmt_src, e["range"]["end"])
+        fmt_doc = fmt_doc[:s] + e["newText"] + fmt_doc[t:]
+    assert fmt_doc == ("Object FmtTank\n  MaxHealth = 1\n"
+                       "  Behavior = AutoHealBehavior ModuleTag_01\n"
+                       "    HealingAmount = 5\n  End\nEnd\n"), fmt_doc
+    assert len(fmt["result"]) == 1, \
+        f"adjacent reindent edits should coalesce, got {len(fmt['result'])}"
+    print("OK: formatting normalizes indentation to scope depth (coalesced)")
 
     # code actions: a misspelled enum member offers did-you-mean; an
     # unterminated block offers the missing End.
@@ -393,6 +419,64 @@ def main() -> int:
         proc.wait(timeout=5)
     except Exception:
         proc.kill()
+
+    # 10) a default-initialized server (no initializationOptions) must not
+    #     advertise formatting and must answer the request with null.
+    proc2 = subprocess.Popen(
+        [exe],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        bufsize=0,
+    )
+    q2: "queue.Queue" = queue.Queue()
+    threading.Thread(target=reader, args=(proc2.stdout, q2), daemon=True).start()
+
+    def send2(obj):
+        proc2.stdin.write(frame(obj))
+        proc2.stdin.flush()
+
+    def wait_for2(pred, what, timeout=15.0):
+        import time
+
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                msg = q2.get(timeout=deadline - time.time())
+            except queue.Empty:
+                break
+            if msg is None:
+                break
+            if pred(msg):
+                return msg
+        print(f"TIMEOUT waiting for {what}", file=sys.stderr)
+        return None
+
+    send2({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+           "params": {"capabilities": {}, "workspaceFolders": None, "rootUri": None}})
+    init2 = wait_for2(lambda m: m.get("id") == 1 and "result" in m, "default initialize")
+    assert init2, "no default initialize result"
+    caps2 = init2["result"]["capabilities"]
+    assert "documentFormattingProvider" not in caps2, \
+        "formatting must be off by default (no initializationOptions)"
+    send2({"jsonrpc": "2.0", "method": "initialized", "params": {}})
+    send2({"jsonrpc": "2.0", "method": "textDocument/didOpen",
+           "params": {"textDocument": {"uri": fmt_uri, "languageId": "generals-ini",
+                                       "version": 1, "text": "Object T\nMaxHealth = 1\nEnd\n"}}})
+    send2({"jsonrpc": "2.0", "id": 2, "method": "textDocument/formatting",
+           "params": {"textDocument": {"uri": fmt_uri},
+                      "options": {"tabSize": 2, "insertSpaces": True}}})
+    fmt2 = wait_for2(lambda m: m.get("id") == 2, "disabled formatting response")
+    assert fmt2 and fmt2.get("result") is None, \
+        f"disabled formatting must return null, got {fmt2}"
+    print("OK: formatting is opt-in (capability withheld + request answers null)")
+    send2({"jsonrpc": "2.0", "id": 99, "method": "shutdown", "params": None})
+    wait_for2(lambda m: m.get("id") == 99, "shutdown 2")
+    send2({"jsonrpc": "2.0", "method": "exit", "params": None})
+    try:
+        proc2.wait(timeout=5)
+    except Exception:
+        proc2.kill()
 
     print("\nALL E2E CHECKS PASSED")
     return 0

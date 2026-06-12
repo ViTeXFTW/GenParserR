@@ -31,6 +31,15 @@ export function activate(context: vscode.ExtensionContext) {
       // Re-index when any .ini in the workspace changes on disk.
       fileEvents: vscode.workspace.createFileSystemWatcher("**/*.ini"),
     },
+    // Evaluated on every (re)start, so a settings-triggered restart picks up
+    // the current values. The server reads these once at `initialize`.
+    initializationOptions: () => ({
+      format: {
+        enable: vscode.workspace
+          .getConfiguration("genparser")
+          .get<boolean>("format.enable", false),
+      },
+    }),
   };
 
   client = new LanguageClient(
@@ -46,6 +55,16 @@ export function activate(context: vscode.ExtensionContext) {
       void client?.stop();
     },
   });
+
+  // Server settings (initializationOptions, server path) are read once at
+  // startup, so any genparser.* change needs a clean restart to apply.
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("genparser")) {
+        void client?.restart();
+      }
+    })
+  );
 }
 
 export function deactivate(): Thenable<void> | undefined {

@@ -125,14 +125,25 @@ schema.json ──embedded──▶ schema ──▶ analysis ──▶ server
   `DocumentState`s (`ropey` rope + matching `text: Arc<str>` + cached parse +
   version + diagnostics cache; INCREMENTAL sync — `did_change` applies each
   delta to the rope and keeps the parse in lockstep via `Analyzer::reparse`,
-  so a keystroke costs the edited block, not the file; `refresh` only runs
-  cached diagnostics and publishes; read-only requests reuse the cached
-  parse), the shared `Analyzer`, and the `WorkspaceIndex`. `convert.rs` does
-  byte-offset ↔ LSP position mapping in the position encoding negotiated at
-  `initialize` (UTF-8 when the client offers it, else the UTF-16 baseline).
-  Advertises `semanticTokens` `full` **and** `range`. Phase-3 numbers
-  (`docs/phase3-incremental.md`): keystroke on the 61k-line
-  ParticleSystem.ini ≈ 147 µs vs 44 ms full reparse.
+  so a keystroke costs the edited block, not the file; a batch of >8 deltas
+  or a multi-delta batch totalling >32 KB — the format-on-save shape —
+  instead applies all deltas to the rope and does **one** full parse, since
+  per-delta incremental needs a full-text rebuild per change; the formatter
+  itself coalesces reindent edits closer than 512 unchanged bytes
+  (`format::COALESCE_GAP`), so a mass reformat returns a handful of edits,
+  not one per line — applying tens of thousands of discrete edits in the
+  editor is the slow part; `refresh` only runs cached diagnostics and
+  publishes;
+  read-only requests reuse the cached parse), the shared `Analyzer`, and the
+  `WorkspaceIndex`. `convert.rs` does byte-offset ↔ LSP position mapping in
+  the position encoding negotiated at `initialize` (UTF-8 when the client
+  offers it, else the UTF-16 baseline). Advertises `semanticTokens` `full`
+  **and** `range`. Formatting is **opt-in**: the capability is advertised
+  only when `initializationOptions` carries `{"format": {"enable": true}}`
+  (the VS Code setting `genparser.format.enable`, default off — real game
+  files are wildly hand-indented, so format-on-save must never fire
+  unasked). Phase-3 numbers (`docs/phase3-incremental.md`): keystroke on the
+  61k-line ParticleSystem.ini ≈ 147 µs vs 44 ms full reparse.
 
 ### Two concepts worth understanding before editing
 

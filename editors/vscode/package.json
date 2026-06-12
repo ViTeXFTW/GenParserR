@@ -45,6 +45,11 @@
           "default": "",
           "markdownDescription": "Absolute path to the `genparser-lsp` server binary. If empty, the extension uses the bundled binary under `server/`, then falls back to `genparser-lsp` on your PATH."
         },
+        "genparser.format.enable": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Enable document formatting (indentation normalization). When off — the default — the server does not advertise the formatting capability, so `#editor.formatOnSave#` will not invoke it for Generals INI files. Changing this restarts the language server."
+        },
         "genparser.trace.server": {
           "type": "string",
           "enum": [
