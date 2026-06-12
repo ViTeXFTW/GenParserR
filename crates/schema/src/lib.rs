@@ -113,9 +113,11 @@ pub struct SubBlock {
 pub struct ModuleSlot {
     /// The field keyword introducing the slot (`Draw`, `Body`, `Behavior`, ...).
     pub keyword: String,
-    /// The module interface modules in this slot must implement. Used to filter
-    /// completions to modules valid for the slot.
-    pub interface: String,
+    /// The module interfaces that are accepted in this slot. A module is valid
+    /// here when `module.interfaces` and `slot.accepts` share at least one entry.
+    /// Driven by the engine's `findModuleInterfaceMask` / interface-mask checks
+    /// in `ThingTemplate::parseModuleName`.
+    pub accepts: Vec<String>,
     #[serde(default)]
     pub doc: Option<String>,
 }

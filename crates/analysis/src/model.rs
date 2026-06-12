@@ -2,6 +2,12 @@
 //! `MODULE`), determine which schema entity it is and look up fields / slots.
 
 use genparser_schema::{BlockType, Field, ModuleSlot, ModuleType, SubBlock};
+
+/// Returns true when `module` implements at least one of the interfaces the
+/// `slot` accepts. Used to filter completions and validate module placement.
+pub fn module_fits_slot(module: &ModuleType, slot: &ModuleSlot) -> bool {
+    module.interfaces.iter().any(|i| slot.accepts.contains(i))
+}
 use genparser_syntax::ast::{Block, Module};
 use genparser_syntax::{SyntaxKind, SyntaxNode};
 

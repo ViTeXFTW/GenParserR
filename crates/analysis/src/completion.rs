@@ -10,7 +10,7 @@ use genparser_schema::ValueType;
 use genparser_syntax::ast::{Field, Module};
 use genparser_syntax::{Parse, SyntaxKind, SyntaxNode};
 
-use crate::model::scope_schema;
+use crate::model::{module_fits_slot, scope_schema};
 use crate::{Analyzer, WorkspaceIndex};
 
 /// The role of a completion item, mapped to LSP `CompletionItemKind` by the server.
@@ -56,7 +56,7 @@ pub fn complete(
             key,
             value_index,
         } => field_value_completions(analyzer, &scope_node, &key, value_index, index),
-        PosContext::ModuleName => module_name_completions(analyzer),
+        PosContext::ModuleName { slot_accepts } => module_name_completions(analyzer, &slot_accepts),
     }
 }
 
@@ -72,8 +72,9 @@ enum PosContext {
         key: String,
         value_index: usize,
     },
-    /// Completing a module type name after a slot `=`.
-    ModuleName,
+    /// Completing a module type name after a slot `=`. Carries the slot's
+    /// accepted interfaces so completions can be filtered to valid modules only.
+    ModuleName { slot_accepts: Vec<String> },
 }
 
 fn classify_position(analyzer: &Analyzer, root: &SyntaxNode, offset: u32) -> PosContext {
@@ -114,17 +115,18 @@ fn classify_position(analyzer: &Analyzer, root: &SyntaxNode, offset: u32) -> Pos
         // module slot of the parent block.
         if on_header_line(&module_node, offset) && after_equals(&module_node, offset) {
             let parent = enclosing_scope(&module_node).map(|p| scope_schema(analyzer, &p));
-            let is_real = Module(module_node.clone())
+            let slot_accepts = Module(module_node.clone())
                 .slot()
-                .map(|s| {
-                    parent
-                        .as_ref()
-                        .map(|p| p.module_slots().iter().any(|ms| ms.keyword == s.text()))
-                        .unwrap_or(false)
-                })
-                .unwrap_or(false);
-            if is_real {
-                return PosContext::ModuleName;
+                .and_then(|s| {
+                    parent.as_ref().and_then(|p| {
+                        p.module_slots()
+                            .iter()
+                            .find(|ms| ms.keyword == s.text())
+                            .map(|ms| ms.accepts.clone())
+                    })
+                });
+            if let Some(accepts) = slot_accepts {
+                return PosContext::ModuleName { slot_accepts: accepts };
             }
         }
         // Otherwise we're inside the module body -> completing a field key.
@@ -233,11 +235,15 @@ fn completions_for_type(
     }
 }
 
-fn module_name_completions(analyzer: &Analyzer) -> Vec<Completion> {
+fn module_name_completions(analyzer: &Analyzer, slot_accepts: &[String]) -> Vec<Completion> {
     analyzer
         .schema()
         .modules
         .iter()
+        .filter(|m| {
+            slot_accepts.is_empty()
+                || m.interfaces.iter().any(|i| slot_accepts.contains(i))
+        })
         .map(|m| Completion {
             label: m.name.clone(),
             kind: CompletionKind::Module,

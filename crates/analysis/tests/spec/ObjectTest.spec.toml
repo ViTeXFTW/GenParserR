@@ -23,10 +23,11 @@ severity = "warning"
 code = "missing-condition"
 on = "WeaponSet"
 
-# After `Draw =` -> offer draw modules.
+# After `Draw =` -> offer draw modules only; Body/Behavior modules excluded.
 [[complete]]
 at = "$1"
 includes = ["W3DModelDraw"]
+excludes = ["ActiveBody", "PhysicsBehavior"]
 
 # After `Weapon =` inside a WeaponSet -> offer the weapon slot enums.
 [[complete]]
@@ -38,3 +39,9 @@ includes = ["PRIMARY", "SECONDARY", "TERTIARY"]
 at = "$3"
 includes = ["OkToChangeModelColor"]
 excludes = ["ActiveBody", "W3DModelDraw"]
+
+# ActiveBody in a Draw slot -> engine crash -> error.
+[[diag]]
+severity = "error"
+code = "module-wrong-slot"
+on = "ActiveBody"

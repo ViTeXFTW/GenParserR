@@ -70,7 +70,7 @@
             ]
           },
           "parse_fn": "ArmorTemplate::parseArmorCoefficients",
-          "doc": "`<DamageType> <Percent>` \u2014 damage multiplier for that damage type."
+          "doc": "`<DamageType> <Percent>` — damage multiplier for that damage type."
         }
       ],
       "module_slots": []
@@ -2289,23 +2289,38 @@
       "module_slots": [
         {
           "keyword": "Draw",
-          "interface": "Draw",
-          "doc": "Rendering module (e.g. W3DModelDraw)."
+          "doc": "Rendering module (e.g. W3DModelDraw).",
+          "accepts": [
+            "Draw"
+          ]
         },
         {
           "keyword": "Body",
-          "interface": "Body",
-          "doc": "Health/body module (e.g. ActiveBody)."
+          "doc": "Health/body module (e.g. ActiveBody).",
+          "accepts": [
+            "Body"
+          ]
         },
         {
           "keyword": "Behavior",
-          "interface": "Behavior",
-          "doc": "Behavior/update/upgrade module."
+          "doc": "Behavior/update/upgrade module.",
+          "accepts": [
+            "Behavior",
+            "Update",
+            "Upgrade",
+            "Die",
+            "Collide",
+            "Contain",
+            "Create",
+            "Damage"
+          ]
         },
         {
           "keyword": "ClientUpdate",
-          "interface": "ClientUpdate",
-          "doc": "Client-side update module."
+          "doc": "Client-side update module.",
+          "accepts": [
+            "ClientUpdate"
+          ]
         }
       ],
       "sub_blocks": [
@@ -3352,23 +3367,38 @@
       "module_slots": [
         {
           "keyword": "Draw",
-          "interface": "Draw",
-          "doc": "Rendering module (e.g. W3DModelDraw)."
+          "doc": "Rendering module (e.g. W3DModelDraw).",
+          "accepts": [
+            "Draw"
+          ]
         },
         {
           "keyword": "Body",
-          "interface": "Body",
-          "doc": "Health/body module (e.g. ActiveBody)."
+          "doc": "Health/body module (e.g. ActiveBody).",
+          "accepts": [
+            "Body"
+          ]
         },
         {
           "keyword": "Behavior",
-          "interface": "Behavior",
-          "doc": "Behavior/update/upgrade module."
+          "doc": "Behavior/update/upgrade module.",
+          "accepts": [
+            "Behavior",
+            "Update",
+            "Upgrade",
+            "Die",
+            "Collide",
+            "Contain",
+            "Create",
+            "Damage"
+          ]
         },
         {
           "keyword": "ClientUpdate",
-          "interface": "ClientUpdate",
-          "doc": "Client-side update module."
+          "doc": "Client-side update module.",
+          "accepts": [
+            "ClientUpdate"
+          ]
         }
       ],
       "sub_blocks": [
@@ -35465,7 +35495,7 @@
           "value": 44
         }
       ],
-      "doc": "ObjectStatusTypes \u2014 runtime status bits objects can carry/grant"
+      "doc": "ObjectStatusTypes — runtime status bits objects can carry/grant"
     },
     {
       "id": "model_condition",
@@ -35943,7 +35973,7 @@
           "value": 117
         }
       ],
-      "doc": "ModelConditionFlagType \u2014 drives ConditionState selection in draw modules"
+      "doc": "ModelConditionFlagType — drives ConditionState selection in draw modules"
     },
     {
       "id": "static_game_lod",

@@ -20,7 +20,7 @@ use genparser_schema::{RefKind, ValueType};
 use genparser_syntax::ast::{Block, Field, Module};
 use genparser_syntax::{Parse, SyntaxKind, SyntaxNode, SyntaxToken};
 
-use crate::model::{scope_schema, ScopeSchema};
+use crate::model::{module_fits_slot, scope_schema, ScopeSchema};
 use crate::{Analyzer, Span, WorkspaceIndex};
 
 /// Severity of a diagnostic, mapped to LSP severities by the server.
@@ -87,6 +87,7 @@ pub const KNOWN_CODES: &[&str] = &[
     "bad-flag",
     "unresolved-reference",
     "unknown-suppression",
+    "module-wrong-slot",
 ];
 
 /// The head word of the in-file suppression pragma comment.
@@ -554,7 +555,32 @@ impl<'a> Ctx<'a> {
         let inner = if is_real_module {
             if let Some(name) = module.module_name() {
                 match self.analyzer.module(name.text()) {
-                    Some(_) => {
+                    Some(module_type) => {
+                        // Check that the module implements an interface accepted
+                        // by this slot. The engine crashes on a mismatch
+                        // (ThingTemplate::parseModuleName, ThingTemplate.cpp).
+                        if let Some(slot_token) = module.slot() {
+                            if let Some(slot) = parent
+                                .module_slots()
+                                .iter()
+                                .find(|ms| ms.keyword == slot_token.text())
+                            {
+                                if !module_fits_slot(module_type, slot) {
+                                    self.error(
+                                        &name,
+                                        "module-wrong-slot",
+                                        format!(
+                                            "module `{}` cannot be placed in a `{}` slot; \
+                                             it implements {:?} but the slot accepts {:?}",
+                                            name.text(),
+                                            slot.keyword,
+                                            module_type.interfaces,
+                                            slot.accepts,
+                                        ),
+                                    );
+                                }
+                            }
+                        }
                         // ThingTemplate.cpp: "there must be a module tag
                         // present, and it must be unique across all modules".
                         if module.tag().is_none() {
