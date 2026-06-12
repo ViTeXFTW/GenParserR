@@ -1865,7 +1865,8 @@
         {
           "name": "BuildVariations",
           "value_type": {
-            "kind": "ascii_string_list"
+            "kind": "reference_list",
+            "ref_kind": "object"
           },
           "parse_fn": "INI::parseAsciiStringVector",
           "doc": null
@@ -3649,7 +3650,8 @@
         {
           "name": "BuildVariations",
           "value_type": {
-            "kind": "ascii_string_list"
+            "kind": "reference_list",
+            "ref_kind": "object"
           },
           "parse_fn": "INI::parseAsciiStringVector",
           "doc": null
