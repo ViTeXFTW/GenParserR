@@ -89,6 +89,7 @@ pub const KNOWN_CODES: &[&str] = &[
     "unknown-suppression",
     "module-wrong-slot",
     "duplicate-module-tag",
+    "editor-default-module",
 ];
 
 /// The head word of the in-file suppression pragma comment.
@@ -602,7 +603,29 @@ impl<'a> Ctx<'a> {
                                     ),
                                 );
                             } else {
-                                self.tag_seen.insert(tag_text);
+                                self.tag_seen.insert(tag_text.clone());
+                            }
+                            // World Builder inserts these three module tags into
+                            // every new Object it creates. In map/solo.ini they
+                            // should almost always be removed.
+                            const EDITOR_DEFAULTS: [&str; 3] = [
+                                "ModuleTag_DefaultDestroyDie",
+                                "ModuleTag_DefaultInactiveBody",
+                                "ModuleTag_DefaultW3DDefaultDraw",
+                            ];
+                            if self.file.is_some_and(is_override_layer)
+                                && EDITOR_DEFAULTS
+                                    .iter()
+                                    .any(|d| d.eq_ignore_ascii_case(&tag_text))
+                            {
+                                self.hint(
+                                    &tag_tok,
+                                    "editor-default-module",
+                                    format!(
+                                        "World Builder adds `{tag_text}` to every new object; \
+                                         consider removing it with `RemoveModule {tag_text}`"
+                                    ),
+                                );
                             }
                         } else {
                             self.warning(

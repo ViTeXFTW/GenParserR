@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 
 use genparser_schema::{RefKind, ValueType};
-use genparser_syntax::ast::{Block, Field};
+use genparser_syntax::ast::{Block, Field, Module};
 use genparser_syntax::{Parse, SyntaxKind, SyntaxNode};
 
 use crate::model::{scope_schema, ScopeSchema};
@@ -65,6 +65,11 @@ pub struct WorkspaceIndex {
     /// Bumped whenever the *name set* changes (not mere span shifts), so
     /// consumers (the per-block diagnostics cache) can invalidate cheaply.
     generation: u64,
+    /// Module tags per object (case-insensitive object name key).
+    /// Populated from all indexed files. Powers RemoveModule completions.
+    object_tags: HashMap<String, Vec<String>>,
+    /// Reverse map: file → (object_lower, tag) for removal on re-index.
+    file_tags: HashMap<String, Vec<(String, String)>>,
 }
 
 impl WorkspaceIndex {
@@ -165,6 +170,41 @@ impl WorkspaceIndex {
                 }
             }
         }
+    }
+
+    /// Replace module-tag entries contributed by `file`.
+    /// Called alongside `set_file` so RemoveModule completions stay current.
+    pub fn set_file_tags(&mut self, file: &str, tags: Vec<(String, String)>) {
+        if let Some(old) = self.file_tags.remove(file) {
+            for (obj_lower, tag) in old {
+                if let Some(list) = self.object_tags.get_mut(&obj_lower) {
+                    list.retain(|t| !t.eq_ignore_ascii_case(&tag));
+                    if list.is_empty() {
+                        self.object_tags.remove(&obj_lower);
+                    }
+                }
+            }
+        }
+        let mut entries = Vec::with_capacity(tags.len());
+        for (obj_lower, tag) in &tags {
+            self.object_tags
+                .entry(obj_lower.clone())
+                .or_default()
+                .push(tag.clone());
+            entries.push((obj_lower.clone(), tag.clone()));
+        }
+        if !entries.is_empty() {
+            self.file_tags.insert(file.to_string(), entries);
+        }
+    }
+
+    /// Module tags defined on `object_name` (case-insensitive) across all
+    /// indexed files. Used to populate RemoveModule value completions.
+    pub fn module_tags_for_object<'a>(&'a self, name: &str) -> impl Iterator<Item = &'a str> {
+        self.object_tags
+            .get(&name.to_ascii_lowercase())
+            .into_iter()
+            .flat_map(|tags| tags.iter().map(|t| t.as_str()))
     }
 
     /// Is `name` defined for `kind` anywhere in the workspace?
@@ -326,6 +366,30 @@ pub fn definitions_in(analyzer: &Analyzer, parse: &Parse, _file: &str) -> Vec<De
                 kind,
                 span: name.text_range().into(),
             });
+        }
+    }
+    out
+}
+
+/// Collect `(object_name_lower, module_tag)` pairs from all Object blocks in
+/// a parsed file. Used to populate the RemoveModule completion index.
+pub fn module_tags_in(_analyzer: &Analyzer, parse: &Parse) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for node in parse.syntax().children() {
+        if node.kind() != SyntaxKind::BLOCK {
+            continue;
+        }
+        let block = Block(node.clone());
+        let Some(kw) = block.keyword() else { continue };
+        if !kw.text().eq_ignore_ascii_case("Object") {
+            continue;
+        }
+        let Some(name) = block.name() else { continue };
+        let name_lower = name.text().to_ascii_lowercase();
+        for child in node.children().filter(|n| n.kind() == SyntaxKind::MODULE) {
+            if let Some(tag) = Module(child).tag() {
+                out.push((name_lower.clone(), tag.text().to_string()));
+            }
         }
     }
     out

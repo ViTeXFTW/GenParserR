@@ -196,6 +196,29 @@ fn field_value_completions(
     value_index: usize,
     index: Option<&WorkspaceIndex>,
 ) -> Vec<Completion> {
+    // RemoveModule / ReplaceModule: suggest module tags from the origin object.
+    if key.eq_ignore_ascii_case("RemoveModule") || key.eq_ignore_ascii_case("ReplaceModule") {
+        if let Some(idx) = index {
+            let obj_name = Block(scope_node.clone())
+                .name()
+                .map(|n| n.text().to_string())
+                .unwrap_or_default();
+            if !obj_name.is_empty() {
+                let tags: Vec<Completion> = idx
+                    .module_tags_for_object(&obj_name)
+                    .map(|tag| Completion {
+                        label: tag.to_string(),
+                        kind: CompletionKind::Reference,
+                        detail: Some("module tag".into()),
+                        insert: None,
+                    })
+                    .collect();
+                if !tags.is_empty() {
+                    return tags;
+                }
+            }
+        }
+    }
     let scope = scope_schema(analyzer, scope_node);
     let Some(field) = scope.field(key) else {
         return Vec::new();

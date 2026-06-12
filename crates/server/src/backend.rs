@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use dashmap::DashMap;
 use genparser_analysis::diagnostics::DiagnosticsCache;
-use genparser_analysis::index::{definitions_in, references_in, WorkspaceIndex};
+use genparser_analysis::index::{definitions_in, module_tags_in, references_in, WorkspaceIndex};
 use genparser_analysis::nav::{definition_at, hover_at, reference_at, HoverInfo};
 use genparser_analysis::{actions, completion, diagnostics, format, outline, semantic, Analyzer};
 use genparser_syntax::{Edit, Parse};
@@ -86,7 +86,7 @@ fn canonical_uri(uri: Url) -> Url {
     uri
 }
 
-/// Walk `roots` and index every `.ini` file (definitions + reference sites).
+/// Walk `roots` and index every `.ini` file (definitions + reference sites + module tags).
 /// CPU/IO heavy — runs via `spawn_blocking` from [`Backend::scan_workspace`].
 fn scan_roots(
     analyzer: &Analyzer,
@@ -95,6 +95,7 @@ fn scan_roots(
     String,
     Vec<genparser_analysis::index::Definition>,
     Vec<genparser_analysis::index::ReferenceSite>,
+    Vec<(String, String)>,
 )> {
     let mut out = Vec::new();
     for root in roots {
@@ -114,7 +115,8 @@ fn scan_roots(
             let parse = analyzer.parse(&text);
             let defs = definitions_in(analyzer, &parse, uri.as_str());
             let refs = references_in(analyzer, &parse);
-            out.push((uri.to_string(), defs, refs));
+            let tags = module_tags_in(analyzer, &parse);
+            out.push((uri.to_string(), defs, refs, tags));
         }
     }
     out
@@ -170,9 +172,11 @@ impl Backend {
         // Reference sites never bump it.
         let defs = definitions_in(&self.analyzer, &parse, uri.as_str());
         let refs = references_in(&self.analyzer, &parse);
+        let tags = module_tags_in(&self.analyzer, &parse);
         if let Ok(mut idx) = self.index.write() {
             idx.set_file(uri.as_str(), defs);
             idx.set_file_refs(uri.as_str(), refs);
+            idx.set_file_tags(uri.as_str(), tags);
         }
 
         let enc = self.enc();
@@ -224,10 +228,11 @@ impl Backend {
             .map(|e| e.key().as_str().to_string())
             .collect();
         let Ok(mut idx) = self.index.write() else { return };
-        for (uri, defs, refs) in scanned {
+        for (uri, defs, refs, tags) in scanned {
             if !open.contains(&uri) {
                 idx.set_file(&uri, defs);
                 idx.set_file_refs(&uri, refs);
+                idx.set_file_tags(&uri, tags);
             }
         }
     }
