@@ -148,7 +148,35 @@ pub fn to_lsp_diagnostic(rope: &Rope, d: &AnDiagnostic, enc: PositionEnc) -> Dia
 }
 
 /// Convert an analysis completion to an LSP completion item.
-pub fn to_lsp_completion(c: Completion) -> CompletionItem {
+///
+/// When `snippets_supported` is true and the item carries an `insert` string,
+/// the response uses `insertText` with `InsertTextFormat::SNIPPET` instead of
+/// the plain label. Module-slot field completions (e.g. `Behavior = $0`) also
+/// set a `triggerSuggest` command so the module-name popup opens automatically
+/// after the `=` is inserted.
+pub fn to_lsp_completion(c: Completion, snippets_supported: bool) -> CompletionItem {
+    let (insert_text, insert_text_format, command) =
+        if snippets_supported {
+            if let Some(snippet) = c.insert {
+                // Slot completions like `Behavior = $0` — trigger the suggest
+                // popup so the module list appears immediately.
+                let cmd = if snippet.ends_with("= $0") {
+                    Some(Command {
+                        title: "Trigger Suggest".into(),
+                        command: "editor.action.triggerSuggest".into(),
+                        arguments: None,
+                    })
+                } else {
+                    None
+                };
+                (Some(snippet), Some(InsertTextFormat::SNIPPET), cmd)
+            } else {
+                (None, None, None)
+            }
+        } else {
+            (None, None, None)
+        };
+
     CompletionItem {
         label: c.label,
         kind: Some(match c.kind {
@@ -160,6 +188,9 @@ pub fn to_lsp_completion(c: Completion) -> CompletionItem {
             CompletionKind::Reference => CompletionItemKind::REFERENCE,
         }),
         detail: c.detail,
+        insert_text,
+        insert_text_format,
+        command,
         ..Default::default()
     }
 }

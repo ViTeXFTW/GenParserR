@@ -53,6 +53,9 @@ pub struct Backend {
     /// default: format-on-save rewriting a whole hand-indented game file is
     /// surprising, so formatting is opt-in per editor.
     format_enabled: OnceLock<bool>,
+    /// Whether the client supports snippet insertText (tab-stops, placeholders).
+    /// Captured at `initialize` from the client's completion-item capabilities.
+    snippet_support: OnceLock<bool>,
     /// Monotonic id source for semantic-token results (delta bookkeeping).
     semantic_result_id: std::sync::atomic::AtomicU64,
 }
@@ -127,6 +130,7 @@ impl Backend {
             roots: Mutex::new(Vec::new()),
             encoding: OnceLock::new(),
             format_enabled: OnceLock::new(),
+            snippet_support: OnceLock::new(),
             semantic_result_id: std::sync::atomic::AtomicU64::new(1),
         }
     }
@@ -316,6 +320,16 @@ impl LanguageServer for Backend {
             .unwrap_or(false);
         let _ = self.format_enabled.set(format_enabled);
 
+        let snippet_support = params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|td| td.completion.as_ref())
+            .and_then(|c| c.completion_item.as_ref())
+            .and_then(|ci| ci.snippet_support)
+            .unwrap_or(false);
+        let _ = self.snippet_support.set(snippet_support);
+
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "genparser-lsp".into(),
@@ -487,10 +501,11 @@ impl LanguageServer for Backend {
         };
         let offset = convert::position_to_offset(&rope, pos, self.enc());
         let idx = self.index.read().ok();
+        let snippets = self.snippet_support.get().copied().unwrap_or(false);
         let items: Vec<CompletionItem> =
             completion::complete(&self.analyzer, &parse, offset, idx.as_deref())
                 .into_iter()
-                .map(convert::to_lsp_completion)
+                .map(|c| convert::to_lsp_completion(c, snippets))
                 .collect();
         Ok(Some(CompletionResponse::Array(items)))
     }

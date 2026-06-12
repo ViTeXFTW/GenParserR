@@ -30,6 +30,11 @@ pub struct Completion {
     pub label: String,
     pub kind: CompletionKind,
     pub detail: Option<String>,
+    /// Optional LSP snippet string. When the client supports snippets, the
+    /// server uses this as `insertText` with `InsertTextFormat::SNIPPET`
+    /// instead of the plain `label`. `$0` marks the final cursor position;
+    /// `${N:placeholder}` marks tab-stops. `None` means plain-label insertion.
+    pub insert: Option<String>,
 }
 
 /// Compute completions at byte `offset`.
@@ -42,14 +47,7 @@ pub fn complete(
     let root = parse.syntax();
     let ctx = classify_position(analyzer, &root, offset);
     match ctx {
-        PosContext::TopLevel => analyzer
-            .block_names()
-            .map(|n| Completion {
-                label: n.to_string(),
-                kind: CompletionKind::Block,
-                detail: Some("block".into()),
-            })
-            .collect(),
+        PosContext::TopLevel => top_level_completions(analyzer),
         PosContext::FieldKey(scope_node) => field_key_completions(analyzer, &scope_node),
         PosContext::FieldValue {
             scope_node,
@@ -165,20 +163,27 @@ fn field_key_completions(analyzer: &Analyzer, scope_node: &SyntaxNode) -> Vec<Co
             label: f.name.clone(),
             kind: CompletionKind::Field,
             detail: Some(type_label(&f.value_type)),
+            insert: None,
         })
         .collect();
     for slot in scope.module_slots() {
+        // Snippet: `Slot = $0` so cursor lands at the module-name position.
+        let insert = Some(format!("{} = $0", slot.keyword));
         out.push(Completion {
             label: slot.keyword.clone(),
             kind: CompletionKind::Field,
             detail: Some("module slot".into()),
+            insert,
         });
     }
     for sub in scope.sub_blocks() {
+        // Snippet: sub-block header + indented body + End.
+        let insert = Some(format!("{}\n\t$0\nEnd", sub.keyword));
         out.push(Completion {
             label: sub.keyword.clone(),
             kind: CompletionKind::Block,
             detail: Some("sub-block".into()),
+            insert,
         });
     }
     out
@@ -216,6 +221,7 @@ fn completions_for_type(
                 label: v.to_string(),
                 kind: CompletionKind::Value,
                 detail: None,
+                insert: None,
             })
             .collect(),
         ValueType::Enum { value_set } | ValueType::BitFlags { value_set } => analyzer
@@ -227,6 +233,7 @@ fn completions_for_type(
                         label: m.name.clone(),
                         kind: CompletionKind::EnumMember,
                         detail: Some(value_set.clone()),
+                        insert: None,
                     })
                     .collect()
             })
@@ -239,6 +246,7 @@ fn completions_for_type(
                             label: n.to_string(),
                             kind: CompletionKind::Reference,
                             detail: Some(format!("{ref_kind:?}")),
+                            insert: None,
                         })
                         .collect()
                 })
@@ -249,11 +257,36 @@ fn completions_for_type(
                 label: n.to_string(),
                 kind: CompletionKind::Reference,
                 detail: Some(format!("{ref_kind:?} (engine builtin)")),
+                insert: None,
             }));
             out
         }
         _ => Vec::new(),
     }
+}
+
+fn top_level_completions(analyzer: &Analyzer) -> Vec<Completion> {
+    analyzer
+        .schema()
+        .blocks
+        .iter()
+        .map(|b| {
+            let insert = if !b.terminated {
+                // Single-line directive — no End needed.
+                None
+            } else if b.named {
+                Some(format!("{} ${{1:Name}}\n\t$0\nEnd", b.name))
+            } else {
+                Some(format!("{}\n\t$0\nEnd", b.name))
+            };
+            Completion {
+                label: b.name.clone(),
+                kind: CompletionKind::Block,
+                detail: Some("block".into()),
+                insert,
+            }
+        })
+        .collect()
 }
 
 fn module_name_completions(analyzer: &Analyzer, slot_accepts: &[String]) -> Vec<Completion> {
@@ -265,10 +298,16 @@ fn module_name_completions(analyzer: &Analyzer, slot_accepts: &[String]) -> Vec<
             slot_accepts.is_empty()
                 || m.interfaces.iter().any(|i| slot_accepts.contains(i))
         })
-        .map(|m| Completion {
-            label: m.name.clone(),
-            kind: CompletionKind::Module,
-            detail: Some("module".into()),
+        .map(|m| {
+            // Snippet: module name + placeholder tag + indented body + End.
+            // Also satisfies missing-module-tag in one accept.
+            let insert = Some(format!("{} ${{1:ModuleTag_01}}\n\t$0\nEnd", m.name));
+            Completion {
+                label: m.name.clone(),
+                kind: CompletionKind::Module,
+                detail: Some("module".into()),
+                insert,
+            }
         })
         .collect()
 }
