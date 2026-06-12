@@ -104,6 +104,11 @@ pub struct SubBlock {
     /// When set, `fields`/`sub_blocks` need not be declared.
     #[serde(default)]
     pub reenters_parent: bool,
+    /// Type of the header argument that follows `=` when opening this sub-block
+    /// (e.g. `BitFlags { model_condition }` for ConditionState). `None` when
+    /// the sub-block has no header argument or the type is not yet modeled.
+    #[serde(default)]
+    pub argument_type: Option<ValueType>,
     #[serde(default)]
     pub doc: Option<String>,
 }

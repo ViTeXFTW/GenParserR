@@ -57,6 +57,9 @@ pub fn complete(
             value_index,
         } => field_value_completions(analyzer, &scope_node, &key, value_index, index, file),
         PosContext::ModuleName { slot_accepts } => module_name_completions(analyzer, &slot_accepts),
+        PosContext::SubBlockArg { argument_type } => {
+            completions_for_type(analyzer, &argument_type, 0, index)
+        }
     }
 }
 
@@ -75,6 +78,8 @@ enum PosContext {
     /// Completing a module type name after a slot `=`. Carries the slot's
     /// accepted interfaces so completions can be filtered to valid modules only.
     ModuleName { slot_accepts: Vec<String> },
+    /// Completing the argument of a sub-block header (after `=`).
+    SubBlockArg { argument_type: genparser_schema::ValueType },
 }
 
 fn classify_position(analyzer: &Analyzer, root: &SyntaxNode, offset: u32) -> PosContext {
@@ -115,18 +120,28 @@ fn classify_position(analyzer: &Analyzer, root: &SyntaxNode, offset: u32) -> Pos
         // module slot of the parent block.
         if on_header_line(&module_node, offset) && after_equals(&module_node, offset) {
             let parent = enclosing_scope(&module_node).map(|p| scope_schema(analyzer, &p));
-            let slot_accepts = Module(module_node.clone())
-                .slot()
-                .and_then(|s| {
-                    parent.as_ref().and_then(|p| {
-                        p.module_slots()
-                            .iter()
-                            .find(|ms| ms.keyword == s.text())
-                            .map(|ms| ms.accepts.clone())
-                    })
-                });
+            let slot = Module(module_node.clone()).slot();
+            let slot_accepts = slot.as_ref().and_then(|s| {
+                parent.as_ref().and_then(|p| {
+                    p.module_slots()
+                        .iter()
+                        .find(|ms| ms.keyword == s.text())
+                        .map(|ms| ms.accepts.clone())
+                })
+            });
             if let Some(accepts) = slot_accepts {
                 return PosContext::ModuleName { slot_accepts: accepts };
+            }
+            // Check for a sub-block with an argument_type (e.g. ConditionState = <flags>).
+            if let Some(arg_type) = slot.as_ref().and_then(|s| {
+                parent.as_ref().and_then(|p| {
+                    p.sub_blocks()
+                        .iter()
+                        .find(|sb| sb.keyword == s.text())
+                        .and_then(|sb| sb.argument_type.clone())
+                })
+            }) {
+                return PosContext::SubBlockArg { argument_type: arg_type };
             }
         }
         // Otherwise we're inside the module body -> completing a field key.
@@ -179,8 +194,12 @@ fn field_key_completions(analyzer: &Analyzer, scope_node: &SyntaxNode) -> Vec<Co
         });
     }
     for sub in scope.sub_blocks() {
-        // Snippet: sub-block header + indented body + End.
-        let insert = Some(format!("{}\n\t$0\nEnd", sub.keyword));
+        // Snippet: include `= ${1:NONE}` argument placeholder when the sub-block takes one.
+        let insert = if sub.argument_type.is_some() {
+            Some(format!("{} = ${{1:NONE}}\n\t$0\nEnd", sub.keyword))
+        } else {
+            Some(format!("{}\n\t$0\nEnd", sub.keyword))
+        };
         out.push(Completion {
             label: sub.keyword.clone(),
             kind: CompletionKind::Block,

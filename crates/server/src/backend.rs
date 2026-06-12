@@ -665,7 +665,7 @@ impl LanguageServer for Backend {
         let end = convert::position_to_offset(&rope, params.range.end, enc);
 
         let range_span = genparser_analysis::Span::new(start, end);
-        let mut fixes = {
+        let fixes = {
             let idx = self.index.read().ok();
             let diags = diagnostics::diagnose_with_cache(
                 &self.analyzer,
