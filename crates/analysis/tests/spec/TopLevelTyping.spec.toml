@@ -1,0 +1,9 @@
+# Partial block keyword at file scope -> block completions (inline typing popup).
+[[complete]]
+at = "$1"
+includes = ["FXList", "Object", "Weapon"]
+
+# Block-name position (after `Object `) -> should NOT offer block keywords.
+[[complete]]
+at = "$2"
+excludes = ["FXList", "Object", "Weapon"]

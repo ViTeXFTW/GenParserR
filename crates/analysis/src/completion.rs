@@ -7,10 +7,10 @@
 //!   workspace index) names of the referenced definition kind.
 
 use genparser_schema::ValueType;
-use genparser_syntax::ast::{Field, Module};
+use genparser_syntax::ast::{Block, Field, Module};
 use genparser_syntax::{Parse, SyntaxKind, SyntaxNode};
 
-use crate::model::{module_fits_slot, scope_schema};
+use crate::model::scope_schema;
 use crate::{Analyzer, WorkspaceIndex};
 
 /// The role of a completion item, mapped to LSP `CompletionItemKind` by the server.
@@ -133,8 +133,22 @@ fn classify_position(analyzer: &Analyzer, root: &SyntaxNode, offset: u32) -> Pos
         return PosContext::FieldKey(module_node);
     }
 
-    // Inside a BLOCK body (blank line) -> field key completion for that block.
+    // Inside a BLOCK body -> field key completion for that block.
+    // Special case: if the cursor is on the block's keyword token at file scope
+    // with no `=` before it, the user is typing a block keyword -> offer block
+    // names (TopLevel) so the popup appears while typing.
     if let Some(block_node) = ancestor_of_kind(&node, SyntaxKind::BLOCK) {
+        let is_top_level = block_node
+            .parent()
+            .map(|p| p.kind() == SyntaxKind::ROOT)
+            .unwrap_or(false);
+        if is_top_level && on_header_line(&block_node, offset) && !after_equals(&block_node, offset) {
+            if let Some(kw) = Block(block_node.clone()).keyword() {
+                if offset <= u32::from(kw.text_range().end()) {
+                    return PosContext::TopLevel;
+                }
+            }
+        }
         return PosContext::FieldKey(block_node);
     }
 
