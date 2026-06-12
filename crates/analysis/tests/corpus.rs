@@ -28,6 +28,21 @@ fn corpus_dir() -> Option<PathBuf> {
     dir.is_dir().then(|| dir.canonicalize().unwrap())
 }
 
+/// Extra corpora checked into `corpus/` by hand (e.g. `MapINI/`: map.ini /
+/// solo.ini override files shipped with overhaul maps). Optional — only
+/// scanned when present.
+fn extra_corpus_dirs() -> Vec<PathBuf> {
+    ["MapINI"]
+        .iter()
+        .filter_map(|name| {
+            let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../corpus")
+                .join(name);
+            dir.is_dir().then(|| dir.canonicalize().unwrap())
+        })
+        .collect()
+}
+
 fn ini_files(dir: &PathBuf) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![dir.clone()];
@@ -61,7 +76,20 @@ fn corpus_smoke() {
     let Some(dir) = corpus_dir() else {
         panic!("corpus not found; run scripts/fetch-corpus.ps1 first");
     };
-    let files = ini_files(&dir);
+    // (display-relative name, absolute path) across the main corpus and any
+    // hand-added extra corpora (map.ini overrides etc.).
+    let mut files: Vec<(String, PathBuf)> = ini_files(&dir)
+        .into_iter()
+        .map(|p| (p.strip_prefix(&dir).unwrap().display().to_string(), p))
+        .collect();
+    for extra in extra_corpus_dirs() {
+        let base = extra.parent().unwrap().to_path_buf();
+        files.extend(
+            ini_files(&extra)
+                .into_iter()
+                .map(|p| (p.strip_prefix(&base).unwrap().display().to_string(), p)),
+        );
+    }
     assert!(!files.is_empty(), "corpus dir exists but holds no .ini files");
 
     let analyzer = Analyzer::embedded();
@@ -71,8 +99,8 @@ fn corpus_smoke() {
     let mut wsindex = WorkspaceIndex::new();
     let mut panics: Vec<(String, String)> = Vec::new();
     let mut parses = Vec::with_capacity(files.len());
-    for path in &files {
-        let rel = path.strip_prefix(&dir).unwrap().display().to_string();
+    for (rel, path) in &files {
+        let rel = rel.clone();
         let text = read_lossy(path);
         let result = catch_unwind(AssertUnwindSafe(|| analyzer.parse(&text)));
         match result {
@@ -110,7 +138,7 @@ fn corpus_smoke() {
 
         let t1 = Instant::now();
         let diags = catch_unwind(AssertUnwindSafe(|| {
-            diagnostics::diagnose(&analyzer, &parse, Some(&wsindex))
+            diagnostics::diagnose(&analyzer, &parse, Some(&wsindex), Some(rel))
         }));
         let diag_t = t1.elapsed();
         let diags = match diags {

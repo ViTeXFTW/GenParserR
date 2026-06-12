@@ -1,0 +1,19 @@
+# Expected behavior for Map.ini (an override-layer file): redefining an
+# existing name yields an `overrides` hint on each definition (each sees the
+# other), no errors, and — pinned by the `map_override_*` unit tests in
+# diagnostics.rs — no `unreachable-set` warning, since the inherited
+# definition may carry the trigger module.
+
+no_errors = true
+
+[[diag]]
+severity = "hint"
+code = "overrides"
+on = "CINE_RangerPatch"
+nth = 1
+
+[[diag]]
+severity = "hint"
+code = "overrides"
+on = "CINE_RangerPatch"
+nth = 2

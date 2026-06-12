@@ -201,8 +201,6 @@ const CURATED_SUBBLOCKS: &[&str] = &[
     "ArmorSet",
     "WeaponSet",
     "AttackContactPoint",
-    "InheritableModule",
-    "OverrideableByLikeKind",
     // RadiusDecalTemplate scopes inside Behavior modules (deployment updates).
     "AttackAreaDecal",
     "TargetingReticleDecal",
@@ -233,6 +231,25 @@ impl SchemaOpeners {
             let entry = scope_children.entry(block.name.clone()).or_default();
             entry.extend(block.module_slots.iter().map(|s| s.keyword.clone()));
             add_subblocks(&mut scope_children, &block.name, &block.sub_blocks);
+        }
+        // Reentrant sub-blocks (`reenters_parent`, e.g. `Object`'s
+        // `AddModule`) re-enter the parent block's field table, so every
+        // child that opens inside the parent also opens inside them. Resolved
+        // after all blocks are added so the parent's child set is complete.
+        let reentrant: Vec<(String, String)> = schema
+            .blocks
+            .iter()
+            .flat_map(|b| {
+                b.sub_blocks
+                    .iter()
+                    .filter(|s| s.reenters_parent)
+                    .map(|s| (b.name.clone(), s.keyword.clone()))
+            })
+            .collect();
+        for (parent, sub) in reentrant {
+            if let Some(children) = scope_children.get(&parent).cloned() {
+                scope_children.entry(sub).or_default().extend(children);
+            }
         }
         // Module sub-blocks (e.g. AIUpdate's `Turret`) open inside module
         // scopes, where the oracle's enclosing head is the hosting *slot*

@@ -130,14 +130,16 @@ impl Field {
         header_tokens(&self.0).find(|t| token_kind(t) == SyntaxKind::WORD)
     }
 
-    /// The value tokens (WORD/STRING after the `=`), in order.
+    /// The value tokens after the key, in order. The engine lexes `=` as just
+    /// another separator (INI.cpp seps are `" \n\r\t="`), so `RemoveModule
+    /// ModuleTag_01` carries a value exactly like `Key = Value` does.
     pub fn value_tokens(&self) -> Vec<SyntaxToken> {
-        let mut seen_equals = false;
+        let mut seen_key = false;
         let mut out = Vec::new();
         for t in header_tokens(&self.0) {
             match token_kind(&t) {
-                SyntaxKind::EQUALS => seen_equals = true,
-                SyntaxKind::WORD | SyntaxKind::STRING if seen_equals => out.push(t),
+                SyntaxKind::WORD if !seen_key => seen_key = true,
+                SyntaxKind::WORD | SyntaxKind::STRING if seen_key => out.push(t),
                 _ => {}
             }
         }

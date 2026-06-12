@@ -86,7 +86,7 @@ fn bench_analyze(c: &mut Criterion) {
             b.iter(|| black_box(analyzer.parse(src)))
         });
         group.bench_with_input(BenchmarkId::new("diagnose", lines), &parse, |b, parse| {
-            b.iter(|| black_box(diagnostics::diagnose(&analyzer, parse, None)))
+            b.iter(|| black_box(diagnostics::diagnose(&analyzer, parse, None, None)))
         });
         group.bench_with_input(
             BenchmarkId::new("semantic_tokens", lines),
@@ -103,7 +103,7 @@ fn bench_analyze(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("keystroke", lines), &src, |b, src| {
             b.iter(|| {
                 let parse = analyzer.parse(src);
-                black_box(diagnostics::diagnose(&analyzer, &parse, None))
+                black_box(diagnostics::diagnose(&analyzer, &parse, None, None))
             })
         });
 
@@ -117,13 +117,13 @@ fn bench_analyze(c: &mut Criterion) {
             |b, (src, edited, parse)| {
                 let mut cache = DiagnosticsCache::new();
                 // Warm the cache as the server would have after the open.
-                diagnostics::diagnose_with_cache(&analyzer, parse, None, &mut cache);
+                diagnostics::diagnose_with_cache(&analyzer, parse, None, None, &mut cache);
                 let edit = Edit { start: at, old_end: at, new_len: 1 };
                 b.iter(|| {
                     let (inc, strategy) = analyzer.reparse(parse, src, edited, edit);
                     assert_eq!(strategy, Strategy::Spliced);
                     black_box(diagnostics::diagnose_with_cache(
-                        &analyzer, &inc, None, &mut cache,
+                        &analyzer, &inc, None, None, &mut cache,
                     ))
                 })
             },
@@ -153,16 +153,16 @@ fn bench_corpus_keystroke(c: &mut Criterion) {
     group.bench_function("keystroke_full_ParticleSystem", |b| {
         b.iter(|| {
             let p = analyzer.parse(&edited);
-            black_box(diagnostics::diagnose(&analyzer, &p, None))
+            black_box(diagnostics::diagnose(&analyzer, &p, None, None))
         })
     });
     group.bench_function("keystroke_incremental_ParticleSystem", |b| {
         let mut cache = DiagnosticsCache::new();
-        diagnostics::diagnose_with_cache(&analyzer, &parse, None, &mut cache);
+        diagnostics::diagnose_with_cache(&analyzer, &parse, None, None, &mut cache);
         b.iter(|| {
             let (inc, strategy) = analyzer.reparse(&parse, &src, &edited, edit);
             assert_eq!(strategy, Strategy::Spliced);
-            black_box(diagnostics::diagnose_with_cache(&analyzer, &inc, None, &mut cache))
+            black_box(diagnostics::diagnose_with_cache(&analyzer, &inc, None, None, &mut cache))
         })
     });
     group.bench_function("semantic_tokens_range_ParticleSystem", |b| {

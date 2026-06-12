@@ -93,15 +93,15 @@ fn check_edit_sequence(
             "structure\n{ctx}"
         );
         assert_eq!(inc.errors, reference.errors, "errors\n{ctx}");
-        let fresh = diagnostics::diagnose(analyzer, &reference, None);
+        let fresh = diagnostics::diagnose(analyzer, &reference, None, None);
         assert_eq!(
-            diagnostics::diagnose(analyzer, &inc, None),
+            diagnostics::diagnose(analyzer, &inc, None, None),
             fresh,
             "diagnostics\n{ctx}"
         );
         // The per-block cache, fed only spliced trees, must agree exactly.
         assert_eq!(
-            diagnostics::diagnose_with_cache(analyzer, &inc, None, &mut cache),
+            diagnostics::diagnose_with_cache(analyzer, &inc, None, None, &mut cache),
             fresh,
             "cached diagnostics\n{ctx}"
         );

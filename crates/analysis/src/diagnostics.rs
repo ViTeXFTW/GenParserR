@@ -35,15 +35,20 @@ pub struct Diagnostic {
 }
 
 /// Run all diagnostics over `parse`. `index` enables cross-file reference checks
-/// (pass `None` to skip them, e.g. for single-file analysis).
+/// (pass `None` to skip them, e.g. for single-file analysis). `file` is the
+/// document's name as it appears in the index (the server passes the URI);
+/// with both present, redefinitions of names defined elsewhere are recognized
+/// (map.ini override hints, duplicate-definition warnings, and override-aware
+/// whole-object checks).
 pub fn diagnose(
     analyzer: &Analyzer,
     parse: &Parse,
     index: Option<&WorkspaceIndex>,
+    file: Option<&str>,
 ) -> Vec<Diagnostic> {
     let mut out = parser_errors(parse);
     for node in parse.syntax().children() {
-        out.extend(diagnose_root_child(analyzer, index, &node));
+        out.extend(diagnose_root_child(analyzer, index, file, &node));
     }
     out
 }
@@ -68,11 +73,13 @@ fn parser_errors(parse: &Parse) -> Vec<Diagnostic> {
 fn diagnose_root_child(
     analyzer: &Analyzer,
     index: Option<&WorkspaceIndex>,
+    file: Option<&str>,
     node: &SyntaxNode,
 ) -> Vec<Diagnostic> {
     let mut ctx = Ctx {
         analyzer,
         index,
+        file,
         out: Vec::new(),
     };
     match node.kind() {
@@ -143,6 +150,7 @@ pub fn diagnose_with_cache(
     analyzer: &Analyzer,
     parse: &Parse,
     index: Option<&WorkspaceIndex>,
+    file: Option<&str>,
     cache: &mut DiagnosticsCache,
 ) -> Vec<Diagnostic> {
     let generation = index.map(|i| i.generation());
@@ -163,7 +171,7 @@ pub fn diagnose_with_cache(
             entry.diags.clone()
         } else {
             cache.misses += 1;
-            let absolute = diagnose_root_child(analyzer, index, &node);
+            let absolute = diagnose_root_child(analyzer, index, file, &node);
             Arc::new(
                 absolute
                     .into_iter()
@@ -194,7 +202,24 @@ pub fn diagnose_with_cache(
 struct Ctx<'a> {
     analyzer: &'a Analyzer,
     index: Option<&'a WorkspaceIndex>,
+    /// The document's name as keyed in `index` (None for single-file analysis).
+    file: Option<&'a str>,
     out: Vec<Diagnostic>,
+}
+
+/// Files the engine loads in `INI_LOAD_CREATE_OVERRIDES` mode: map-shipped
+/// `map.ini`/`solo.ini`. A block there redefining an existing name is merged
+/// over a *copy* of the existing template (ThingFactory.cpp `newOverride`),
+/// inheriting its modules and fields.
+fn is_override_layer(file: &str) -> bool {
+    file.rsplit(['/', '\\'])
+        .next()
+        .is_some_and(|name| name.eq_ignore_ascii_case("map.ini") || name.eq_ignore_ascii_case("solo.ini"))
+}
+
+/// The trailing path segment, for readable diagnostics (`file` may be a URI).
+fn short_file(file: &str) -> &str {
+    file.rsplit(['/', '\\']).next().unwrap_or(file)
 }
 
 impl<'a> Ctx<'a> {
@@ -209,13 +234,84 @@ impl<'a> Ctx<'a> {
                     format!("unknown block type `{}`", keyword.text()),
                 );
             }
+            let is_override_redefinition = self.check_redefinition(node);
             // Only plain `Object`s: an ObjectReskin inherits its parent's
-            // modules and sets, so neither side of the pairing is visible.
-            if keyword.text() == "Object" {
+            // modules and sets, so neither side of the pairing is visible —
+            // and a map.ini override redefinition inherits the base object's
+            // modules the same way.
+            if keyword.text() == "Object" && !is_override_redefinition {
                 self.check_set_reachability(node);
             }
         }
         self.walk(node, &schema);
+    }
+
+    /// Cross-file redefinition handling for named definition blocks, driven
+    /// purely by the index's name table (so it stays sound under the
+    /// per-block cache: the generation bumps whenever any file's definition
+    /// names change). Returns true when this block is a map.ini/solo.ini
+    /// *override* of a name defined elsewhere — the engine merges it over a
+    /// copy of the existing template (`INI_LOAD_CREATE_OVERRIDES`,
+    /// ThingFactory.cpp `newOverride`), so whole-object checks must not
+    /// assume the block is self-contained.
+    fn check_redefinition(&mut self, node: &SyntaxNode) -> bool {
+        let (Some(index), Some(file)) = (self.index, self.file) else {
+            return false;
+        };
+        let block = Block(node.clone());
+        let Some(kind) = block
+            .keyword()
+            .and_then(|k| self.analyzer.block(k.text()))
+            .and_then(|b| b.defines)
+        else {
+            return false;
+        };
+        let Some(name) = block.name() else { return false };
+        let my_span: Span = name.text_range().into();
+        // Definition sites other than this block (the index records the name
+        // token's span, so a same-file site at another span is a duplicate).
+        let others: Vec<&crate::index::Location> = index
+            .locations(kind, name.text())
+            .iter()
+            .filter(|l| l.file != file || l.span != my_span)
+            .collect();
+        if others.is_empty() {
+            return false;
+        }
+        if is_override_layer(file) {
+            // Name the base-game site when one exists.
+            let site = others
+                .iter()
+                .find(|l| !is_override_layer(&l.file))
+                .unwrap_or(&others[0]);
+            self.hint(
+                &name,
+                "overrides",
+                format!(
+                    "overrides `{}` defined in {} (map override: merged over the existing definition)",
+                    name.text(),
+                    short_file(&site.file)
+                ),
+            );
+            return true;
+        }
+        // Outside override mode the engine rejects duplicate object templates
+        // outright (ThingFactory.cpp "Duplicate factionunit"); other stores
+        // have laxer last-wins semantics, so only objects are flagged.
+        if kind == RefKind::Object {
+            if let Some(site) = others.iter().find(|l| !is_override_layer(&l.file)) {
+                self.warning(
+                    &name,
+                    "duplicate-definition",
+                    format!(
+                        "`{}` is already defined in {} — the engine rejects duplicate object definitions outside map overrides",
+                        name.text(),
+                        short_file(&site.file)
+                    ),
+                );
+            }
+        }
+        false
     }
 
     /// Block-local dead-code check: a `WeaponSet`/`ArmorSet` carrying the
@@ -681,6 +777,10 @@ impl<'a> Ctx<'a> {
         self.push(tok, Severity::Warning, code, message);
     }
 
+    fn hint(&mut self, tok: &SyntaxToken, code: &'static str, message: String) {
+        self.push(tok, Severity::Hint, code, message);
+    }
+
     fn push(&mut self, tok: &SyntaxToken, severity: Severity, code: &'static str, message: String) {
         self.out.push(Diagnostic {
             span: tok.text_range().into(),
@@ -729,7 +829,7 @@ mod tests {
 
     fn diags(src: &str) -> Vec<Diagnostic> {
         let a = Analyzer::embedded();
-        diagnose(&a, &a.parse(src), None)
+        diagnose(&a, &a.parse(src), None, None)
     }
 
     fn codes(src: &str) -> Vec<&'static str> {
@@ -836,7 +936,7 @@ End
         let src = "Weapon AK47\n  ClipSize = lots\nEnd\nWeapon B\nEnd\nWeapon C\nEnd\nWeapon D\n  PrimaryDamg = 1\nEnd\n";
         let parse = a.parse(src);
         let mut cache = DiagnosticsCache::new();
-        assert_eq!(diagnose_with_cache(&a, &parse, None, &mut cache), diagnose(&a, &parse, None));
+        assert_eq!(diagnose_with_cache(&a, &parse, None, None, &mut cache), diagnose(&a, &parse, None, None));
         assert_eq!(cache.stats().0, 0, "first run is all misses");
 
         // Edit inside the *last* block; the splice widens one sibling, so the
@@ -851,7 +951,7 @@ End
             genparser_syntax::Edit { start: at, old_end: at + 1, new_len: 1 },
         );
         assert_eq!(strategy, genparser_syntax::Strategy::Spliced);
-        assert_eq!(diagnose_with_cache(&a, &inc, None, &mut cache), diagnose(&a, &inc, None));
+        assert_eq!(diagnose_with_cache(&a, &inc, None, None, &mut cache), diagnose(&a, &inc, None, None));
         assert!(cache.stats().0 >= 1, "unchanged block must hit the cache");
     }
 
@@ -866,13 +966,71 @@ End
         let parse = a.parse(src);
         let mut cache = DiagnosticsCache::new();
         let g0 = index.generation();
-        let first = diagnose_with_cache(&a, &parse, Some(&index), &mut cache);
+        let first = diagnose_with_cache(&a, &parse, Some(&index), None, &mut cache);
         index.set_file("other.ini", crate::index::definitions_in(&a, &a.parse("Object X\nEnd\n"), "other.ini"));
         assert_ne!(index.generation(), g0);
-        let second = diagnose_with_cache(&a, &parse, Some(&index), &mut cache);
+        let second = diagnose_with_cache(&a, &parse, Some(&index), None, &mut cache);
         assert_eq!(first, second); // no reference fields here; same result
         let (hits, _) = cache.stats();
         assert_eq!(hits, 0, "generation bump must clear the cache");
+    }
+
+    #[test]
+    fn map_override_redefinition_hints_and_suppresses_reachability() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        let base = "Object AmericaInfantryRanger\nEnd\n";
+        index.set_file(
+            "data/AmericaInfantry.ini",
+            crate::index::definitions_in(&a, &a.parse(base), "data/AmericaInfantry.ini"),
+        );
+        // A map.ini redefinition with a PLAYER_UPGRADE WeaponSet and no
+        // trigger module in sight: the base object's modules are inherited
+        // (INI_LOAD_CREATE_OVERRIDES), so unreachable-set must stay silent.
+        let src = "Object AmericaInfantryRanger\n  WeaponSet\n    Conditions = PLAYER_UPGRADE\n    Weapon = PRIMARY DefaultRangerCombatRifle\n  End\nEnd\n";
+        let parse = a.parse(src);
+        index.set_file("maps/Map.ini", crate::index::definitions_in(&a, &parse, "maps/Map.ini"));
+
+        let diags = diagnose(&a, &parse, Some(&index), Some("maps/Map.ini"));
+        assert!(
+            diags.iter().any(|d| d.code == "overrides" && d.severity == Severity::Hint),
+            "expected `overrides` hint: {diags:?}"
+        );
+        assert!(
+            !diags.iter().any(|d| d.code == "unreachable-set"),
+            "override redefinition must skip reachability: {diags:?}"
+        );
+
+        // The base-game side is not an override and not a duplicate (the
+        // other site lives in an override layer): no diagnostics there.
+        let base_parse = a.parse(base);
+        let base_diags =
+            diagnose(&a, &base_parse, Some(&index), Some("data/AmericaInfantry.ini"));
+        assert!(
+            !base_diags
+                .iter()
+                .any(|d| d.code == "overrides" || d.code == "duplicate-definition"),
+            "base definition must stay clean: {base_diags:?}"
+        );
+    }
+
+    #[test]
+    fn duplicate_object_definition_outside_overrides_warns() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        let src = "Object Tank\nEnd\n";
+        index.set_file("a.ini", crate::index::definitions_in(&a, &a.parse(src), "a.ini"));
+        let parse = a.parse(src);
+        index.set_file("b.ini", crate::index::definitions_in(&a, &parse, "b.ini"));
+        // The engine DEBUG_CRASHes on duplicate object templates outside
+        // override mode (ThingFactory.cpp "Duplicate factionunit").
+        let diags = diagnose(&a, &parse, Some(&index), Some("b.ini"));
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.code == "duplicate-definition" && d.severity == Severity::Warning),
+            "expected duplicate-definition: {diags:?}"
+        );
     }
 
     #[test]

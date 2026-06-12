@@ -146,8 +146,13 @@ impl Backend {
         let enc = self.enc();
         let lsp_diags: Vec<Diagnostic> = {
             let idx = self.index.read().ok();
-            let diags =
-                diagnostics::diagnose_with_cache(&self.analyzer, &parse, idx.as_deref(), &mut cache);
+            let diags = diagnostics::diagnose_with_cache(
+                &self.analyzer,
+                &parse,
+                idx.as_deref(),
+                Some(uri.as_str()),
+                &mut cache,
+            );
             diags
                 .iter()
                 .map(|d| convert::to_lsp_diagnostic(&rope, d, enc))

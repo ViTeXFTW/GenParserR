@@ -107,11 +107,16 @@ pub fn scope_schema<'a>(analyzer: &'a Analyzer, node: &SyntaxNode) -> ScopeSchem
             else {
                 return ScopeSchema::Unknown;
             };
-            match scope_schema(analyzer, &parent)
+            let parent_schema = scope_schema(analyzer, &parent);
+            match parent_schema
                 .sub_blocks()
                 .iter()
                 .find(|s| s.keyword == slot.text())
             {
+                // A reentrant scope (`AddModule`, `InheritableModule`, ...)
+                // re-enters the parent's field table: validate and complete
+                // it exactly as the parent scope.
+                Some(sb) if sb.reenters_parent => parent_schema,
                 Some(sb) => ScopeSchema::SubBlock(sb),
                 None => ScopeSchema::Unknown,
             }

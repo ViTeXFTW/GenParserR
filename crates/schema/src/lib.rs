@@ -96,6 +96,14 @@ pub struct SubBlock {
     /// Sub-blocks nested inside this one.
     #[serde(default)]
     pub sub_blocks: Vec<SubBlock>,
+    /// The scope re-enters the *parent's* field table: the engine parse
+    /// function calls `ini->initFromINI(self, self->getFieldParse())` back on
+    /// the enclosing template (e.g. `Object`'s `AddModule`/`ReplaceModule`/
+    /// `InheritableModule`/`OverrideableByLikeKind`), so everything legal in
+    /// the parent — fields, module slots, other sub-blocks — is legal here.
+    /// When set, `fields`/`sub_blocks` need not be declared.
+    #[serde(default)]
+    pub reenters_parent: bool,
     #[serde(default)]
     pub doc: Option<String>,
 }

@@ -2334,39 +2334,13 @@
         },
         {
           "keyword": "InheritableModule",
-          "sub_blocks": [
-            {
-              "keyword": "Behavior"
-            },
-            {
-              "keyword": "Draw"
-            },
-            {
-              "keyword": "Body"
-            },
-            {
-              "keyword": "ClientUpdate"
-            }
-          ],
-          "doc": "Wrapper marking default modules that survive template copies."
+          "reenters_parent": true,
+          "doc": "Wrapper marking default modules that survive template copies (ThingTemplate::parseInheritableModule re-enters the object field table)."
         },
         {
           "keyword": "OverrideableByLikeKind",
-          "sub_blocks": [
-            {
-              "keyword": "Behavior"
-            },
-            {
-              "keyword": "Draw"
-            },
-            {
-              "keyword": "Body"
-            },
-            {
-              "keyword": "ClientUpdate"
-            }
-          ],
-          "doc": "Wrapper marking default modules replaceable by same-class modules."
+          "reenters_parent": true,
+          "doc": "Wrapper marking default modules replaceable by same-class modules (ThingTemplate::OverrideableByLikeKind re-enters the object field table)."
         },
         {
           "keyword": "WeaponSet",
@@ -2484,41 +2458,13 @@
         },
         {
           "keyword": "AddModule",
-          "fields": [],
-          "sub_blocks": [
-            {
-              "keyword": "Behavior"
-            },
-            {
-              "keyword": "Draw"
-            },
-            {
-              "keyword": "Body"
-            },
-            {
-              "keyword": "ClientUpdate"
-            }
-          ],
-          "doc": "map.ini override: adds modules to the existing object definition."
+          "reenters_parent": true,
+          "doc": "map.ini override: adds modules to the existing object definition (ThingTemplate::parseAddModule re-enters the object field table)."
         },
         {
           "keyword": "ReplaceModule",
-          "fields": [],
-          "sub_blocks": [
-            {
-              "keyword": "Behavior"
-            },
-            {
-              "keyword": "Draw"
-            },
-            {
-              "keyword": "Body"
-            },
-            {
-              "keyword": "ClientUpdate"
-            }
-          ],
-          "doc": "map.ini override: `ReplaceModule <tag>` scope replacing that module."
+          "reenters_parent": true,
+          "doc": "map.ini override: `ReplaceModule <tag>` scope replacing that module (ThingTemplate::parseReplaceModule re-enters the object field table)."
         }
       ]
     },
@@ -3451,39 +3397,13 @@
         },
         {
           "keyword": "InheritableModule",
-          "sub_blocks": [
-            {
-              "keyword": "Behavior"
-            },
-            {
-              "keyword": "Draw"
-            },
-            {
-              "keyword": "Body"
-            },
-            {
-              "keyword": "ClientUpdate"
-            }
-          ],
-          "doc": "Wrapper marking default modules that survive template copies."
+          "reenters_parent": true,
+          "doc": "Wrapper marking default modules that survive template copies (ThingTemplate::parseInheritableModule re-enters the object field table)."
         },
         {
           "keyword": "OverrideableByLikeKind",
-          "sub_blocks": [
-            {
-              "keyword": "Behavior"
-            },
-            {
-              "keyword": "Draw"
-            },
-            {
-              "keyword": "Body"
-            },
-            {
-              "keyword": "ClientUpdate"
-            }
-          ],
-          "doc": "Wrapper marking default modules replaceable by same-class modules."
+          "reenters_parent": true,
+          "doc": "Wrapper marking default modules replaceable by same-class modules (ThingTemplate::OverrideableByLikeKind re-enters the object field table)."
         },
         {
           "keyword": "WeaponSet",
@@ -3601,41 +3521,13 @@
         },
         {
           "keyword": "AddModule",
-          "fields": [],
-          "sub_blocks": [
-            {
-              "keyword": "Behavior"
-            },
-            {
-              "keyword": "Draw"
-            },
-            {
-              "keyword": "Body"
-            },
-            {
-              "keyword": "ClientUpdate"
-            }
-          ],
-          "doc": "map.ini override: adds modules to the existing object definition."
+          "reenters_parent": true,
+          "doc": "map.ini override: adds modules to the existing object definition (ThingTemplate::parseAddModule re-enters the object field table)."
         },
         {
           "keyword": "ReplaceModule",
-          "fields": [],
-          "sub_blocks": [
-            {
-              "keyword": "Behavior"
-            },
-            {
-              "keyword": "Draw"
-            },
-            {
-              "keyword": "Body"
-            },
-            {
-              "keyword": "ClientUpdate"
-            }
-          ],
-          "doc": "map.ini override: `ReplaceModule <tag>` scope replacing that module."
+          "reenters_parent": true,
+          "doc": "map.ini override: `ReplaceModule <tag>` scope replacing that module (ThingTemplate::parseReplaceModule re-enters the object field table)."
         }
       ]
     },

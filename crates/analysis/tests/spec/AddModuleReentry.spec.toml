@@ -1,0 +1,5 @@
+# AddModule re-enters the Object field table: sub-blocks like
+# UnitSpecificSounds are legal inside the wrapper, the wrapper's End closes
+# the wrapper (not the Object), and fields after it parse as Object fields.
+
+no_errors = true

@@ -310,7 +310,7 @@ fn specs_hold() {
         // the definitions it declares (and only those).
         let mut index = WorkspaceIndex::new();
         index.set_file(&name, definitions_in(&analyzer, &parse, &name));
-        let diags = diagnose(&analyzer, &parse, Some(&index));
+        let diags = diagnose(&analyzer, &parse, Some(&index), Some(&name));
 
         if spec.no_errors {
             let errs: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
