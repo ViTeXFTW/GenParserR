@@ -88,7 +88,9 @@ fn try_splice(
     // Children touching the edit (inclusive at boundaries, so an insertion
     // between two children involves both), widened one sibling each side.
     let mut lo = spans.iter().position(|&(_, end)| end >= edit.start)?;
-    let mut hi = spans.iter().rposition(|&(start, _)| start <= edit.old_end)?;
+    let mut hi = spans
+        .iter()
+        .rposition(|&(start, _)| start <= edit.old_end)?;
     if lo > hi {
         return None;
     }

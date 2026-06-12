@@ -121,7 +121,9 @@ impl Analyzer {
     }
 
     pub fn block(&self, name: &str) -> Option<&BlockType> {
-        self.block_by_name.get(name).map(|&i| &self.schema.blocks[i])
+        self.block_by_name
+            .get(name)
+            .map(|&i| &self.schema.blocks[i])
     }
 
     pub fn module(&self, name: &str) -> Option<&ModuleType> {
@@ -298,11 +300,15 @@ mod tests {
         // opens inside any scope (curated sub-block); a leaf field never opens;
         // and a block keyword used as a field inside a sub-block stays a leaf.
         assert!(a.openers.opens_scope(Some("Object"), "Behavior", true));
-        assert!(a.openers.opens_scope(Some("W3DModelDraw"), "ConditionState", true));
+        assert!(a
+            .openers
+            .opens_scope(Some("W3DModelDraw"), "ConditionState", true));
         assert!(!a.openers.opens_scope(Some("Object"), "PrimaryDamage", true));
         // `Armor`/`Animation` are block keywords but must NOT open when they are
         // fields nested inside another scope (the bug this guards against).
         assert!(!a.openers.opens_scope(Some("ArmorSet"), "Armor", true));
-        assert!(!a.openers.opens_scope(Some("DefaultConditionState"), "Animation", false));
+        assert!(!a
+            .openers
+            .opens_scope(Some("DefaultConditionState"), "Animation", false));
     }
 }

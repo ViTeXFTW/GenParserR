@@ -153,7 +153,8 @@ fn nth_token_offset(haystack: &str, needle: &str, nth: usize) -> Option<u32> {
         let at = start + rel;
         let before_ok = at == 0 || !is_ident(haystack[..at].chars().next_back().unwrap());
         let after_idx = at + needle.len();
-        let after_ok = after_idx >= bytes.len() || !is_ident(haystack[after_idx..].chars().next().unwrap());
+        let after_ok =
+            after_idx >= bytes.len() || !is_ident(haystack[after_idx..].chars().next().unwrap());
         if before_ok && after_ok {
             count += 1;
             if count == nth {
@@ -175,7 +176,11 @@ fn parse_severity(s: &str) -> Severity {
 }
 
 /// Evaluate one diagnostic assertion: `Ok(())` if satisfied, `Err(reason)` if not.
-fn check_diag(spec: &DiagSpec, search: &str, diags: &[genparser_analysis::Diagnostic]) -> Result<(), String> {
+fn check_diag(
+    spec: &DiagSpec,
+    search: &str,
+    diags: &[genparser_analysis::Diagnostic],
+) -> Result<(), String> {
     let Some(target) = nth_token_offset(search, &spec.on, spec.nth) else {
         return Err(format!(
             "token `{}` (#{}) not found in source",
@@ -184,10 +189,7 @@ fn check_diag(spec: &DiagSpec, search: &str, diags: &[genparser_analysis::Diagno
     };
     let want = parse_severity(&spec.severity);
     let hit = diags.iter().any(|d| {
-        d.code == spec.code
-            && d.severity == want
-            && d.span.start <= target
-            && target < d.span.end
+        d.code == spec.code && d.severity == want && d.span.start <= target && target < d.span.end
     });
     if hit {
         Ok(())
@@ -262,7 +264,12 @@ fn render_diags(diags: &[genparser_analysis::Diagnostic]) -> String {
     }
     diags
         .iter()
-        .map(|d| format!("{:?}/{}@{}..{}", d.severity, d.code, d.span.start, d.span.end))
+        .map(|d| {
+            format!(
+                "{:?}/{}@{}..{}",
+                d.severity, d.code, d.span.start, d.span.end
+            )
+        })
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -290,7 +297,11 @@ fn specs_hold() {
     let mut pending = 0usize;
 
     let inis = ini_specs();
-    assert!(!inis.is_empty(), "no specs found under {}", spec_dir().display());
+    assert!(
+        !inis.is_empty(),
+        "no specs found under {}",
+        spec_dir().display()
+    );
 
     for ini in inis {
         let name = ini.file_name().unwrap().to_string_lossy().to_string();
@@ -299,9 +310,8 @@ fn specs_hold() {
         let search = blank_comments(&src);
 
         let spec_path = ini.with_extension("spec.toml");
-        let spec_text = std::fs::read_to_string(&spec_path).unwrap_or_else(|_| {
-            panic!("missing spec file {}", spec_path.display())
-        });
+        let spec_text = std::fs::read_to_string(&spec_path)
+            .unwrap_or_else(|_| panic!("missing spec file {}", spec_path.display()));
         let spec: Spec = toml::from_str(&spec_text)
             .unwrap_or_else(|e| panic!("parse {}: {e}", spec_path.display()));
 
@@ -313,7 +323,10 @@ fn specs_hold() {
         let diags = diagnose(&analyzer, &parse, Some(&index));
 
         if spec.no_errors {
-            let errs: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
+            let errs: Vec<_> = diags
+                .iter()
+                .filter(|d| d.severity == Severity::Error)
+                .collect();
             if !errs.is_empty() {
                 failures.push(format!(
                     "{name}: no_errors violated — {}",

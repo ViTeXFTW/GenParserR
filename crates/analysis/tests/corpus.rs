@@ -17,7 +17,7 @@
 
 use std::collections::BTreeMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use genparser_analysis::{diagnostics, index, Analyzer, WorkspaceIndex};
@@ -28,9 +28,9 @@ fn corpus_dir() -> Option<PathBuf> {
     dir.is_dir().then(|| dir.canonicalize().unwrap())
 }
 
-fn ini_files(dir: &PathBuf) -> Vec<PathBuf> {
+fn ini_files(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    let mut stack = vec![dir.clone()];
+    let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
         for entry in std::fs::read_dir(&d).unwrap() {
             let p = entry.unwrap().path();
@@ -46,7 +46,7 @@ fn ini_files(dir: &PathBuf) -> Vec<PathBuf> {
 }
 
 /// Real INIs predate UTF-8; decode leniently rather than skipping files.
-fn read_lossy(path: &PathBuf) -> String {
+fn read_lossy(path: &Path) -> String {
     String::from_utf8_lossy(&std::fs::read(path).unwrap()).into_owned()
 }
 
@@ -62,7 +62,10 @@ fn corpus_smoke() {
         panic!("corpus not found; run scripts/fetch-corpus.ps1 first");
     };
     let files = ini_files(&dir);
-    assert!(!files.is_empty(), "corpus dir exists but holds no .ini files");
+    assert!(
+        !files.is_empty(),
+        "corpus dir exists but holds no .ini files"
+    );
 
     let analyzer = Analyzer::embedded();
 

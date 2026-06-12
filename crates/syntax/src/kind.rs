@@ -49,7 +49,10 @@ impl SyntaxKind {
     /// Whitespace, newlines and comments — preserved in the CST but ignored by
     /// the grammar.
     pub fn is_trivia(self) -> bool {
-        matches!(self, SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::COMMENT)
+        matches!(
+            self,
+            SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::COMMENT
+        )
     }
 }
 

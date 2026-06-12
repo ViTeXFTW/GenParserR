@@ -200,16 +200,25 @@ mod tests {
         let a = Analyzer::embedded();
         let mut idx = WorkspaceIndex::new();
         let g0 = idx.generation();
-        idx.set_file("f.ini", definitions_in(&a, &a.parse("Weapon AK47\nEnd\n"), "f.ini"));
+        idx.set_file(
+            "f.ini",
+            definitions_in(&a, &a.parse("Weapon AK47\nEnd\n"), "f.ini"),
+        );
         let g1 = idx.generation();
         assert_ne!(g0, g1, "new definitions bump the generation");
 
         // Same names at shifted spans (e.g. a comment typed above): no bump.
-        idx.set_file("f.ini", definitions_in(&a, &a.parse("; c\nWeapon AK47\nEnd\n"), "f.ini"));
+        idx.set_file(
+            "f.ini",
+            definitions_in(&a, &a.parse("; c\nWeapon AK47\nEnd\n"), "f.ini"),
+        );
         assert_eq!(idx.generation(), g1);
 
         // Renaming a definition bumps.
-        idx.set_file("f.ini", definitions_in(&a, &a.parse("Weapon M16\nEnd\n"), "f.ini"));
+        idx.set_file(
+            "f.ini",
+            definitions_in(&a, &a.parse("Weapon M16\nEnd\n"), "f.ini"),
+        );
         assert_ne!(idx.generation(), g1);
 
         // A file with no definitions, set repeatedly: no bumps after removal.
@@ -224,8 +233,14 @@ mod tests {
     fn updating_a_file_replaces_its_symbols() {
         let a = Analyzer::embedded();
         let mut idx = WorkspaceIndex::new();
-        idx.set_file("f.ini", definitions_in(&a, &a.parse("Weapon Old\nEnd\n"), "f.ini"));
-        idx.set_file("f.ini", definitions_in(&a, &a.parse("Weapon New\nEnd\n"), "f.ini"));
+        idx.set_file(
+            "f.ini",
+            definitions_in(&a, &a.parse("Weapon Old\nEnd\n"), "f.ini"),
+        );
+        idx.set_file(
+            "f.ini",
+            definitions_in(&a, &a.parse("Weapon New\nEnd\n"), "f.ini"),
+        );
         assert!(!idx.is_defined(RefKind::Weapon, "Old"));
         assert!(idx.is_defined(RefKind::Weapon, "New"));
     }

@@ -98,8 +98,12 @@ impl Backend {
         let enc = self.enc();
         let lsp_diags: Vec<Diagnostic> = {
             let idx = self.index.read().ok();
-            let diags =
-                diagnostics::diagnose_with_cache(&self.analyzer, &parse, idx.as_deref(), &mut cache);
+            let diags = diagnostics::diagnose_with_cache(
+                &self.analyzer,
+                &parse,
+                idx.as_deref(),
+                &mut cache,
+            );
             diags
                 .iter()
                 .map(|d| convert::to_lsp_diagnostic(&rope, d, enc))
@@ -109,7 +113,9 @@ impl Backend {
         // Hand the warmed cache back unless a newer change superseded us (the
         // newer change runs its own refresh against its own parse).
         {
-            let Some(mut entry) = self.docs.get_mut(uri) else { return };
+            let Some(mut entry) = self.docs.get_mut(uri) else {
+                return;
+            };
             if entry.version != version {
                 return;
             }
@@ -124,7 +130,9 @@ impl Backend {
     /// index, so references resolve before a file is opened.
     fn scan_workspace(&self) {
         let roots = self.roots.lock().map(|r| r.clone()).unwrap_or_default();
-        let Ok(mut idx) = self.index.write() else { return };
+        let Ok(mut idx) = self.index.write() else {
+            return;
+        };
         for root in roots {
             for entry in walkdir::WalkDir::new(&root)
                 .into_iter()
@@ -140,8 +148,12 @@ impl Backend {
                 {
                     continue;
                 }
-                let Some(text) = read_lossy(path) else { continue };
-                let Ok(uri) = Url::from_file_path(path) else { continue };
+                let Some(text) = read_lossy(path) else {
+                    continue;
+                };
+                let Ok(uri) = Url::from_file_path(path) else {
+                    continue;
+                };
                 let parse = self.analyzer.parse(&text);
                 let defs = definitions_in(&self.analyzer, &parse, uri.as_str());
                 idx.set_file(uri.as_str(), defs);
@@ -261,7 +273,9 @@ impl LanguageServer for Backend {
         let version = params.text_document.version;
         let enc = self.enc();
         {
-            let Some(mut entry) = self.docs.get_mut(&uri) else { return };
+            let Some(mut entry) = self.docs.get_mut(&uri) else {
+                return;
+            };
             let entry = entry.value_mut();
             // Each change applies to the text produced by the previous one.
             // The parse is kept in lockstep via incremental reparse, so the
@@ -374,7 +388,9 @@ impl LanguageServer for Backend {
         };
 
         let locations: Vec<(String, genparser_analysis::Span)> = {
-            let Ok(idx) = self.index.read() else { return Ok(None) };
+            let Ok(idx) = self.index.read() else {
+                return Ok(None);
+            };
             idx.locations(reference.kind, &reference.name)
                 .iter()
                 .map(|l| (l.file.clone(), l.span))
@@ -383,7 +399,9 @@ impl LanguageServer for Backend {
 
         let mut out = Vec::new();
         for (file, span) in locations {
-            let Ok(target_uri) = Url::parse(&file) else { continue };
+            let Ok(target_uri) = Url::parse(&file) else {
+                continue;
+            };
             if let Some(target_rope) = self.rope_for(&target_uri) {
                 out.push(Location {
                     uri: target_uri,

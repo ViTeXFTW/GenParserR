@@ -8,11 +8,17 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
 
 permissions:
   contents: read
+
+# A newer push to the same ref supersedes in-flight runs; cancel them so we
+# don't burn runner minutes on stale commits.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -32,7 +38,19 @@ jobs:
           cargo build -p genparser-server
           bin=target/debug/genparser-lsp
           [ "$RUNNER_OS" = "Windows" ] && bin="$bin.exe"
-          python crates/server/tests/e2e.py "$bin"
+          # Linux runners expose the interpreter as `python3`; Windows as `python`.
+          if command -v python3 >/dev/null 2>&1; then py=python3; else py=python; fi
+          "$py" crates/server/tests/e2e.py "$bin"
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo fmt
+        run: cargo fmt --all --check
+      - name: cargo clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
   extension:
     runs-on: ubuntu-latest

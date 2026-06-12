@@ -19,10 +19,8 @@ fn token_kind(t: &SyntaxToken) -> SyntaxKind {
 /// Significant (non-trivia) tokens that are direct children of `node`
 /// (i.e. on its header line, before any nested node).
 fn header_tokens(node: &SyntaxNode) -> impl Iterator<Item = SyntaxToken> + '_ {
-    node.children_with_tokens().filter_map(move |el| {
-        el.into_token()
-            .filter(|t| !token_kind(t).is_trivia())
-    })
+    node.children_with_tokens()
+        .filter_map(move |el| el.into_token().filter(|t| !token_kind(t).is_trivia()))
 }
 
 /// A top-level block, e.g. `Weapon AK47 ... End`.
@@ -47,11 +45,11 @@ impl Block {
     }
 
     pub fn fields(&self) -> impl Iterator<Item = Field> + '_ {
-        self.0.children().filter_map(|n| Field::cast(n))
+        self.0.children().filter_map(Field::cast)
     }
 
     pub fn modules(&self) -> impl Iterator<Item = Module> + '_ {
-        self.0.children().filter_map(|n| Module::cast(n))
+        self.0.children().filter_map(Module::cast)
     }
 }
 
@@ -108,11 +106,11 @@ impl Module {
     }
 
     pub fn fields(&self) -> impl Iterator<Item = Field> + '_ {
-        self.0.children().filter_map(|n| Field::cast(n))
+        self.0.children().filter_map(Field::cast)
     }
 
     pub fn modules(&self) -> impl Iterator<Item = Module> + '_ {
-        self.0.children().filter_map(|n| Module::cast(n))
+        self.0.children().filter_map(Module::cast)
     }
 }
 
@@ -174,6 +172,9 @@ mod tests {
         let module = object.modules().next().unwrap();
         assert_eq!(module.slot().unwrap().text(), "Body");
         assert_eq!(module.module_name().unwrap().text(), "ActiveBody");
-        assert_eq!(module.fields().next().unwrap().key().unwrap().text(), "MaxHealth");
+        assert_eq!(
+            module.fields().next().unwrap().key().unwrap().text(),
+            "MaxHealth"
+        );
     }
 }

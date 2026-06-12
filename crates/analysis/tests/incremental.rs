@@ -146,7 +146,10 @@ fn spec_corpus_edit_sequences_match_full_parse() {
 fn corpus_edit_sequences_match_full_parse() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../corpus/GeneralsGamePatch2/GeneralsZH/Data/INI");
-    assert!(dir.is_dir(), "corpus not found; run scripts/fetch-corpus.ps1");
+    assert!(
+        dir.is_dir(),
+        "corpus not found; run scripts/fetch-corpus.ps1"
+    );
 
     let analyzer = Analyzer::embedded();
     let (mut spliced, mut full) = (0, 0);

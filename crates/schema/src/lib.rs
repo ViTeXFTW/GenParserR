@@ -285,11 +285,7 @@ impl Schema {
             schema: self,
             blocks: self.blocks.iter().map(|b| (b.name.as_str(), b)).collect(),
             modules: self.modules.iter().map(|m| (m.name.as_str(), m)).collect(),
-            value_sets: self
-                .value_sets
-                .iter()
-                .map(|v| (v.id.as_str(), v))
-                .collect(),
+            value_sets: self.value_sets.iter().map(|v| (v.id.as_str(), v)).collect(),
         }
     }
 }
@@ -341,7 +337,10 @@ mod tests {
         let back = Schema::from_json(&json).unwrap();
         assert_eq!(back.blocks.len(), 1);
         let idx = back.index();
-        assert_eq!(idx.block("Weapon").unwrap().fields[0].value_type, ValueType::Real);
+        assert_eq!(
+            idx.block("Weapon").unwrap().fields[0].value_type,
+            ValueType::Real
+        );
     }
 
     /// The committed, embedded schema must parse and contain core blocks. This

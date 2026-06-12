@@ -256,7 +256,12 @@ impl<'a> Ctx<'a> {
         // after `=` is an argument, not a module name.
         let is_real_module = module
             .slot()
-            .map(|s| parent.module_slots().iter().any(|ms| ms.keyword == s.text()))
+            .map(|s| {
+                parent
+                    .module_slots()
+                    .iter()
+                    .any(|ms| ms.keyword == s.text())
+            })
             .unwrap_or(false);
 
         let inner = if is_real_module {
@@ -323,7 +328,11 @@ impl<'a> Ctx<'a> {
             if let Some(key) = field.key() {
                 // Most fields require at least one value; lenient types don't.
                 if !matches!(ty, ValueType::Unknown { .. } | ValueType::AsciiStringList) {
-                    self.warning(&key, "missing-value", format!("`{}` expects a value", key.text()));
+                    self.warning(
+                        &key,
+                        "missing-value",
+                        format!("`{}` expects a value", key.text()),
+                    );
                 }
             }
             return;
@@ -384,7 +393,11 @@ impl<'a> Ctx<'a> {
             ValueType::Bool => {
                 let v = unquote(tok.text()).to_ascii_lowercase();
                 if v != "yes" && v != "no" {
-                    self.error(tok, "bad-bool", format!("expected `Yes` or `No`, found `{}`", tok.text()));
+                    self.error(
+                        tok,
+                        "bad-bool",
+                        format!("expected `Yes` or `No`, found `{}`", tok.text()),
+                    );
                 }
             }
             ValueType::Int => self.check_number(tok, NumKind::Int),
@@ -398,7 +411,11 @@ impl<'a> Ctx<'a> {
                 self.check_number(tok, NumKind::Real);
                 if let Ok(n) = tok.text().parse::<f64>() {
                     if n <= 0.0 {
-                        self.warning(tok, "non-positive", format!("`{}` should be greater than 0", tok.text()));
+                        self.warning(
+                            tok,
+                            "non-positive",
+                            format!("`{}` should be greater than 0", tok.text()),
+                        );
                     }
                 }
             }
@@ -487,7 +504,10 @@ impl<'a> Ctx<'a> {
                     this.error(
                         tag_tok,
                         code,
-                        format!("expected `{axis}:`, found `{tag}` (format: `{}`)", expected()),
+                        format!(
+                            "expected `{axis}:`, found `{tag}` (format: `{}`)",
+                            expected()
+                        ),
                     );
                 }
                 return false;
@@ -543,12 +563,18 @@ impl<'a> Ctx<'a> {
                 NumKind::UInt => "a non-negative integer",
                 NumKind::Real => "a number",
             };
-            self.error(tok, "bad-number", format!("expected {what}, found `{text}`"));
+            self.error(
+                tok,
+                "bad-number",
+                format!("expected {what}, found `{text}`"),
+            );
         }
     }
 
     fn check_enum_member(&mut self, value_set: &str, tok: &SyntaxToken) {
-        let Some(set) = self.analyzer.value_set(value_set) else { return };
+        let Some(set) = self.analyzer.value_set(value_set) else {
+            return;
+        };
         if set.members.is_empty() {
             return; // value set we couldn't populate; don't flag
         }
@@ -563,7 +589,9 @@ impl<'a> Ctx<'a> {
     }
 
     fn check_bitflag_member(&mut self, value_set: &str, tok: &SyntaxToken, raw: &str) {
-        let Some(set) = self.analyzer.value_set(value_set) else { return };
+        let Some(set) = self.analyzer.value_set(value_set) else {
+            return;
+        };
         if set.members.is_empty() {
             return;
         }
@@ -664,7 +692,9 @@ mod tests {
     fn unknown_field_is_warning() {
         let src = "Weapon AK47\n  PrimaryDamg = 50.0\nEnd\n";
         let d = diags(src);
-        assert!(d.iter().any(|d| d.code == "unknown-field" && d.severity == Severity::Warning));
+        assert!(d
+            .iter()
+            .any(|d| d.code == "unknown-field" && d.severity == Severity::Warning));
     }
 
     #[test]
@@ -719,7 +749,10 @@ End
         let src = "Weapon AK47\n  ClipSize = lots\nEnd\nWeapon B\nEnd\nWeapon C\nEnd\nWeapon D\n  PrimaryDamg = 1\nEnd\n";
         let parse = a.parse(src);
         let mut cache = DiagnosticsCache::new();
-        assert_eq!(diagnose_with_cache(&a, &parse, None, &mut cache), diagnose(&a, &parse, None));
+        assert_eq!(
+            diagnose_with_cache(&a, &parse, None, &mut cache),
+            diagnose(&a, &parse, None)
+        );
         assert_eq!(cache.stats().0, 0, "first run is all misses");
 
         // Edit inside the *last* block; the splice widens one sibling, so the
@@ -731,10 +764,17 @@ End
             &parse,
             src,
             &edited,
-            genparser_syntax::Edit { start: at, old_end: at + 1, new_len: 1 },
+            genparser_syntax::Edit {
+                start: at,
+                old_end: at + 1,
+                new_len: 1,
+            },
         );
         assert_eq!(strategy, genparser_syntax::Strategy::Spliced);
-        assert_eq!(diagnose_with_cache(&a, &inc, None, &mut cache), diagnose(&a, &inc, None));
+        assert_eq!(
+            diagnose_with_cache(&a, &inc, None, &mut cache),
+            diagnose(&a, &inc, None)
+        );
         assert!(cache.stats().0 >= 1, "unchanged block must hit the cache");
     }
 
@@ -750,7 +790,10 @@ End
         let mut cache = DiagnosticsCache::new();
         let g0 = index.generation();
         let first = diagnose_with_cache(&a, &parse, Some(&index), &mut cache);
-        index.set_file("other.ini", crate::index::definitions_in(&a, &a.parse("Object X\nEnd\n"), "other.ini"));
+        index.set_file(
+            "other.ini",
+            crate::index::definitions_in(&a, &a.parse("Object X\nEnd\n"), "other.ini"),
+        );
         assert_ne!(index.generation(), g0);
         let second = diagnose_with_cache(&a, &parse, Some(&index), &mut cache);
         assert_eq!(first, second); // no reference fields here; same result
@@ -766,7 +809,10 @@ End
         // Object.weapon references go through WeaponSet (custom parser), so use a
         // field we know maps to a reference: PrimaryDamageRadius is Real, so
         // instead assert the plumbing via a synthetic check below.
-        index.set_file("a.ini", crate::index::definitions_in(&a, &a.parse("Weapon AK47\nEnd\n"), "a.ini"));
+        index.set_file(
+            "a.ini",
+            crate::index::definitions_in(&a, &a.parse("Weapon AK47\nEnd\n"), "a.ini"),
+        );
         assert!(index.is_defined(RefKind::Weapon, "AK47"));
     }
 }

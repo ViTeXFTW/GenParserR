@@ -133,7 +133,14 @@ impl<'a> Sem<'a> {
         }
         if let Some(name) = module.module_name() {
             // Real module: the name is a module type; sub-block: it's an arg.
-            self.set(&name, if is_real_module { SemKind::Module } else { SemKind::EnumMember });
+            self.set(
+                &name,
+                if is_real_module {
+                    SemKind::Module
+                } else {
+                    SemKind::EnumMember
+                },
+            );
         }
     }
 
@@ -188,7 +195,9 @@ impl<'a> Sem<'a> {
 
     fn set_if_absent(&mut self, tok: &SyntaxToken, kind: SemKind) {
         let span: Span = tok.text_range().into();
-        self.by_start.entry(span.start).or_insert(SemToken { span, kind });
+        self.by_start
+            .entry(span.start)
+            .or_insert(SemToken { span, kind });
     }
 }
 
@@ -198,9 +207,9 @@ fn value_token_kind(tok: &SyntaxToken, ty: Option<&ValueType>) -> SemKind {
         return SemKind::StringLit;
     }
     match ty {
-        Some(ValueType::Bool)
-        | Some(ValueType::Enum { .. })
-        | Some(ValueType::BitFlags { .. }) => SemKind::EnumMember,
+        Some(ValueType::Bool) | Some(ValueType::Enum { .. }) | Some(ValueType::BitFlags { .. }) => {
+            SemKind::EnumMember
+        }
         Some(ValueType::Int)
         | Some(ValueType::UInt)
         | Some(ValueType::Real)
@@ -255,7 +264,9 @@ mod tests {
     fn classifies_module_type_name() {
         let src = "Object Tank\n  Body = ActiveBody Tag01\n    MaxHealth = 100\n  End\nEnd\n";
         let t = toks(src);
-        assert!(t.iter().any(|(k, s)| *k == SemKind::Module && s == "ActiveBody"));
+        assert!(t
+            .iter()
+            .any(|(k, s)| *k == SemKind::Module && s == "ActiveBody"));
         assert!(t.iter().any(|(k, s)| *k == SemKind::Number && s == "100"));
     }
 

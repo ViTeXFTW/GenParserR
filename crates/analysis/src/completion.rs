@@ -89,7 +89,10 @@ fn classify_position(analyzer: &Analyzer, root: &SyntaxNode, offset: u32) -> Pos
         let scope_node = enclosing_scope(&field_node);
         if after_equals(&field_node, offset) {
             let field = Field(field_node.clone());
-            let key = field.key().map(|k| k.text().to_string()).unwrap_or_default();
+            let key = field
+                .key()
+                .map(|k| k.text().to_string())
+                .unwrap_or_default();
             let value_index = field
                 .value_tokens()
                 .iter()
@@ -341,7 +344,10 @@ mod tests {
         let src = "Weapon AK47\n  ScaleWeaponSpeed = \nEnd\n";
         let offset = "Weapon AK47\n  ScaleWeaponSpeed = ".len() as u32;
         let out = labels(src, offset);
-        assert!(out.contains(&"Yes".to_string()) && out.contains(&"No".to_string()), "{out:?}");
+        assert!(
+            out.contains(&"Yes".to_string()) && out.contains(&"No".to_string()),
+            "{out:?}"
+        );
     }
 
     #[test]
