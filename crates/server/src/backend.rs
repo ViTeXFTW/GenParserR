@@ -65,6 +65,24 @@ fn read_lossy(path: &Path) -> Option<String> {
         .map(|b| String::from_utf8_lossy(&b).into_owned())
 }
 
+/// Normalise a client-supplied URI to the form [`Url::from_file_path`] produces.
+/// On Windows, VS Code sends `file:///c%3A/…` (percent-encoded colon, lowercase
+/// drive letter) while `from_file_path` produces `file:///C:/…`. The mismatch
+/// makes the same file land in the `WorkspaceIndex` under two different keys,
+/// so every definition appears duplicated. Round-tripping through the file-path
+/// canonicalises both percent-encoding and drive-letter casing. Non-`file:`
+/// schemes are returned unchanged.
+fn canonical_uri(uri: Url) -> Url {
+    if uri.scheme() == "file" {
+        if let Ok(path) = uri.to_file_path() {
+            if let Ok(canonical) = Url::from_file_path(path) {
+                return canonical;
+            }
+        }
+    }
+    uri
+}
+
 /// Walk `roots` and index every `.ini` file (definitions + reference sites).
 /// CPU/IO heavy — runs via `spawn_blocking` from [`Backend::scan_workspace`].
 fn scan_roots(
@@ -193,10 +211,20 @@ impl Backend {
         let scanned = tokio::task::spawn_blocking(move || scan_roots(&analyzer, &roots))
             .await
             .unwrap_or_default();
+        // Don't overwrite index entries for already-open documents with stale
+        // disk content; `initialized` calls `refresh` for each open doc right
+        // after this returns, so they will populate the index from live text.
+        let open: std::collections::HashSet<String> = self
+            .docs
+            .iter()
+            .map(|e| e.key().as_str().to_string())
+            .collect();
         let Ok(mut idx) = self.index.write() else { return };
         for (uri, defs, refs) in scanned {
-            idx.set_file(&uri, defs);
-            idx.set_file_refs(&uri, refs);
+            if !open.contains(&uri) {
+                idx.set_file(&uri, defs);
+                idx.set_file_refs(&uri, refs);
+            }
         }
     }
 
@@ -355,7 +383,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        let uri = params.text_document.uri;
+        let uri = canonical_uri(params.text_document.uri);
         let text: Arc<str> = params.text_document.text.into();
         let rope = Rope::from_str(&text);
         let parse = Arc::new(self.analyzer.parse(&text));
@@ -375,7 +403,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        let uri = params.text_document.uri;
+        let uri = canonical_uri(params.text_document.uri);
         let version = params.text_document.version;
         let enc = self.enc();
         {
@@ -448,11 +476,11 @@ impl LanguageServer for Backend {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         // Keep the file's symbols in the index (it still exists on disk); just
         // drop the in-memory buffer.
-        self.docs.remove(&params.text_document.uri);
+        self.docs.remove(&canonical_uri(params.text_document.uri));
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        let uri = params.text_document_position.text_document.uri;
+        let uri = canonical_uri(params.text_document_position.text_document.uri);
         let pos = params.text_document_position.position;
         let Some((rope, parse)) = self.doc(&uri) else {
             return Ok(None);
@@ -471,7 +499,7 @@ impl LanguageServer for Backend {
         &self,
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
-        let uri = params.text_document.uri;
+        let uri = canonical_uri(params.text_document.uri);
         let Some((rope, parse)) = self.doc(&uri) else {
             return Ok(None);
         };
@@ -491,7 +519,7 @@ impl LanguageServer for Backend {
         &self,
         params: SemanticTokensDeltaParams,
     ) -> Result<Option<SemanticTokensFullDeltaResult>> {
-        let uri = params.text_document.uri;
+        let uri = canonical_uri(params.text_document.uri);
         let Some((rope, parse)) = self.doc(&uri) else {
             return Ok(None);
         };
@@ -525,7 +553,7 @@ impl LanguageServer for Backend {
         if !self.format_enabled() {
             return Ok(None);
         }
-        let uri = params.text_document.uri;
+        let uri = canonical_uri(params.text_document.uri);
         // `text` is kept in lockstep with `rope` by did_open/did_change, so no
         // rope-to-string rebuild is needed here.
         let Some((rope, text, parse)) = self
@@ -552,7 +580,7 @@ impl LanguageServer for Backend {
     }
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
-        let uri = params.text_document.uri;
+        let uri = canonical_uri(params.text_document.uri);
         let Some((rope, parse)) = self.doc(&uri) else {
             return Ok(None);
         };
@@ -591,7 +619,7 @@ impl LanguageServer for Backend {
         &self,
         params: SemanticTokensRangeParams,
     ) -> Result<Option<SemanticTokensRangeResult>> {
-        let uri = params.text_document.uri;
+        let uri = canonical_uri(params.text_document.uri);
         let Some((rope, parse)) = self.doc(&uri) else {
             return Ok(None);
         };
@@ -614,7 +642,7 @@ impl LanguageServer for Backend {
         &self,
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
-        let uri = params.text_document_position_params.text_document.uri;
+        let uri = canonical_uri(params.text_document_position_params.text_document.uri);
         let pos = params.text_document_position_params.position;
         let Some((rope, parse)) = self.doc(&uri) else {
             return Ok(None);
@@ -654,7 +682,8 @@ impl LanguageServer for Backend {
         &self,
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
-        let Some((rope, parse)) = self.doc(&params.text_document.uri) else {
+        let uri = canonical_uri(params.text_document.uri);
+        let Some((rope, parse)) = self.doc(&uri) else {
             return Ok(None);
         };
         let enc = self.enc();
@@ -666,7 +695,8 @@ impl LanguageServer for Backend {
     }
 
     async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
-        let Some((rope, parse)) = self.doc(&params.text_document.uri) else {
+        let uri = canonical_uri(params.text_document.uri);
+        let Some((rope, parse)) = self.doc(&uri) else {
             return Ok(None);
         };
         let enc = self.enc();
@@ -719,7 +749,7 @@ impl LanguageServer for Backend {
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
-        let uri = params.text_document_position.text_document.uri;
+        let uri = canonical_uri(params.text_document_position.text_document.uri);
         let pos = params.text_document_position.position;
         let Some(sym) = self.symbol_at(&uri, pos) else {
             return Ok(None);
@@ -750,7 +780,7 @@ impl LanguageServer for Backend {
         &self,
         params: TextDocumentPositionParams,
     ) -> Result<Option<PrepareRenameResponse>> {
-        let uri = params.text_document.uri;
+        let uri = canonical_uri(params.text_document.uri);
         let Some(sym) = self.symbol_at(&uri, params.position) else {
             return Ok(None);
         };
@@ -763,7 +793,7 @@ impl LanguageServer for Backend {
     }
 
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
-        let uri = params.text_document_position.text_document.uri;
+        let uri = canonical_uri(params.text_document_position.text_document.uri);
         let pos = params.text_document_position.position;
         let new_name = params.new_name;
         // A definition name must survive the engine tokenizer as one token.
@@ -813,7 +843,7 @@ impl LanguageServer for Backend {
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        let uri = params.text_document_position_params.text_document.uri;
+        let uri = canonical_uri(params.text_document_position_params.text_document.uri);
         let pos = params.text_document_position_params.position;
         let Some((rope, parse)) = self.doc(&uri) else {
             return Ok(None);
@@ -849,5 +879,33 @@ impl LanguageServer for Backend {
             }),
             range: Some(convert::span_to_range(&rope, span, enc)),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_uri_pass_through_non_file() {
+        let u = Url::parse("untitled:///buffer").unwrap();
+        assert_eq!(canonical_uri(u.clone()), u);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn canonical_uri_normalises_windows_file_uri() {
+        // VS Code on Windows sends percent-encoded colon + lowercase drive
+        // letter; `from_file_path` produces uppercase drive + no encoding.
+        let client = Url::parse("file:///c%3A/CodeProjects/mod/Object.ini").unwrap();
+        let expected = Url::from_file_path(r"C:\CodeProjects\mod\Object.ini").unwrap();
+        assert_eq!(canonical_uri(client), expected);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn canonical_uri_idempotent_on_well_formed_windows_uri() {
+        let well_formed = Url::from_file_path(r"C:\CodeProjects\mod\Object.ini").unwrap();
+        assert_eq!(canonical_uri(well_formed.clone()), well_formed);
     }
 }
