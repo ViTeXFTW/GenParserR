@@ -617,10 +617,42 @@
       "fields": [],
       "sub_blocks": [
         {
-          "keyword": "Sound"
+          "keyword": "Sound",
+          "fields": [
+            {
+              "name": "Name",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            }
+          ]
         },
         {
-          "keyword": "RayEffect"
+          "keyword": "RayEffect",
+          "fields": [
+            {
+              "name": "Name",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PrimaryOffset",
+              "value_type": {
+                "kind": "coord3_d"
+              },
+              "parse_fn": "INI::parseCoord3D"
+            },
+            {
+              "name": "SecondaryOffset",
+              "value_type": {
+                "kind": "coord3_d"
+              },
+              "parse_fn": "INI::parseCoord3D"
+            }
+          ]
         },
         {
           "keyword": "Tracer",
@@ -692,19 +724,210 @@
           ]
         },
         {
-          "keyword": "LightPulse"
+          "keyword": "LightPulse",
+          "fields": [
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseRGBColor"
+            },
+            {
+              "name": "Radius",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal"
+            },
+            {
+              "name": "RadiusAsPercentOfObjectSize",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal"
+            },
+            {
+              "name": "IncreaseTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt"
+            },
+            {
+              "name": "DecreaseTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt"
+            }
+          ]
         },
         {
-          "keyword": "ViewShake"
+          "keyword": "ViewShake",
+          "fields": [
+            {
+              "name": "Type",
+              "value_type": {
+                "kind": "enum",
+                "value_set": "view_shake_type"
+              },
+              "parse_fn": "parseShakeType"
+            }
+          ]
         },
         {
-          "keyword": "TerrainScorch"
+          "keyword": "TerrainScorch",
+          "fields": [
+            {
+              "name": "Type",
+              "value_type": {
+                "kind": "enum",
+                "value_set": "terrain_scorch_type"
+              },
+              "parse_fn": "parseScorchType"
+            },
+            {
+              "name": "Radius",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal"
+            }
+          ]
         },
         {
-          "keyword": "ParticleSystem"
+          "keyword": "ParticleSystem",
+          "fields": [
+            {
+              "name": "Name",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "Count",
+              "value_type": {
+                "kind": "int"
+              },
+              "parse_fn": "INI::parseInt"
+            },
+            {
+              "name": "Offset",
+              "value_type": {
+                "kind": "coord3_d"
+              },
+              "parse_fn": "INI::parseCoord3D"
+            },
+            {
+              "name": "Radius",
+              "value_type": {
+                "kind": "unknown",
+                "parse_fn": "INI::parseGameClientRandomVariable"
+              },
+              "parse_fn": "INI::parseGameClientRandomVariable"
+            },
+            {
+              "name": "Height",
+              "value_type": {
+                "kind": "unknown",
+                "parse_fn": "INI::parseGameClientRandomVariable"
+              },
+              "parse_fn": "INI::parseGameClientRandomVariable"
+            },
+            {
+              "name": "InitialDelay",
+              "value_type": {
+                "kind": "unknown",
+                "parse_fn": "INI::parseGameClientRandomVariable"
+              },
+              "parse_fn": "INI::parseGameClientRandomVariable"
+            },
+            {
+              "name": "RotateX",
+              "value_type": {
+                "kind": "angle_real"
+              },
+              "parse_fn": "INI::parseAngleReal"
+            },
+            {
+              "name": "RotateY",
+              "value_type": {
+                "kind": "angle_real"
+              },
+              "parse_fn": "INI::parseAngleReal"
+            },
+            {
+              "name": "RotateZ",
+              "value_type": {
+                "kind": "angle_real"
+              },
+              "parse_fn": "INI::parseAngleReal"
+            },
+            {
+              "name": "OrientToObject",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "Ricochet",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "AttachToObject",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "CreateAtGroundHeight",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "UseCallersRadius",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            }
+          ]
         },
         {
-          "keyword": "FXListAtBonePos"
+          "keyword": "FXListAtBonePos",
+          "fields": [
+            {
+              "name": "FX",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "fx_list"
+              },
+              "parse_fn": "INI::parseFXList"
+            },
+            {
+              "name": "BoneName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "OrientToBone",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            }
+          ]
         }
       ]
     },
@@ -2492,13 +2715,604 @@
       "fields": [],
       "sub_blocks": [
         {
-          "keyword": "CreateObject"
+          "keyword": "CreateObject",
+          "fields": [
+            {
+              "name": "PutInContainer",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "ParticleSystem",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "Count",
+              "value_type": {
+                "kind": "int"
+              },
+              "parse_fn": "INI::parseInt"
+            },
+            {
+              "name": "IgnorePrimaryObstacle",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "OrientInForceDirection",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "ExtraBounciness",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal"
+            },
+            {
+              "name": "ExtraFriction",
+              "value_type": {
+                "kind": "unknown",
+                "parse_fn": "parseFrictionPerSec"
+              },
+              "parse_fn": "parseFrictionPerSec"
+            },
+            {
+              "name": "Offset",
+              "value_type": {
+                "kind": "coord3_d"
+              },
+              "parse_fn": "INI::parseCoord3D"
+            },
+            {
+              "name": "Disposition",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "debris_disposition"
+              },
+              "parse_fn": "INI::parseBitString32"
+            },
+            {
+              "name": "DispositionIntensity",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal"
+            },
+            {
+              "name": "SpinRate",
+              "value_type": {
+                "kind": "angle_real"
+              },
+              "parse_fn": "INI::parseAngularVelocityReal"
+            },
+            {
+              "name": "YawRate",
+              "value_type": {
+                "kind": "angle_real"
+              },
+              "parse_fn": "INI::parseAngularVelocityReal"
+            },
+            {
+              "name": "RollRate",
+              "value_type": {
+                "kind": "angle_real"
+              },
+              "parse_fn": "INI::parseAngularVelocityReal"
+            },
+            {
+              "name": "PitchRate",
+              "value_type": {
+                "kind": "angle_real"
+              },
+              "parse_fn": "INI::parseAngularVelocityReal"
+            },
+            {
+              "name": "MinForceMagnitude",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal"
+            },
+            {
+              "name": "MaxForceMagnitude",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal"
+            },
+            {
+              "name": "MinForcePitch",
+              "value_type": {
+                "kind": "angle_real"
+              },
+              "parse_fn": "INI::parseAngleReal"
+            },
+            {
+              "name": "MaxForcePitch",
+              "value_type": {
+                "kind": "angle_real"
+              },
+              "parse_fn": "INI::parseAngleReal"
+            },
+            {
+              "name": "MinLifetime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt"
+            },
+            {
+              "name": "MaxLifetime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt"
+            },
+            {
+              "name": "SpreadFormation",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "MinDistanceAFormation",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal"
+            },
+            {
+              "name": "MinDistanceBFormation",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal"
+            },
+            {
+              "name": "MaxDistanceFormation",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal"
+            },
+            {
+              "name": "FadeIn",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "FadeOut",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "FadeTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt"
+            },
+            {
+              "name": "FadeSound",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PreserveLayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "DiesOnBadLand",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "ContainInsideSourceObject",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "ObjectNames",
+              "value_type": {
+                "kind": "unknown",
+                "parse_fn": "parseDebrisObjectNames"
+              },
+              "parse_fn": "parseDebrisObjectNames"
+            },
+            {
+              "name": "ObjectCount",
+              "value_type": {
+                "kind": "int"
+              },
+              "parse_fn": "INI::parseInt"
+            },
+            {
+              "name": "InheritsVeterancy",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "SkipIfSignificantlyAirborne",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "InvulnerableTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt"
+            },
+            {
+              "name": "MinHealth",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal"
+            },
+            {
+              "name": "MaxHealth",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal"
+            },
+            {
+              "name": "RequiresLivePlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            }
+          ]
         },
         {
-          "keyword": "CreateDebris"
+          "keyword": "CreateDebris",
+          "fields": [
+            {
+              "name": "PutInContainer",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "ParticleSystem",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "Count",
+              "value_type": {
+                "kind": "int"
+              },
+              "parse_fn": "INI::parseInt"
+            },
+            {
+              "name": "IgnorePrimaryObstacle",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "OrientInForceDirection",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "ExtraBounciness",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal"
+            },
+            {
+              "name": "ExtraFriction",
+              "value_type": {
+                "kind": "unknown",
+                "parse_fn": "parseFrictionPerSec"
+              },
+              "parse_fn": "parseFrictionPerSec"
+            },
+            {
+              "name": "Offset",
+              "value_type": {
+                "kind": "coord3_d"
+              },
+              "parse_fn": "INI::parseCoord3D"
+            },
+            {
+              "name": "Disposition",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "debris_disposition"
+              },
+              "parse_fn": "INI::parseBitString32"
+            },
+            {
+              "name": "DispositionIntensity",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal"
+            },
+            {
+              "name": "SpinRate",
+              "value_type": {
+                "kind": "angle_real"
+              },
+              "parse_fn": "INI::parseAngularVelocityReal"
+            },
+            {
+              "name": "YawRate",
+              "value_type": {
+                "kind": "angle_real"
+              },
+              "parse_fn": "INI::parseAngularVelocityReal"
+            },
+            {
+              "name": "RollRate",
+              "value_type": {
+                "kind": "angle_real"
+              },
+              "parse_fn": "INI::parseAngularVelocityReal"
+            },
+            {
+              "name": "PitchRate",
+              "value_type": {
+                "kind": "angle_real"
+              },
+              "parse_fn": "INI::parseAngularVelocityReal"
+            },
+            {
+              "name": "MinForceMagnitude",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal"
+            },
+            {
+              "name": "MaxForceMagnitude",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal"
+            },
+            {
+              "name": "MinForcePitch",
+              "value_type": {
+                "kind": "angle_real"
+              },
+              "parse_fn": "INI::parseAngleReal"
+            },
+            {
+              "name": "MaxForcePitch",
+              "value_type": {
+                "kind": "angle_real"
+              },
+              "parse_fn": "INI::parseAngleReal"
+            },
+            {
+              "name": "MinLifetime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt"
+            },
+            {
+              "name": "MaxLifetime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt"
+            },
+            {
+              "name": "SpreadFormation",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "MinDistanceAFormation",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal"
+            },
+            {
+              "name": "MinDistanceBFormation",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal"
+            },
+            {
+              "name": "MaxDistanceFormation",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal"
+            },
+            {
+              "name": "FadeIn",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "FadeOut",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "FadeTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt"
+            },
+            {
+              "name": "FadeSound",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PreserveLayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "DiesOnBadLand",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "ModelNames",
+              "value_type": {
+                "kind": "unknown",
+                "parse_fn": "parseDebrisObjectNames"
+              },
+              "parse_fn": "parseDebrisObjectNames"
+            },
+            {
+              "name": "Mass",
+              "value_type": {
+                "kind": "positive_real"
+              },
+              "parse_fn": "INI::parsePositiveNonZeroReal"
+            },
+            {
+              "name": "AnimationSet",
+              "value_type": {
+                "kind": "unknown",
+                "parse_fn": "parseAnimSet"
+              },
+              "parse_fn": "parseAnimSet"
+            },
+            {
+              "name": "FXFinal",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "fx_list"
+              },
+              "parse_fn": "INI::parseFXList"
+            },
+            {
+              "name": "OkToChangeModelColor",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "MinLODRequired",
+              "value_type": {
+                "kind": "enum",
+                "value_set": "static_game_lod"
+              },
+              "parse_fn": "INI::parseStaticGameLODLevel"
+            },
+            {
+              "name": "Shadow",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32"
+            },
+            {
+              "name": "BounceSound",
+              "value_type": {
+                "kind": "unknown",
+                "parse_fn": "INI::parseAudioEventRTS"
+              },
+              "parse_fn": "INI::parseAudioEventRTS"
+            }
+          ]
         },
         {
-          "keyword": "ApplyRandomForce"
+          "keyword": "ApplyRandomForce",
+          "fields": [
+            {
+              "name": "SpinRate",
+              "value_type": {
+                "kind": "angle_real"
+              },
+              "parse_fn": "INI::parseAngularVelocityReal"
+            },
+            {
+              "name": "MinForceMagnitude",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal"
+            },
+            {
+              "name": "MaxForceMagnitude",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal"
+            },
+            {
+              "name": "MinForcePitch",
+              "value_type": {
+                "kind": "angle_real"
+              },
+              "parse_fn": "INI::parseAngleReal"
+            },
+            {
+              "name": "MaxForcePitch",
+              "value_type": {
+                "kind": "angle_real"
+              },
+              "parse_fn": "INI::parseAngleReal"
+            }
+          ]
         },
         {
           "keyword": "DeliverPayload",
@@ -2506,13 +3320,128 @@
             {
               "keyword": "DeliveryDecal"
             }
+          ],
+          "fields": [
+            {
+              "name": "Transport",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "StartAtPreferredHeight",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "StartAtMaxSpeed",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "FormationSize",
+              "value_type": {
+                "kind": "u_int"
+              },
+              "parse_fn": "INI::parseUnsignedInt"
+            },
+            {
+              "name": "FormationSpacing",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal"
+            },
+            {
+              "name": "WeaponConvergenceFactor",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal"
+            },
+            {
+              "name": "WeaponErrorRadius",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal"
+            },
+            {
+              "name": "DelayDeliveryMax",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt"
+            },
+            {
+              "name": "Payload",
+              "value_type": {
+                "kind": "unknown",
+                "parse_fn": "parsePayload"
+              },
+              "parse_fn": "parsePayload"
+            },
+            {
+              "name": "PutInContainer",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            }
           ]
         },
         {
-          "keyword": "FireWeapon"
+          "keyword": "FireWeapon",
+          "fields": [
+            {
+              "name": "Weapon",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "weapon"
+              },
+              "parse_fn": "INI::parseWeaponTemplate"
+            }
+          ]
         },
         {
-          "keyword": "Attack"
+          "keyword": "Attack",
+          "fields": [
+            {
+              "name": "NumberOfShots",
+              "value_type": {
+                "kind": "int"
+              },
+              "parse_fn": "INI::parseInt"
+            },
+            {
+              "name": "WeaponSlot",
+              "value_type": {
+                "kind": "enum",
+                "value_set": "weapon_slot"
+              },
+              "parse_fn": "INI::parseLookupList"
+            },
+            {
+              "name": "DeliveryDecal",
+              "value_type": {
+                "kind": "unknown",
+                "parse_fn": "RadiusDecalTemplate::parseRadiusDecalTemplate"
+              },
+              "parse_fn": "RadiusDecalTemplate::parseRadiusDecalTemplate"
+            },
+            {
+              "name": "DeliveryDecalRadius",
+              "value_type": {
+                "kind": "real"
+              },
+              "parse_fn": "INI::parseReal"
+            }
+          ]
         }
       ]
     },
@@ -36484,6 +37413,84 @@
         }
       ],
       "doc": "TheGunshipCreateLocTypeNames (SpectreGunshipDeploymentUpdate.cpp)"
+    },
+    {
+      "id": "view_shake_type",
+      "members": [
+        {
+          "name": "SUBTLE"
+        },
+        {
+          "name": "NORMAL"
+        },
+        {
+          "name": "STRONG"
+        },
+        {
+          "name": "SEVERE"
+        },
+        {
+          "name": "CINE_EXTREME"
+        },
+        {
+          "name": "CINE_INSANE"
+        }
+      ]
+    },
+    {
+      "id": "terrain_scorch_type",
+      "members": [
+        {
+          "name": "SCORCH_1"
+        },
+        {
+          "name": "SCORCH_2"
+        },
+        {
+          "name": "SCORCH_3"
+        },
+        {
+          "name": "SCORCH_4"
+        },
+        {
+          "name": "SHADOW_SCORCH"
+        },
+        {
+          "name": "RANDOM"
+        }
+      ]
+    },
+    {
+      "id": "debris_disposition",
+      "members": [
+        {
+          "name": "LIKE_EXISTING"
+        },
+        {
+          "name": "ON_GROUND_ALIGNED"
+        },
+        {
+          "name": "SEND_IT_FLYING"
+        },
+        {
+          "name": "SEND_IT_UP"
+        },
+        {
+          "name": "SEND_IT_OUT"
+        },
+        {
+          "name": "RANDOM_FORCE"
+        },
+        {
+          "name": "FLOATING"
+        },
+        {
+          "name": "INHERIT_VELOCITY"
+        },
+        {
+          "name": "WHIRLING"
+        }
+      ]
     }
   ],
   "builtins": [

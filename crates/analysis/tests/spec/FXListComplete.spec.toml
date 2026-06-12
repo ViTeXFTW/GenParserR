@@ -3,3 +3,8 @@
 [[complete]]
 at = "$1"
 includes = ["ParticleSystem", "Sound", "Tracer"]
+
+# Inside a ParticleSystem nugget -> its own fields are offered.
+[[complete]]
+at = "$2"
+includes = ["Name", "Count", "OrientToObject", "AttachToObject"]
