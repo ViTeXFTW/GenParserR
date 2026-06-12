@@ -70,7 +70,7 @@
             ]
           },
           "parse_fn": "ArmorTemplate::parseArmorCoefficients",
-          "doc": "`<DamageType> <Percent>` — damage multiplier for that damage type."
+          "doc": "`<DamageType> <Percent>` \u00e2\u20ac\u201d damage multiplier for that damage type."
         }
       ],
       "module_slots": []
@@ -7016,8 +7016,17 @@
         {
           "name": "FX",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "parseFX"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "enum",
+                "value_set": "slow_death_phase"
+              },
+              {
+                "kind": "reference",
+                "ref_kind": "fx_list"
+              }
+            ]
           },
           "parse_fn": "parseFX",
           "doc": null
@@ -7025,8 +7034,17 @@
         {
           "name": "OCL",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "parseOCL"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "enum",
+                "value_set": "slow_death_phase"
+              },
+              {
+                "kind": "reference",
+                "ref_kind": "object_creation_list"
+              }
+            ]
           },
           "parse_fn": "parseOCL",
           "doc": null
@@ -15290,8 +15308,17 @@
         {
           "name": "FX",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "parseFX"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "enum",
+                "value_set": "slow_death_phase"
+              },
+              {
+                "kind": "reference",
+                "ref_kind": "fx_list"
+              }
+            ]
           },
           "parse_fn": "parseFX",
           "doc": null
@@ -15299,8 +15326,17 @@
         {
           "name": "OCL",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "parseOCL"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "enum",
+                "value_set": "slow_death_phase"
+              },
+              {
+                "kind": "reference",
+                "ref_kind": "object_creation_list"
+              }
+            ]
           },
           "parse_fn": "parseOCL",
           "doc": null
@@ -17174,8 +17210,17 @@
         {
           "name": "FX",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "parseFX"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "enum",
+                "value_set": "slow_death_phase"
+              },
+              {
+                "kind": "reference",
+                "ref_kind": "fx_list"
+              }
+            ]
           },
           "parse_fn": "parseFX",
           "doc": null
@@ -17183,8 +17228,17 @@
         {
           "name": "OCL",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "parseOCL"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "enum",
+                "value_set": "slow_death_phase"
+              },
+              {
+                "kind": "reference",
+                "ref_kind": "object_creation_list"
+              }
+            ]
           },
           "parse_fn": "parseOCL",
           "doc": null
@@ -19016,8 +19070,17 @@
         {
           "name": "FX",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "parseFX"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "enum",
+                "value_set": "slow_death_phase"
+              },
+              {
+                "kind": "reference",
+                "ref_kind": "fx_list"
+              }
+            ]
           },
           "parse_fn": "parseFX",
           "doc": null
@@ -19025,8 +19088,17 @@
         {
           "name": "OCL",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "parseOCL"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "enum",
+                "value_set": "slow_death_phase"
+              },
+              {
+                "kind": "reference",
+                "ref_kind": "object_creation_list"
+              }
+            ]
           },
           "parse_fn": "parseOCL",
           "doc": null
@@ -26039,8 +26111,17 @@
         {
           "name": "FX",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "parseFX"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "enum",
+                "value_set": "slow_death_phase"
+              },
+              {
+                "kind": "reference",
+                "ref_kind": "fx_list"
+              }
+            ]
           },
           "parse_fn": "parseFX",
           "doc": null
@@ -26048,8 +26129,17 @@
         {
           "name": "OCL",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "parseOCL"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "enum",
+                "value_set": "slow_death_phase"
+              },
+              {
+                "kind": "reference",
+                "ref_kind": "object_creation_list"
+              }
+            ]
           },
           "parse_fn": "parseOCL",
           "doc": null
@@ -27687,8 +27777,17 @@
         {
           "name": "OCL",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "parseOCL"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "enum",
+                "value_set": "structure_collapse_phase"
+              },
+              {
+                "kind": "reference",
+                "ref_kind": "object_creation_list"
+              }
+            ]
           },
           "parse_fn": "parseOCL",
           "doc": null
@@ -27696,8 +27795,17 @@
         {
           "name": "FXList",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "parseFX"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "enum",
+                "value_set": "structure_collapse_phase"
+              },
+              {
+                "kind": "reference",
+                "ref_kind": "fx_list"
+              }
+            ]
           },
           "parse_fn": "parseFX",
           "doc": null
@@ -27861,8 +27969,17 @@
         {
           "name": "OCL",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "parseOCL"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "enum",
+                "value_set": "structure_topple_phase"
+              },
+              {
+                "kind": "reference",
+                "ref_kind": "object_creation_list"
+              }
+            ]
           },
           "parse_fn": "parseOCL",
           "doc": null
@@ -36424,7 +36541,7 @@
           "value": 44
         }
       ],
-      "doc": "ObjectStatusTypes — runtime status bits objects can carry/grant"
+      "doc": "ObjectStatusTypes \u00e2\u20ac\u201d runtime status bits objects can carry/grant"
     },
     {
       "id": "model_condition",
@@ -36902,7 +37019,7 @@
           "value": 117
         }
       ],
-      "doc": "ModelConditionFlagType — drives ConditionState selection in draw modules"
+      "doc": "ModelConditionFlagType \u00e2\u20ac\u201d drives ConditionState selection in draw modules"
     },
     {
       "id": "static_game_lod",
@@ -37489,6 +37606,51 @@
         },
         {
           "name": "WHIRLING"
+        }
+      ]
+    },
+    {
+      "id": "slow_death_phase",
+      "members": [
+        {
+          "name": "INITIAL"
+        },
+        {
+          "name": "MIDPOINT"
+        },
+        {
+          "name": "FINAL"
+        }
+      ]
+    },
+    {
+      "id": "structure_collapse_phase",
+      "members": [
+        {
+          "name": "INITIAL"
+        },
+        {
+          "name": "DELAY"
+        },
+        {
+          "name": "BURST"
+        },
+        {
+          "name": "FINAL"
+        }
+      ]
+    },
+    {
+      "id": "structure_topple_phase",
+      "members": [
+        {
+          "name": "INITIAL"
+        },
+        {
+          "name": "DELAY"
+        },
+        {
+          "name": "FINAL"
         }
       ]
     }
