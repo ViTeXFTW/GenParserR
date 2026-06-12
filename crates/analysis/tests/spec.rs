@@ -247,7 +247,7 @@ fn check_complete(
     let Some(&offset) = markers.get(&spec.at) else {
         return Err(format!("cursor marker `{}` not present in .ini", spec.at));
     };
-    let labels: Vec<String> = complete(analyzer, parse, offset, Some(index))
+    let labels: Vec<String> = complete(analyzer, parse, offset, Some(index), None)
         .into_iter()
         .map(|c| c.label)
         .collect();

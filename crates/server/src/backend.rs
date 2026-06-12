@@ -86,6 +86,46 @@ fn canonical_uri(uri: Url) -> Url {
     uri
 }
 
+/// Parse string table key names from a `.str` file (the Generals INI string format).
+/// Each block starts with a bare key name, followed by `LANG: "text"` lines, and `END`.
+fn parse_str_keys(content: &str) -> Vec<String> {
+    let mut keys = Vec::new();
+    let mut expect_key = true;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with(';') {
+            continue;
+        }
+        if trimmed.eq_ignore_ascii_case("END") {
+            expect_key = true;
+        } else if expect_key {
+            keys.push(trimmed.to_string());
+            expect_key = false;
+        }
+        // else: inside a block (language entries) — skip
+    }
+    keys
+}
+
+/// Read the sibling `.str` file for `ini_url` (same directory, same basename)
+/// and return its string table keys, or an empty vec if not found.
+fn load_sibling_str_keys(ini_url: &Url) -> Vec<String> {
+    let path = match ini_url.to_file_path() {
+        Ok(p) => p,
+        Err(_) => return Vec::new(),
+    };
+    // map.ini → map.str (same stem, .str extension)
+    let str_path = path.with_extension("str");
+    if let Some(text) = read_lossy(&str_path) {
+        return parse_str_keys(&text);
+    }
+    // Also try the uppercase variant (game data ships with mixed casing).
+    let str_upper = path.with_extension("STR");
+    read_lossy(&str_upper)
+        .map(|t| parse_str_keys(&t))
+        .unwrap_or_default()
+}
+
 /// Walk `roots` and index every `.ini` file (definitions + reference sites + module tags).
 /// CPU/IO heavy — runs via `spawn_blocking` from [`Backend::scan_workspace`].
 fn scan_roots(
@@ -173,10 +213,12 @@ impl Backend {
         let defs = definitions_in(&self.analyzer, &parse, uri.as_str());
         let refs = references_in(&self.analyzer, &parse);
         let tags = module_tags_in(&self.analyzer, &parse);
+        let str_keys = load_sibling_str_keys(&uri);
         if let Ok(mut idx) = self.index.write() {
             idx.set_file(uri.as_str(), defs);
             idx.set_file_refs(uri.as_str(), refs);
             idx.set_file_tags(uri.as_str(), tags);
+            idx.set_ini_string_keys(uri.as_str(), str_keys);
         }
 
         let enc = self.enc();
@@ -508,7 +550,7 @@ impl LanguageServer for Backend {
         let idx = self.index.read().ok();
         let snippets = self.snippet_support.get().copied().unwrap_or(false);
         let items: Vec<CompletionItem> =
-            completion::complete(&self.analyzer, &parse, offset, idx.as_deref())
+            completion::complete(&self.analyzer, &parse, offset, idx.as_deref(), Some(uri.as_str()))
                 .into_iter()
                 .map(|c| convert::to_lsp_completion(c, snippets))
                 .collect();

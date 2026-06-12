@@ -70,6 +70,9 @@ pub struct WorkspaceIndex {
     object_tags: HashMap<String, Vec<String>>,
     /// Reverse map: file → (object_lower, tag) for removal on re-index.
     file_tags: HashMap<String, Vec<(String, String)>>,
+    /// String table keys from companion `.str` files, keyed by the INI file URI.
+    /// Powers DisplayName completions when a map.str is present.
+    ini_str_keys: HashMap<String, Vec<String>>,
 }
 
 impl WorkspaceIndex {
@@ -205,6 +208,24 @@ impl WorkspaceIndex {
             .get(&name.to_ascii_lowercase())
             .into_iter()
             .flat_map(|tags| tags.iter().map(|t| t.as_str()))
+    }
+
+    /// Store string table keys parsed from the `.str` file co-located with `ini_file`.
+    /// An empty `keys` list removes the entry.
+    pub fn set_ini_string_keys(&mut self, ini_file: &str, keys: Vec<String>) {
+        if keys.is_empty() {
+            self.ini_str_keys.remove(ini_file);
+        } else {
+            self.ini_str_keys.insert(ini_file.to_string(), keys);
+        }
+    }
+
+    /// String table keys available to `ini_file` from its companion `.str` file.
+    pub fn string_keys_for_ini<'a>(&'a self, ini_file: &str) -> impl Iterator<Item = &'a str> {
+        self.ini_str_keys
+            .get(ini_file)
+            .into_iter()
+            .flat_map(|keys| keys.iter().map(|k| k.as_str()))
     }
 
     /// Is `name` defined for `kind` anywhere in the workspace?

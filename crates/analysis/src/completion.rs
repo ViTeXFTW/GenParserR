@@ -38,11 +38,13 @@ pub struct Completion {
 }
 
 /// Compute completions at byte `offset`.
+/// `file` is the current document URI, used for string-key lookup from co-located `.str` files.
 pub fn complete(
     analyzer: &Analyzer,
     parse: &Parse,
     offset: u32,
     index: Option<&WorkspaceIndex>,
+    file: Option<&str>,
 ) -> Vec<Completion> {
     let root = parse.syntax();
     let ctx = classify_position(analyzer, &root, offset);
@@ -53,7 +55,7 @@ pub fn complete(
             scope_node,
             key,
             value_index,
-        } => field_value_completions(analyzer, &scope_node, &key, value_index, index),
+        } => field_value_completions(analyzer, &scope_node, &key, value_index, index, file),
         PosContext::ModuleName { slot_accepts } => module_name_completions(analyzer, &slot_accepts),
     }
 }
@@ -195,6 +197,7 @@ fn field_value_completions(
     key: &str,
     value_index: usize,
     index: Option<&WorkspaceIndex>,
+    file: Option<&str>,
 ) -> Vec<Completion> {
     // RemoveModule / ReplaceModule: suggest module tags from the origin object.
     if key.eq_ignore_ascii_case("RemoveModule") || key.eq_ignore_ascii_case("ReplaceModule") {
@@ -219,11 +222,22 @@ fn field_value_completions(
             }
         }
     }
-    let scope = scope_schema(analyzer, scope_node);
-    let Some(field) = scope.field(key) else {
-        return Vec::new();
+    // DisplayName: add string table keys from the companion .str file when available.
+    let mut base = {
+        let scope = scope_schema(analyzer, scope_node);
+        scope.field(key).map(|f| completions_for_type(analyzer, &f.value_type, value_index, index)).unwrap_or_default()
     };
-    completions_for_type(analyzer, &field.value_type, value_index, index)
+    if key.eq_ignore_ascii_case("DisplayName") {
+        if let (Some(idx), Some(f)) = (index, file) {
+            base.extend(idx.string_keys_for_ini(f).map(|k| Completion {
+                label: k.to_string(),
+                kind: CompletionKind::Value,
+                detail: Some("string key".into()),
+                insert: None,
+            }));
+        }
+    }
+    base
 }
 
 fn completions_for_type(
@@ -410,7 +424,7 @@ mod tests {
 
     fn labels(src: &str, offset: u32) -> Vec<String> {
         let a = Analyzer::embedded();
-        complete(&a, &a.parse(src), offset, None)
+        complete(&a, &a.parse(src), offset, None, None)
             .into_iter()
             .map(|c| c.label)
             .collect()
