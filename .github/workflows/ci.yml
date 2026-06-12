@@ -1,0 +1,48 @@
+# Test gate on pushes and pull requests: the full Rust suite (unit, spec,
+# schema round-trip, incremental fuzz) on Linux and Windows, the wire-level
+# e2e script against the real binary, and a compile check of the VS Code
+# extension. The corpus gate stays local-only (it needs the fetched game
+# data); run it before tagging a release — see docs/release.md.
+
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test
+        run: cargo test
+      - name: e2e (stdio wire protocol)
+        shell: bash
+        run: |
+          cargo build -p genparser-server
+          bin=target/debug/genparser-lsp
+          [ "$RUNNER_OS" = "Windows" ] && bin="$bin.exe"
+          python crates/server/tests/e2e.py "$bin"
+
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Compile VS Code extension
+        working-directory: editors/vscode
+        run: |
+          npm ci
+          npm run compile

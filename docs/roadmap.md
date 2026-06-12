@@ -3,9 +3,10 @@
 The development plan for taking `genparser` from working prototype to a
 well-rounded, distributable language server. Eight phases; each is either
 **done** (with what was actually implemented) or **planned** (with what it is
-meant to implement). Phases are executed in order, but Phase 5 (schema
-scale-out) is a continuous workstream that runs alongside everything after
-Phase 2.
+meant to implement). Phases are executed in order, with two exceptions:
+Phase 5 (schema scale-out) is a continuous workstream that runs alongside
+everything after Phase 2, and Phase 7 (distribution) was brought forward of
+Phase 6 so releases could ship.
 
 | Phase | Title | Status |
 |---|---|---|
@@ -16,7 +17,7 @@ Phase 2.
 | 4 | Value-type validation completion | ✅ done (2026-06-11) |
 | 5 | Schema scale-out | 🔄 in progress (batches 1–3 done 2026-06-11; milestones M1–M4 reached) |
 | 6 | LSP breadth | 🔲 planned |
-| 7 | Distribution | 🔲 planned |
+| 7 | Distribution | ✅ done (2026-06-12; first tagged release pending) |
 
 ---
 
@@ -351,21 +352,40 @@ Each feature lands spec-first for the analysis layer plus an `e2e.py`
 assertion for the wire handler. Before this phase: reassess the pinned,
 archived tower-lsp 0.20 against forks (`tower-lsp-server`, `async-lsp`).
 
-## Phase 7 — Distribution 🔲
+## Phase 7 — Distribution ✅
 
-**Goal:** installable by modders without a Rust toolchain.
+**Goal:** installable by modders without a Rust toolchain. Full procedure:
+[`release.md`](release.md).
 
-**Planned:**
+**Implemented:**
 
-- CI matrix (win-x64, linux-x64, mac-x64/arm64) → GitHub Releases with
-  checksums, tag-triggered.
-- VS Code: platform-specific `.vsix` via `vsce package --target` with the
-  bundled binary (config-path override kept); publish to the Marketplace and
-  OpenVSX (GPL-3.0 is Marketplace-compatible).
-- README config blocks for Neovim / Helix / Zed.
+- **Tag-triggered release pipeline** (`.github/workflows/release.yml`): a
+  `vX.Y.Z` tag (gated to match the workspace `Cargo.toml` version) builds
+  `genparser-lsp` for win-x64 (MSVC), linux-x64 (musl — fully static, all
+  deps are pure Rust), mac-x64 and mac-arm64 (cross-compiled on the arm64
+  runner); archives are created on the build machine so the Unix exec bit
+  survives, each with a `.sha256`, plus an aggregate `SHA256SUMS.txt` on the
+  GitHub Release.
+- **Platform-specific `.vsix`** per target via `vsce package --target`
+  (win32-x64 / linux-x64 / darwin-x64 / darwin-arm64) with the binary bundled
+  under the extension's `server/` directory; the `genparser.server.path`
+  override is kept, and the extension re-sets the exec bit on activate (zip
+  installs can drop it). Extension version is stamped from the tag; added
+  `repository` metadata, `.vscodeignore`, and the repo-root GPL-3.0 `LICENSE`
+  (shipped in archives and `.vsix`).
+- **Marketplace + Open VSX publishing** as separate jobs keyed on optional
+  `VSCE_PAT` / `OVSX_PAT` secrets — skipped (never failed) when absent, so
+  the GitHub Release doesn't depend on marketplace credentials.
+- **CI test gate** (`.github/workflows/ci.yml`): `cargo test` + the stdio
+  e2e script on Linux and Windows, plus an extension compile check, on every
+  push/PR. The corpus gate stays a documented local pre-tag step (needs the
+  fetched game data).
+- README gained an Install section (Marketplace / Releases / static-binary
+  notes); Neovim / Helix / Zed config blocks were already in place.
 
-**Exit criteria:** a clean-machine Marketplace install gives diagnostics on
-a ZH INI; the release pipeline is reproducible from a tag.
+**Exit criteria** (verified per release via `docs/release.md`): a
+clean-machine Marketplace install gives diagnostics on a ZH INI; the
+pipeline is reproducible from a tag.
 
 ---
 

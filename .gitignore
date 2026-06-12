@@ -1,9 +1,10 @@
 .*
 !.gitignore
+!.github/
+!.vscodeignore
 
 /target
 **/*.rs.bk
-Cargo.lock
 
 # VS Code extension
 editors/vscode/node_modules

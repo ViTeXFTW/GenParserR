@@ -5,6 +5,10 @@
   "version": "0.1.0",
   "license": "GPL-3.0-or-later",
   "publisher": "genparser",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ViTeXFTW/GenParserR.git"
+  },
   "engines": {
     "vscode": "^1.84.0"
   },
@@ -62,7 +66,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "vscode:prepublish": "npm run compile",
-    "package": "npx --yes @vscode/vsce package --allow-missing-repository"
+    "package": "npx --yes @vscode/vsce package"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"

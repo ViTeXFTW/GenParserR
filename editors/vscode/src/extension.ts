@@ -71,6 +71,14 @@ function resolveServerPath(context: vscode.ExtensionContext): string | undefined
   const exe = process.platform === "win32" ? "genparser-lsp.exe" : "genparser-lsp";
   const bundled = context.asAbsolutePath(path.join("server", exe));
   if (fs.existsSync(bundled)) {
+    if (process.platform !== "win32") {
+      // The zip-based .vsix install can drop the executable bit.
+      try {
+        fs.chmodSync(bundled, 0o755);
+      } catch {
+        // Read-only extension dir: either the bit survived or spawn fails loudly.
+      }
+    }
     return bundled;
   }
 

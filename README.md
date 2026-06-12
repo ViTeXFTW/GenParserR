@@ -14,6 +14,25 @@ dispatch table and `ModuleFactory` enumerate the block and module types. The
 schema lives in `crates/schema/schema.json` and is grown by hand against that
 source.
 
+## Install
+
+No Rust toolchain needed:
+
+* **VS Code** — install the *Generals Zero Hour INI* extension from the
+  Marketplace or Open VSX (the platform `.vsix` bundles the server binary), or
+  grab a `.vsix` from
+  [GitHub Releases](https://github.com/ViTeXFTW/GenParserR/releases) and run
+  `code --install-extension genparser-vscode-<platform>-<version>.vsix`.
+* **Any other editor** — download the `genparser-lsp` archive for your
+  platform from
+  [GitHub Releases](https://github.com/ViTeXFTW/GenParserR/releases) (verify
+  with the attached `SHA256SUMS.txt`), unpack it somewhere on your `PATH`, and
+  use the config blocks under [Editor setup](#editor-setup). The Linux binary
+  is fully static (musl) and runs on any x64 distro.
+
+Releases are tag-triggered and reproducible — see
+[`docs/release.md`](docs/release.md).
+
 ## Workspace layout
 
 ```
@@ -83,8 +102,12 @@ The server speaks LSP over stdio, so any LSP-capable editor works.
 
 ### VS Code
 
-Use the bundled extension in `editors/vscode/` (see its README). It claims the
-`generals-ini` language id for `.ini` files and launches the server.
+Install the published extension (see [Install](#install)) — it bundles the
+server binary for your platform. To develop against a local build instead, use
+the extension source in `editors/vscode/` (see its README); the
+`genparser.server.path` setting overrides the bundled binary either way. The
+extension claims the `generals-ini` language id for `.ini` files and launches
+the server.
 
 ### Neovim (nvim-lspconfig)
 
