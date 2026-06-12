@@ -160,6 +160,13 @@ fn field_key_completions(analyzer: &Analyzer, scope_node: &SyntaxNode) -> Vec<Co
             detail: Some("module slot".into()),
         });
     }
+    for sub in scope.sub_blocks() {
+        out.push(Completion {
+            label: sub.keyword.clone(),
+            kind: CompletionKind::Block,
+            detail: Some("sub-block".into()),
+        });
+    }
     out
 }
 

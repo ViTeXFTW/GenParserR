@@ -1,0 +1,5 @@
+# Blank line inside FXList body offers sub-block nugget keywords.
+
+[[complete]]
+at = "$1"
+includes = ["ParticleSystem", "Sound", "Tracer"]
