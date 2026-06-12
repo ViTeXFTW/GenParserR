@@ -1,0 +1,38 @@
+no_errors = true
+
+# PLAYER_UPGRADE nth=1: QFBadTank's WeaponSet → diagnostic fires → offers remove + WeaponSetUpgrade
+[[diag]]
+severity = "warning"
+code = "unreachable-set"
+on = "PLAYER_UPGRADE"
+nth = 1
+
+[[action]]
+on = "PLAYER_UPGRADE"
+nth = 1
+offers = ["Remove unreachable", "WeaponSetUpgrade"]
+
+# PLAYER_UPGRADE nth=2: QFBadTank's ArmorSet → diagnostic fires → offers remove + ArmorUpgrade
+[[diag]]
+severity = "warning"
+code = "unreachable-set"
+on = "PLAYER_UPGRADE"
+nth = 2
+
+[[action]]
+on = "PLAYER_UPGRADE"
+nth = 2
+offers = ["Remove unreachable", "ArmorUpgrade"]
+
+# PLAYER_UPGRADE nth=3: QFGoodTank's WeaponSet → reachable → no diagnostic → no remove action
+[[diag]]
+severity = "warning"
+code = "unreachable-set"
+on = "PLAYER_UPGRADE"
+nth = 3
+absent = true
+
+[[action]]
+on = "PLAYER_UPGRADE"
+nth = 3
+not_offers = ["Remove unreachable"]

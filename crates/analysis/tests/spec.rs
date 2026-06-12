@@ -35,10 +35,11 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use genparser_analysis::actions;
 use genparser_analysis::completion::complete;
 use genparser_analysis::diagnostics::{diagnose, Severity};
 use genparser_analysis::index::{definitions_in, WorkspaceIndex};
-use genparser_analysis::Analyzer;
+use genparser_analysis::{Analyzer, Span};
 
 use serde::Deserialize;
 
@@ -54,6 +55,25 @@ struct Spec {
     diag: Vec<DiagSpec>,
     #[serde(default)]
     complete: Vec<CompleteSpec>,
+    #[serde(default)]
+    action: Vec<ActionSpec>,
+}
+
+#[derive(Deserialize)]
+struct ActionSpec {
+    /// Token text whose span is used as the `range` for the code-action request.
+    on: String,
+    /// Which occurrence of `on` to use (1-based, default 1).
+    #[serde(default = "one")]
+    nth: usize,
+    /// Fix titles that must be offered (substring match).
+    #[serde(default)]
+    offers: Vec<String>,
+    /// Fix titles that must NOT be offered (substring match).
+    #[serde(default)]
+    not_offers: Vec<String>,
+    #[serde(default)]
+    xfail: bool,
 }
 
 #[derive(Deserialize)]
@@ -268,6 +288,47 @@ fn check_complete(
     }
 }
 
+/// Evaluate one action assertion.
+fn check_action(
+    spec: &ActionSpec,
+    search: &str,
+    analyzer: &Analyzer,
+    parse: &genparser_syntax::Parse,
+    src: &str,
+    diags: &[genparser_analysis::Diagnostic],
+    index: &WorkspaceIndex,
+) -> Result<(), String> {
+    let Some(off) = nth_token_offset(search, &spec.on, spec.nth) else {
+        return Err(format!(
+            "token `{}` (#{}) not found in source",
+            spec.on, spec.nth
+        ));
+    };
+    let range = Span::new(off, off + spec.on.len() as u32);
+    let fixes = actions::fixes(analyzer, parse, src, range, diags, Some(index));
+    let titles: Vec<&str> = fixes.iter().map(|f| f.title.as_str()).collect();
+
+    let missing: Vec<&String> = spec
+        .offers
+        .iter()
+        .filter(|want| !titles.iter().any(|t| t.contains(want.as_str())))
+        .collect();
+    let unexpected: Vec<&String> = spec
+        .not_offers
+        .iter()
+        .filter(|unwanted| titles.iter().any(|t| t.contains(unwanted.as_str())))
+        .collect();
+
+    if missing.is_empty() && unexpected.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "action at `{}` (#{}) — missing {:?}, unexpected {:?}; got: {:?}",
+            spec.on, spec.nth, missing, unexpected, titles
+        ))
+    }
+}
+
 fn render_diags(diags: &[genparser_analysis::Diagnostic]) -> String {
     if diags.is_empty() {
         return "(none)".into();
@@ -341,6 +402,10 @@ fn specs_hold() {
         for c in &spec.complete {
             let result = check_complete(c, &markers, &analyzer, &parse, &index);
             record(c.xfail, result, &name, &mut failures, &mut pending);
+        }
+        for a in &spec.action {
+            let result = check_action(a, &search, &analyzer, &parse, &src, &diags, &index);
+            record(a.xfail, result, &name, &mut failures, &mut pending);
         }
     }
 

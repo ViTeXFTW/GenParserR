@@ -1,0 +1,24 @@
+# MissingUpgrade: unresolved Upgrade reference → offers Create stub
+[[diag]]
+severity = "warning"
+code = "unresolved-reference"
+on = "MissingUpgrade"
+
+[[action]]
+on = "MissingUpgrade"
+offers = ["Create stub"]
+
+# MissingSound: unresolved AudioEvent reference → ambiguous kind → no stub
+[[diag]]
+severity = "warning"
+code = "unresolved-reference"
+on = "MissingSound"
+
+[[action]]
+on = "MissingSound"
+not_offers = ["Create stub"]
+
+# ExistingUpgrade: resolved reference → no stub offered
+[[action]]
+on = "ExistingUpgrade"
+not_offers = ["Create stub"]

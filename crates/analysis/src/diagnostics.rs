@@ -92,6 +92,45 @@ pub const KNOWN_CODES: &[&str] = &[
 /// The head word of the in-file suppression pragma comment.
 const PRAGMA: &str = "genparser-disable";
 
+/// If `tok` is a file-scope pragma comment (`; genparser-disable[: ...]`),
+/// return `(base, rest)` where `base` is the absolute byte offset of `rest`
+/// inside the file and `rest` is the code-list portion (after the pragma
+/// keyword and optional `:`). Returns `None` if the token is not a pragma.
+pub(crate) fn pragma_rest(tok: &SyntaxToken) -> Option<(u32, &str)> {
+    if tok.kind() != SyntaxKind::COMMENT {
+        return None;
+    }
+    let text = tok.text();
+    let body = text.trim_start_matches(';').trim_start();
+    let rest = body.strip_prefix(PRAGMA)?;
+    let rest = rest.trim_start();
+    let rest = rest.strip_prefix(':').unwrap_or(rest);
+    let base = u32::from(tok.text_range().start()) + (text.len() - rest.len()) as u32;
+    Some((base, rest))
+}
+
+/// Iterate the word positions `(start, end)` within a pragma `rest` string,
+/// skipping separators (space, tab, comma, carriage-return). The returned
+/// offsets are byte-relative to `rest`.
+pub(crate) fn pragma_words(rest: &str) -> impl Iterator<Item = (usize, usize)> + '_ {
+    let is_sep = |b: u8| matches!(b, b' ' | b'\t' | b',' | b'\r');
+    let bytes = rest.as_bytes();
+    let mut i = 0usize;
+    std::iter::from_fn(move || {
+        while i < bytes.len() && is_sep(bytes[i]) {
+            i += 1;
+        }
+        if i >= bytes.len() {
+            return None;
+        }
+        let start = i;
+        while i < bytes.len() && !is_sep(bytes[i]) {
+            i += 1;
+        }
+        Some((start, i))
+    })
+}
+
 /// Honor file-scope suppression pragmas: a comment line outside any block of
 /// the form `; genparser-disable: code, code …` (colon optional; codes
 /// separated by commas and/or whitespace; multiple pragma comments
@@ -111,37 +150,14 @@ fn apply_suppressions(parse: &Parse, out: &mut Vec<Diagnostic>) {
     // scanned (the pragma is a whole-file switch, not a local one).
     for el in parse.syntax().children_with_tokens() {
         let Some(tok) = el.as_token() else { continue };
-        if tok.kind() != SyntaxKind::COMMENT {
-            continue;
-        }
-        let text = tok.text();
-        // The pragma word must be the first thing after the `;`s.
-        let body = text.trim_start_matches(';').trim_start();
-        let Some(rest) = body.strip_prefix(PRAGMA) else { continue };
-        let rest = rest.trim_start();
-        let rest = rest.strip_prefix(':').unwrap_or(rest);
-        // Byte offset of `rest` inside the comment token, for hint spans.
-        let base = u32::from(tok.text_range().start()) + (text.len() - rest.len()) as u32;
-        // `\r` because a comment token on a CRLF line includes the carriage
-        // return.
-        let is_sep = |b: u8| matches!(b, b' ' | b'\t' | b',' | b'\r');
-        let bytes = rest.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            if is_sep(bytes[i]) {
-                i += 1;
-                continue;
-            }
-            let start = i;
-            while i < bytes.len() && !is_sep(bytes[i]) {
-                i += 1;
-            }
-            let word = &rest[start..i];
+        let Some((base, rest)) = pragma_rest(&tok) else { continue };
+        for (start, end) in pragma_words(rest) {
+            let word = &rest[start..end];
             if let Some(code) = KNOWN_CODES.iter().find(|c| **c == word) {
                 suppressed.push(code);
             } else {
                 hints.push(Diagnostic {
-                    span: Span::new(base + start as u32, base + i as u32),
+                    span: Span::new(base + start as u32, base + end as u32),
                     severity: Severity::Hint,
                     code: "unknown-suppression",
                     message: format!("`{word}` is not a known diagnostic code"),

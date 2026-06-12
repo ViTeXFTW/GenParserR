@@ -581,19 +581,53 @@ impl LanguageServer for Backend {
 
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
         let uri = canonical_uri(params.text_document.uri);
-        let Some((rope, parse)) = self.doc(&uri) else {
+
+        // Take the diagnostics cache out without holding the DashMap entry
+        // across the index lock (avoids lock-order deadlock with the index RwLock).
+        let Some((rope, parse, text, version, mut cache)) =
+            self.docs.get_mut(&uri).map(|mut d| {
+                (
+                    d.rope.clone(),
+                    d.parse.clone(),
+                    Arc::clone(&d.text),
+                    d.version,
+                    std::mem::take(&mut d.diag_cache),
+                )
+            })
+        else {
             return Ok(None);
         };
+
         let enc = self.enc();
         let start = convert::position_to_offset(&rope, params.range.start, enc);
         let end = convert::position_to_offset(&rope, params.range.end, enc);
-        let text = rope.to_string();
-        let fixes = actions::fixes(
-            &self.analyzer,
-            &parse,
-            &text,
-            genparser_analysis::Span::new(start, end),
-        );
+
+        let fixes = {
+            let idx = self.index.read().ok();
+            let diags = diagnostics::diagnose_with_cache(
+                &self.analyzer,
+                &parse,
+                idx.as_deref(),
+                Some(uri.as_str()),
+                &mut cache,
+            );
+            actions::fixes(
+                &self.analyzer,
+                &parse,
+                &text,
+                genparser_analysis::Span::new(start, end),
+                &diags,
+                idx.as_deref(),
+            )
+        };
+
+        // Hand the warmed cache back unless a newer change superseded us.
+        if let Some(mut entry) = self.docs.get_mut(&uri) {
+            if entry.version == version {
+                entry.diag_cache = cache;
+            }
+        }
+
         let response: CodeActionResponse = fixes
             .into_iter()
             .map(|f| {
