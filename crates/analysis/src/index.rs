@@ -7,10 +7,11 @@
 
 use std::collections::HashMap;
 
-use genparser_schema::RefKind;
-use genparser_syntax::ast::Block;
-use genparser_syntax::{Parse, SyntaxKind};
+use genparser_schema::{RefKind, ValueType};
+use genparser_syntax::ast::{Block, Field};
+use genparser_syntax::{Parse, SyntaxKind, SyntaxNode};
 
+use crate::model::{scope_schema, ScopeSchema};
 use crate::{Analyzer, Span};
 
 /// A definition's location within a file.
@@ -23,6 +24,14 @@ pub struct Location {
 /// A named definition discovered in a document.
 #[derive(Debug, Clone)]
 pub struct Definition {
+    pub name: String,
+    pub kind: RefKind,
+    pub span: Span,
+}
+
+/// A place where a definition is *referenced* (a Reference-typed field value).
+#[derive(Debug, Clone)]
+pub struct ReferenceSite {
     pub name: String,
     pub kind: RefKind,
     pub span: Span,
@@ -45,6 +54,14 @@ pub struct WorkspaceIndex {
     by_kind: HashMap<RefKind, HashMap<String, NameEntry>>,
     /// Reverse map (lowercased names) so a file's entries can be removed.
     files: HashMap<String, Vec<(RefKind, String)>>,
+    /// Reference *sites*, keyed (kind, lowercased name) — powers
+    /// find-references, rename, and the unused-definition hint. Maintained by
+    /// [`set_file_refs`](Self::set_file_refs), independently of definitions
+    /// and of [`generation`](Self::generation) (site churn must not
+    /// invalidate diagnostics caches on every keystroke).
+    sites: HashMap<(RefKind, String), Vec<Location>>,
+    /// Reverse map for site removal.
+    file_sites: HashMap<String, Vec<(RefKind, String)>>,
     /// Bumped whenever the *name set* changes (not mere span shifts), so
     /// consumers (the per-block diagnostics cache) can invalidate cheaply.
     generation: u64,
@@ -94,12 +111,45 @@ impl WorkspaceIndex {
         self.files.insert(file.to_string(), names);
     }
 
+    /// Replace all reference sites contributed by `file`. Does **not** bump
+    /// the generation: cross-file consumers of sites (the unused-definition
+    /// hint) tolerate staleness until the affected file is next analyzed.
+    pub fn set_file_refs(&mut self, file: &str, refs: Vec<ReferenceSite>) {
+        self.remove_site_entries(file);
+        let mut keys = Vec::with_capacity(refs.len());
+        for r in refs {
+            let key = (r.kind, r.name.to_ascii_lowercase());
+            self.sites.entry(key.clone()).or_default().push(Location {
+                file: file.to_string(),
+                span: r.span,
+            });
+            keys.push(key);
+        }
+        if !keys.is_empty() {
+            self.file_sites.insert(file.to_string(), keys);
+        }
+    }
+
     /// Drop all definitions contributed by `file`.
     pub fn remove_file(&mut self, file: &str) {
         if self.files.get(file).is_some_and(|v| !v.is_empty()) {
             self.generation += 1;
         }
         self.remove_entries(file);
+        self.remove_site_entries(file);
+    }
+
+    fn remove_site_entries(&mut self, file: &str) {
+        if let Some(keys) = self.file_sites.remove(file) {
+            for key in keys {
+                if let Some(locs) = self.sites.get_mut(&key) {
+                    locs.retain(|l| l.file != file);
+                    if locs.is_empty() {
+                        self.sites.remove(&key);
+                    }
+                }
+            }
+        }
     }
 
     fn remove_entries(&mut self, file: &str) {
@@ -142,6 +192,115 @@ impl WorkspaceIndex {
             .get(&kind)
             .into_iter()
             .flat_map(|n| n.values().map(|e| e.display.as_str()))
+    }
+
+    /// All reference sites for `name` of `kind` (case-insensitive).
+    pub fn reference_sites(&self, kind: RefKind, name: &str) -> &[Location] {
+        self.sites
+            .get(&(kind, name.to_ascii_lowercase()))
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Is `name` of `kind` referenced anywhere in the workspace?
+    pub fn is_referenced(&self, kind: RefKind, name: &str) -> bool {
+        !self.reference_sites(kind, name).is_empty()
+    }
+
+    /// Workspace symbols whose name contains `query` (case-insensitive; an
+    /// empty query matches everything). Yields the display-cased name with
+    /// each of its definition locations.
+    pub fn symbols<'a>(
+        &'a self,
+        query: &'a str,
+    ) -> impl Iterator<Item = (RefKind, &'a str, &'a Location)> + 'a {
+        let q = query.to_ascii_lowercase();
+        self.by_kind.iter().flat_map(move |(kind, names)| {
+            let q = q.clone();
+            names
+                .iter()
+                .filter(move |(lower, _)| q.is_empty() || lower.contains(&q))
+                .flat_map(|(_, entry)| {
+                    entry
+                        .locations
+                        .iter()
+                        .map(|loc| (*kind, entry.display.as_str(), loc))
+                })
+        })
+    }
+}
+
+/// Collect every reference site in a parsed document: each value token of a
+/// `Reference`/`ReferenceList`-typed field (including reference elements of
+/// `token_list` fields). Null sentinels (`None`, audio `NoSound`) and engine
+/// builtins are not sites — nothing to navigate to or rename.
+pub fn references_in(analyzer: &Analyzer, parse: &Parse) -> Vec<ReferenceSite> {
+    let mut out = Vec::new();
+    for node in parse.syntax().children() {
+        if node.kind() == SyntaxKind::BLOCK {
+            collect_refs(analyzer, &node, &mut out);
+        }
+    }
+    out
+}
+
+fn collect_refs(analyzer: &Analyzer, node: &SyntaxNode, out: &mut Vec<ReferenceSite>) {
+    let scope = scope_schema(analyzer, node);
+    for child in node.children() {
+        match child.kind() {
+            SyntaxKind::FIELD => collect_field_refs(analyzer, &child, &scope, out),
+            SyntaxKind::MODULE | SyntaxKind::BLOCK => collect_refs(analyzer, &child, out),
+            _ => {}
+        }
+    }
+}
+
+fn collect_field_refs(
+    analyzer: &Analyzer,
+    node: &SyntaxNode,
+    scope: &ScopeSchema,
+    out: &mut Vec<ReferenceSite>,
+) {
+    let field = Field(node.clone());
+    let Some(key) = field.key() else { return };
+    let Some(schema_field) = scope.field(key.text()) else { return };
+    let tokens = field.value_tokens();
+    let mut push = |kind: RefKind, tok: &genparser_syntax::SyntaxToken| {
+        let name = tok.text().trim_matches('"');
+        if name.is_empty()
+            || name.eq_ignore_ascii_case("None")
+            || (kind == RefKind::AudioEvent && name.eq_ignore_ascii_case("NoSound"))
+            || analyzer.is_builtin(kind, name)
+        {
+            return;
+        }
+        out.push(ReferenceSite {
+            name: name.to_string(),
+            kind,
+            span: tok.text_range().into(),
+        });
+    };
+    match &schema_field.value_type {
+        ValueType::Reference { ref_kind } => {
+            if let Some(tok) = tokens.first() {
+                push(*ref_kind, tok);
+            }
+        }
+        ValueType::ReferenceList { ref_kind } => {
+            for tok in &tokens {
+                push(*ref_kind, tok);
+            }
+        }
+        ValueType::TokenList { tokens: specs } => {
+            for (spec, tok) in specs.iter().zip(tokens.iter()) {
+                if let ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } =
+                    spec
+                {
+                    push(*ref_kind, tok);
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -218,6 +377,40 @@ mod tests {
         assert_eq!(idx.generation(), g2);
         idx.remove_file("empty.ini");
         assert_eq!(idx.generation(), g2);
+    }
+
+    #[test]
+    fn collects_and_stores_reference_sites() {
+        let a = Analyzer::embedded();
+        let src = "Object Tank\n  Behavior = StatusBitsUpgrade ModuleTag_01\n    TriggeredBy = Upgrade_A Upgrade_B\n    FXListUpgrade = None\n  End\nEnd\n";
+        let parse = a.parse(src);
+        let refs = references_in(&a, &parse);
+        // Both ReferenceList tokens are sites; `None` is not.
+        assert_eq!(refs.len(), 2, "{refs:?}");
+        assert!(refs.iter().all(|r| r.kind == RefKind::Upgrade));
+
+        let mut idx = WorkspaceIndex::new();
+        let g0 = idx.generation();
+        idx.set_file_refs("f.ini", refs);
+        assert_eq!(idx.generation(), g0, "sites must not bump the generation");
+        assert!(idx.is_referenced(RefKind::Upgrade, "upgrade_a"));
+        assert_eq!(idx.reference_sites(RefKind::Upgrade, "Upgrade_B").len(), 1);
+        idx.set_file_refs("f.ini", Vec::new());
+        assert!(!idx.is_referenced(RefKind::Upgrade, "Upgrade_A"));
+    }
+
+    #[test]
+    fn workspace_symbols_match_by_substring() {
+        let a = Analyzer::embedded();
+        let mut idx = WorkspaceIndex::new();
+        idx.set_file(
+            "f.ini",
+            definitions_in(&a, &a.parse("Weapon AK47\nEnd\nObject Tank\nEnd\n"), "f.ini"),
+        );
+        let hits: Vec<_> = idx.symbols("ak").collect();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].1, "AK47", "display casing is preserved");
+        assert_eq!(idx.symbols("").count(), 2, "empty query matches all");
     }
 
     #[test]

@@ -4,7 +4,9 @@
 for the INI scripting format used by *Command & Conquer Generals: Zero Hour*.
 It helps mappers and modders author `Object`, `Weapon`, `FXList`, and other INI
 definitions with **diagnostics**, **completions**, **hover**, **go-to-definition**,
-and schema-aware **semantic highlighting**.
+**find-references**, workspace-wide **rename**, an **outline** (document
+symbols + folding), **workspace symbol search**, **formatting**, **quick
+fixes**, and schema-aware **semantic highlighting**.
 
 What makes it faithful to the game: the block/field schema is **hand-written to
 match the engine's own `FieldParse` tables** in the open-sourced C++ source. The
@@ -140,9 +142,9 @@ The full phase-by-phase plan and status lives in
 
 * All 63 top-level block types and all 223 engine-registered modules are
   modeled; running the analyzer over the complete Zero Hour game data yields
-  **13 diagnostics, all genuine** (dead references and condition-less
-  WeaponSets in the shipped INIs) — zero unknown-block / unknown-module /
-  unknown-field noise.
+  **21 diagnostics, all genuine** (dead references, condition-less
+  WeaponSets, and unreachable upgrade-conditioned sets in the shipped
+  INIs) — zero unknown-block / unknown-module / unknown-field noise.
 * Value validators cover Bool/Int/Real/Percent/Color/Coord/Duration, enums,
   bitflags, references, and typed token lists (`Armor = <DamageType>
   <percent>`). Module field tables are extracted from the engine's
@@ -158,6 +160,15 @@ The full phase-by-phase plan and status lives in
 * Editing is incremental end-to-end (block-splice reparse + per-block
   diagnostics cache; a keystroke in a 60k-line file costs ~150 µs), and
   positions honor the negotiated LSP encoding (UTF-8 or UTF-16).
+* The full LSP surface: outline/folding/workspace-symbol, find-references and
+  rename (index-backed, case-insensitive like the engine), semantic tokens
+  (full + range + delta), an indent formatter, quick fixes (insert missing
+  `End`, did-you-mean for enum members), and a block-local dead-code warning
+  (`unreachable-set`) that found 8 genuinely dead WeaponSets/ArmorSets in the
+  shipped game data. Corpus total: **21 diagnostics, all genuine**.
+* Workspace-wide *unused-definition* hints were measured and deliberately not
+  shipped: maps, `.wnd` files, and engine code reference INI entities the
+  index can't see (97% of ParticleSystems would false-flag). See the roadmap.
 
 ## License
 

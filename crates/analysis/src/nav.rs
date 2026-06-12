@@ -29,7 +29,9 @@ fn token_at(root: &SyntaxNode, offset: u32) -> Option<SyntaxToken> {
         .filter(|t| t.kind() == SyntaxKind::WORD || t.kind() == SyntaxKind::STRING)
 }
 
-/// If a reference-typed field value sits under `offset`, resolve it.
+/// If a reference-typed field value sits under `offset`, resolve it. Handles
+/// single references, every token of a `ReferenceList`, and reference-typed
+/// elements of a `token_list`.
 pub fn reference_at(analyzer: &Analyzer, parse: &Parse, offset: u32) -> Option<ReferenceAt> {
     let root = parse.syntax();
     let tok = token_at(&root, offset)?;
@@ -38,24 +40,48 @@ pub fn reference_at(analyzer: &Analyzer, parse: &Parse, offset: u32) -> Option<R
         .filter(|p| p.kind() == SyntaxKind::FIELD)?;
     let field = Field(field_node.clone());
     // The token must be one of the value tokens, not the key.
-    if !field.value_tokens().iter().any(|t| t == &tok) {
-        return None;
-    }
+    let pos = field.value_tokens().iter().position(|t| t == &tok)?;
     let scope = field_node
         .ancestors()
         .skip(1)
         .find(|n| matches!(n.kind(), SyntaxKind::BLOCK | SyntaxKind::MODULE))?;
     let schema = scope_schema(analyzer, &scope);
     let key = field.key()?;
-    if let ValueType::Reference { ref_kind } = &schema.field(key.text())?.value_type {
-        let name = tok.text().trim_matches('"').to_string();
-        return Some(ReferenceAt {
-            kind: *ref_kind,
-            name,
-            span: tok.text_range().into(),
-        });
+    let ref_kind = match &schema.field(key.text())?.value_type {
+        ValueType::Reference { ref_kind } if pos == 0 => *ref_kind,
+        ValueType::ReferenceList { ref_kind } => *ref_kind,
+        ValueType::TokenList { tokens } => match tokens.get(pos)? {
+            ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } => *ref_kind,
+            _ => return None,
+        },
+        _ => return None,
+    };
+    let name = tok.text().trim_matches('"').to_string();
+    Some(ReferenceAt {
+        kind: ref_kind,
+        name,
+        span: tok.text_range().into(),
+    })
+}
+
+/// If `offset` sits on a *definition's* name token (the second header word of
+/// a block whose keyword `defines` a reference kind), resolve it. Together
+/// with [`reference_at`] this powers find-references and rename from either
+/// end of an edge.
+pub fn definition_at(analyzer: &Analyzer, parse: &Parse, offset: u32) -> Option<ReferenceAt> {
+    let root = parse.syntax();
+    let tok = token_at(&root, offset)?;
+    let block_node = tok.parent().filter(|p| p.kind() == SyntaxKind::BLOCK)?;
+    let block = Block(block_node);
+    if block.name().as_ref() != Some(&tok) {
+        return None;
     }
-    None
+    let kind = analyzer.block(block.keyword()?.text())?.defines?;
+    Some(ReferenceAt {
+        kind,
+        name: tok.text().to_string(),
+        span: tok.text_range().into(),
+    })
 }
 
 /// Resolve hover information for the token under `offset`.

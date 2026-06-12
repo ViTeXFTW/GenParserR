@@ -11,11 +11,14 @@ use std::collections::{HashMap, HashSet};
 use genparser_schema::{BlockType, ModuleType, RefKind, Schema, ValueSet};
 use genparser_syntax::{parse, Edit, OpenerOracle, Parse, Strategy};
 
+pub mod actions;
 pub mod completion;
 pub mod diagnostics;
+pub mod format;
 pub mod index;
 pub mod model;
 pub mod nav;
+pub mod outline;
 pub mod semantic;
 
 pub use diagnostics::{Diagnostic, Severity};

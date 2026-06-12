@@ -109,8 +109,11 @@ schema.json ──embedded──▶ schema ──▶ analysis ──▶ server
   those suites green.
 - **`analysis`** — IDE-agnostic logic over a shared `Analyzer` (owns the
   schema + lookup maps). Modules: `diagnostics`, `completion`, `semantic`
-  (tokens), `nav` (hover/go-to-def), `index` (`WorkspaceIndex` cross-file
-  reference table), `model` (resolves the schema scope at a CST position).
+  (tokens), `nav` (hover/go-to-def/`definition_at`), `index`
+  (`WorkspaceIndex`: cross-file definitions **and reference sites** — sites
+  power references/rename and never bump the generation), `outline`
+  (documentSymbol/folding), `format` (indent normalizer), `actions` (quick
+  fixes), `model` (resolves the schema scope at a CST position).
   All positions are **byte offsets**; the server converts to LSP line/char.
   Per-block diagnostics are cached (`diagnose_with_cache` +
   `DiagnosticsCache`): keyed on green-node pointer identity with

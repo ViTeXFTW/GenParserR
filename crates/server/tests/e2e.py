@@ -260,7 +260,132 @@ def main() -> int:
     assert "unresolved-reference" not in codes, f"scan-indexed image should resolve: {codes}"
     print("OK: workspace scan indexed uppercase .INI (completion + resolution)")
 
-    # 7) shutdown
+    # 7) Phase-6 LSP breadth: outline, folding, workspace symbols, references,
+    #    rename — exercised over a doc that defines and references an Upgrade.
+    assert caps.get("documentSymbolProvider"), "missing documentSymbolProvider"
+    assert caps.get("foldingRangeProvider"), "missing foldingRangeProvider"
+    assert caps.get("workspaceSymbolProvider"), "missing workspaceSymbolProvider"
+    assert caps.get("referencesProvider"), "missing referencesProvider"
+    assert caps.get("renameProvider"), "missing renameProvider"
+
+    p6_uri = "file:///test/phase6.ini"
+    p6_text = ("Upgrade Upgrade_E2EPhase6\n  BuildTime = 1.0\nEnd\n"
+               "Object Phase6Tank\n"
+               "  Behavior = WeaponSetUpgrade ModuleTag_01\n"
+               "    TriggeredBy = Upgrade_E2EPhase6\n"
+               "  End\n"
+               "End\n")
+    open_doc(p6_uri, p6_text)
+
+    send({"jsonrpc": "2.0", "id": 10, "method": "textDocument/documentSymbol",
+          "params": {"textDocument": {"uri": p6_uri}}})
+    syms = wait_for(lambda m: m.get("id") == 10 and "result" in m, "documentSymbol")
+    names = [s["name"] for s in syms["result"]]
+    assert names == ["Upgrade_E2EPhase6", "Phase6Tank"], names
+    kids = [c["name"] for c in syms["result"][1].get("children", [])]
+    assert "WeaponSetUpgrade" in kids, kids
+    print("OK: documentSymbol returns nested outline")
+
+    send({"jsonrpc": "2.0", "id": 11, "method": "textDocument/foldingRange",
+          "params": {"textDocument": {"uri": p6_uri}}})
+    folds = wait_for(lambda m: m.get("id") == 11 and "result" in m, "foldingRange")
+    spans = {(f["startLine"], f["endLine"]) for f in folds["result"]}
+    assert (0, 2) in spans and (3, 7) in spans and (4, 6) in spans, spans
+    print("OK: foldingRange folds blocks and modules")
+
+    send({"jsonrpc": "2.0", "id": 12, "method": "workspace/symbol",
+          "params": {"query": "e2ephase6"}})
+    wsym = wait_for(lambda m: m.get("id") == 12 and "result" in m, "workspace/symbol")
+    assert any(s["name"] == "Upgrade_E2EPhase6" for s in wsym["result"]), wsym["result"][:3]
+    print("OK: workspace/symbol matches case-insensitive substring")
+
+    # references from the definition name (line 0 "Upgrade_E2EPhase6"),
+    # including the declaration: expect the TriggeredBy site + the def.
+    send({"jsonrpc": "2.0", "id": 13, "method": "textDocument/references",
+          "params": {"textDocument": {"uri": p6_uri},
+                     "position": {"line": 0, "character": 12},
+                     "context": {"includeDeclaration": True}}})
+    refs = wait_for(lambda m: m.get("id") == 13 and "result" in m, "references")
+    lines = sorted(r["range"]["start"]["line"] for r in refs["result"])
+    assert lines == [0, 5], f"expected def line 0 + site line 5, got {lines}"
+    print("OK: references finds the TriggeredBy site and the declaration")
+
+    # rename from the *reference* end (line 5) must edit both occurrences.
+    send({"jsonrpc": "2.0", "id": 14, "method": "textDocument/rename",
+          "params": {"textDocument": {"uri": p6_uri},
+                     "position": {"line": 5, "character": 20},
+                     "newName": "Upgrade_E2ERenamed"}})
+    ren = wait_for(lambda m: m.get("id") == 14 and "result" in m, "rename")
+    edits = ren["result"]["changes"][p6_uri]
+    assert len(edits) == 2 and all(e["newText"] == "Upgrade_E2ERenamed" for e in edits), edits
+    # An invalid new name (embedded space) must be rejected.
+    send({"jsonrpc": "2.0", "id": 15, "method": "textDocument/rename",
+          "params": {"textDocument": {"uri": p6_uri},
+                     "position": {"line": 5, "character": 20},
+                     "newName": "two words"}})
+    bad = wait_for(lambda m: m.get("id") == 15, "rename rejection")
+    assert "error" in bad, f"expected error for invalid name, got {bad}"
+    print("OK: rename edits definition + references; invalid names rejected")
+
+    # 8) Phase-6 batch 2: semanticTokens delta, formatting, code actions.
+    assert caps["semanticTokensProvider"]["full"] == {"delta": True}, \
+        caps["semanticTokensProvider"]["full"]
+    assert caps.get("documentFormattingProvider"), "missing documentFormattingProvider"
+    assert caps.get("codeActionProvider"), "missing codeActionProvider"
+
+    # full (grab the resultId) -> edit -> delta must splice, not resend all.
+    send({"jsonrpc": "2.0", "id": 20, "method": "textDocument/semanticTokens/full",
+          "params": {"textDocument": {"uri": p6_uri}}})
+    full = wait_for(lambda m: m.get("id") == 20 and "result" in m, "tokens full")
+    rid = full["result"]["resultId"]
+    assert rid, "full response carries no resultId"
+    change_doc(p6_uri, 2, [
+        {"range": {"start": {"line": 1, "character": 14}, "end": {"line": 1, "character": 17}},
+         "text": "2.5"}])
+    send({"jsonrpc": "2.0", "id": 21, "method": "textDocument/semanticTokens/full/delta",
+          "params": {"textDocument": {"uri": p6_uri}, "previousResultId": rid}})
+    delta = wait_for(lambda m: m.get("id") == 21 and "result" in m, "tokens delta")
+    assert "edits" in delta["result"], f"expected a delta, got {list(delta['result'])}"
+    edits = delta["result"]["edits"]
+    assert len(edits) == 1 and len(edits[0].get("data", [])) < len(full["result"]["data"]), \
+        "delta should splice less than the full token stream"
+    # A bogus previousResultId falls back to a full response.
+    send({"jsonrpc": "2.0", "id": 22, "method": "textDocument/semanticTokens/full/delta",
+          "params": {"textDocument": {"uri": p6_uri}, "previousResultId": "no-such-id"}})
+    fallback = wait_for(lambda m: m.get("id") == 22 and "result" in m, "delta fallback")
+    assert "data" in fallback["result"], "stale id must fall back to full tokens"
+    print("OK: semanticTokens/full/delta splices (and falls back on stale id)")
+
+    # formatting: a misindented doc comes back normalized to scope depth.
+    fmt_uri = "file:///test/fmt.ini"
+    open_doc(fmt_uri, "Object FmtTank\nMaxHealth = 1\n      Behavior = AutoHealBehavior ModuleTag_01\nHealingAmount = 5\n      End\nEnd\n")
+    send({"jsonrpc": "2.0", "id": 23, "method": "textDocument/formatting",
+          "params": {"textDocument": {"uri": fmt_uri},
+                     "options": {"tabSize": 2, "insertSpaces": True}}})
+    fmt = wait_for(lambda m: m.get("id") == 23 and "result" in m, "formatting")
+    starts = sorted((e["range"]["start"]["line"], e["newText"]) for e in fmt["result"])
+    assert starts == [(1, "  "), (2, "  "), (3, "    "), (4, "  ")], starts
+    print("OK: formatting normalizes indentation to scope depth")
+
+    # code actions: a misspelled enum member offers did-you-mean; an
+    # unterminated block offers the missing End.
+    ca_uri = "file:///test/actions.ini"
+    open_doc(ca_uri, "Locomotor FixLoco\n  Appearance = TREDS\n")
+    send({"jsonrpc": "2.0", "id": 24, "method": "textDocument/codeAction",
+          "params": {"textDocument": {"uri": ca_uri},
+                     "range": {"start": {"line": 0, "character": 0},
+                               "end": {"line": 2, "character": 0}},
+                     "context": {"diagnostics": []}}})
+    ca = wait_for(lambda m: m.get("id") == 24 and "result" in m, "codeAction")
+    titles = [a["title"] for a in ca["result"]]
+    assert any("TREADS" in t for t in titles), titles
+    assert any("`End`" in t for t in titles), titles
+    fix = next(a for a in ca["result"] if "TREADS" in a["title"])
+    new_texts = [e["newText"] for e in fix["edit"]["changes"][ca_uri]]
+    assert new_texts == ["TREADS"], new_texts
+    print("OK: code actions offer did-you-mean + missing End quickfixes")
+
+    # 9) shutdown
     send({"jsonrpc": "2.0", "id": 99, "method": "shutdown", "params": None})
     wait_for(lambda m: m.get("id") == 99, "shutdown")
     send({"jsonrpc": "2.0", "method": "exit", "params": None})

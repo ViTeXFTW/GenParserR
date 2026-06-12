@@ -15,7 +15,7 @@ Phase 2.
 | 3 | Incremental reparse + incremental analysis | ✅ done (2026-06-11) |
 | 4 | Value-type validation completion | ✅ done (2026-06-11) |
 | 5 | Schema scale-out | 🔄 in progress (batches 1–3 done 2026-06-11; milestones M1–M4 reached) |
-| 6 | LSP breadth | 🔲 planned |
+| 6 | LSP breadth | ✅ done 2026-06-12 (outline/folding/workspace-symbol, references + rename, unreachable-set, async scan, semanticTokens delta, formatting, code actions) |
 | 7 | Distribution | 🔲 planned |
 
 ---
@@ -314,42 +314,91 @@ warning noise (batch 1) ✅ → M3 module field tables typed from the engine
 (batch 2, 188/223 modules) ✅ → M4 value sets for the module enum/flag long
 tail (batch 3, 31 sets, 86% of fields concretely typed) ✅.
 
-## Phase 6 — LSP breadth 🔲
+## Phase 6 — LSP breadth ✅ (done 2026-06-12)
 
 **Goal:** round out the feature set, ordered by value/cost.
 
-**Planned:**
+**Implemented (batch 1):**
 
-1. Cheap wins off existing structures: `documentSymbol`, `foldingRange`
-   (block spans), `workspace/symbol` (off the existing `WorkspaceIndex`).
-2. `references` (extend `index.rs` with per-file reference *sites*; today it
-   stores definitions only); `rename` falls out as index-backed edits.
-3. `semanticTokens` delta; make `scan_workspace` async/background (currently
-   synchronous in `initialized`, which hurts on full-mod folders).
-4. Last: formatting (indent normalizer over the lossless CST) and code
-   actions (insert missing `End`, did-you-mean for enum members).
+1. **Outline & folding** (`analysis/src/outline.rs`, purely structural):
+   `documentSymbol` returns the nested block → module/sub-block outline
+   (block name with keyword detail; module type name with its tag);
+   `foldingRange` folds every block/module scope, header line through its
+   `End`.
+2. **`workspace/symbol`**: case-insensitive substring match over the
+   `WorkspaceIndex` (display casing preserved, kind as container, capped at
+   256 results).
+3. **Reference sites → `references` + `rename`**: `index.rs` gained
+   `references_in` (every value token of a `Reference`/`ReferenceList`
+   field, plus reference elements of `token_list`s; `None`/`NoSound`/builtin
+   sentinels excluded) and `set_file_refs` — site churn deliberately does
+   **not** bump the index generation, so per-block diagnostics caches stay
+   warm while typing a name (consequence: cross-file staleness until the
+   other file is next analyzed). `nav.rs` gained `definition_at`, and
+   `reference_at` now resolves list/token-list positions, so
+   find-references and rename work from either end of an edge. Rename
+   validates the new name survives the engine tokenizer as one token and
+   edits definition + all sites across files.
+4. **`unreachable-set` diagnostic** (block-local dead code, the sub-track's
+   first tier): a `WeaponSet`/`ArmorSet` conditioned on `PLAYER_UPGRADE` on
+   an object where no module can set that flag. Trigger sets transcribed
+   from the engine: `WeaponSetUpgrade` *plus the whole TransportContain
+   family* (TransportContain.cpp sets WEAPONSET_PLAYER_UPGRADE on the
+   transport when a rider has a viable weapon — Helix/InternetHack/
+   Overlord/RailedTransport/RiderChange inherit it); `ArmorUpgrade` is the
+   sole armor trigger. Skipped for `ObjectReskin` (inherits parent modules)
+   and map.ini-style override patches (`AddModule`/`RemoveModule`/
+   `ReplaceModule` present). Pinned by `DeadCodeTest` spec + unit tests.
+   **Corpus: 8 new hits, all verified genuine dead sets in shipped data**
+   (4 CINE-only units, MilitiaTank, and 3 Infantry-General infantry whose
+   PLAYER_UPGRADE ArmorSet has no ArmorUpgrade — one with a contradictory
+   double `Conditions` line). Corpus total now 21, all genuine.
+5. **Async workspace scan**: the walk/parse of `initialized` runs on a
+   blocking thread (`spawn_blocking`); the executor keeps serving requests
+   during full-mod folder scans.
 
-### Dead-code / consistency diagnostics (new sub-track)
+All wire handlers e2e-pinned (documentSymbol/foldingRange/workspace-symbol/
+references/rename incl. invalid-name rejection).
 
-Modder-helpful reachability warnings, in two tiers:
+**Measured and deferred — workspace-wide unused-definition hints:** corpus
+measurement (definitions never referenced by any indexed site) shows the
+signal is not shippable yet: 1969/2115 Objects, 1055/1087 ParticleSystems,
+3439/4048 AudioEvents would flag. Root causes: (a) consumers our schema
+doesn't reference-type yet (FXList nugget `Name =` fields, `ParticleSysBone`
+token positions, W3D draw internals), (b) consumers outside INI entirely
+(maps, `.wnd` files, engine code). Revisit after deeper reference typing,
+and only per-kind with corpus noise ≈ 0 — or expose as an explicit query
+command instead of an always-on diagnostic.
 
-- **Block-local (no new infrastructure):** a `WeaponSet` whose `Conditions`
-  include `PLAYER_UPGRADE` on an object with no `WeaponSetUpgrade` behavior
-  is unreachable (and the reverse: a `WeaponSetUpgrade` with no
-  upgrade-conditioned set does nothing); same pairing for `ArmorSet` /
-  `ArmorUpgrade`. Per-flag rules transcribed from the engine: only
-  `PLAYER_UPGRADE` is module-triggered — `VETERAN`/`ELITE`/`HERO` (XP),
-  `CRATEUPGRADE_*` (crates), and `WEAPON_RIDER*` (RiderChangeContain) fire
-  externally and must not warn. Calibrate against the corpus like every
-  other check.
-- **Workspace-wide (needs item 2's reference sites):** definitions nothing
-  references — an `Upgrade` no CommandButton/science grants, a `Weapon` /
-  `FXList` nothing names. *Hints*, not warnings: maps and `.scb` scripts can
-  reference INI entities outside the indexed workspace.
+**Implemented (batch 2, 2026-06-12):**
 
-Each feature lands spec-first for the analysis layer plus an `e2e.py`
-assertion for the wire handler. Before this phase: reassess the pinned,
-archived tower-lsp 0.20 against forks (`tower-lsp-server`, `async-lsp`).
+6. **`semanticTokens/full/delta`**: the full response now carries a
+   `resultId`; the per-document snapshot lets delta requests answer with a
+   single token-aligned splice (common prefix/suffix over the encoded
+   stream, offsets in protocol `u32` units). A stale/unknown
+   `previousResultId` falls back to a full response. Splice equivalence is
+   unit-tested by replaying the edit client-side.
+7. **`textDocument/formatting`** (`analysis/src/format.rs`): an indentation
+   normalizer over the lossless CST — each line is reindented to its scope
+   depth (fields one level inside their scope; headers and `End` at the
+   parent's depth) using the client's `tabSize`/`insertSpaces`. Token
+   spacing, casing, blank lines, and comment lines (whose intended scope is
+   ambiguous) are left untouched; already-formatted files produce zero
+   edits.
+8. **`textDocument/codeAction`** (`analysis/src/actions.rs`), quickfix-only:
+   *Insert missing `End`* for each unterminated scope (appended at EOF —
+   where the parser reports them — indented like the scope's header), and
+   *did-you-mean* for misspelled enum/bitflag members (case-insensitive
+   Levenshtein ≤ 2 against the value set, best 3, `+`/`-` prefixes
+   preserved).
+
+**tower-lsp reassessment (decision):** stay on the pinned 0.20 for Phase 7.
+Everything this phase needed (delta tokens, prepare-rename, code actions)
+is supported; the forks (`tower-lsp-server`, `async-lsp`) would churn every
+handler signature for no feature we lack. Revisit only if a Phase 7
+blocker appears.
+
+Phase complete: every planned item shipped or explicitly decided.
 
 ## Phase 7 — Distribution 🔲
 

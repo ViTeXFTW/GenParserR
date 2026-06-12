@@ -8,6 +8,7 @@
 
 use genparser_analysis::completion::{Completion, CompletionKind};
 use genparser_analysis::diagnostics::{Diagnostic as AnDiagnostic, Severity};
+use genparser_analysis::outline::{DocSymbol, SymKind};
 use genparser_analysis::semantic::SemKind;
 use genparser_analysis::Span;
 use ropey::Rope;
@@ -163,6 +164,45 @@ pub fn to_lsp_completion(c: Completion) -> CompletionItem {
     }
 }
 
+/// Convert an analysis outline symbol to an LSP `DocumentSymbol` (recursive).
+pub fn to_lsp_document_symbol(rope: &Rope, s: &DocSymbol, enc: PositionEnc) -> DocumentSymbol {
+    #[allow(deprecated)] // `deprecated` field is required by the struct literal
+    DocumentSymbol {
+        name: s.name.clone(),
+        detail: s.detail.clone(),
+        kind: match s.kind {
+            SymKind::Block => SymbolKind::CLASS,
+            SymKind::Module => SymbolKind::CONSTRUCTOR,
+            SymKind::SubBlock => SymbolKind::STRUCT,
+        },
+        tags: None,
+        deprecated: None,
+        range: span_to_range(rope, s.span, enc),
+        selection_range: span_to_range(rope, s.selection, enc),
+        children: Some(
+            s.children
+                .iter()
+                .map(|c| to_lsp_document_symbol(rope, c, enc))
+                .collect(),
+        ),
+    }
+}
+
+/// Convert a foldable scope span to an LSP folding range. Folds from the
+/// header line to the closing `End`'s line, so the header stays visible.
+pub fn to_lsp_folding_range(rope: &Rope, span: Span, enc: PositionEnc) -> Option<FoldingRange> {
+    let start = offset_to_position(rope, span.start, enc);
+    // The node's range ends after the trailing newline; step back one byte so
+    // the end line is the `End` line itself.
+    let end = offset_to_position(rope, span.end.saturating_sub(1).max(span.start), enc);
+    (end.line > start.line).then_some(FoldingRange {
+        start_line: start.line,
+        end_line: end.line,
+        kind: Some(FoldingRangeKind::Region),
+        ..Default::default()
+    })
+}
+
 /// The semantic-token legend (type names), ordered to match [`sem_kind_index`].
 pub fn semantic_legend() -> SemanticTokensLegend {
     SemanticTokensLegend {
@@ -231,10 +271,69 @@ pub fn to_lsp_semantic_tokens(
     out
 }
 
+/// The single splice turning `prev` into `next`, as a `semanticTokens/delta`
+/// edit. Token-aligned common prefix/suffix; protocol offsets count raw
+/// `u32`s, i.e. tokens × 5.
+pub fn semantic_tokens_splice(
+    prev: &[SemanticToken],
+    next: &[SemanticToken],
+) -> SemanticTokensEdit {
+    let prefix = prev
+        .iter()
+        .zip(next.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let suffix = prev[prefix..]
+        .iter()
+        .rev()
+        .zip(next[prefix..].iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    SemanticTokensEdit {
+        start: (prefix * 5) as u32,
+        delete_count: ((prev.len() - prefix - suffix) * 5) as u32,
+        data: Some(next[prefix..next.len() - suffix].to_vec()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use genparser_analysis::semantic::{SemKind, SemToken};
+
+    /// Apply a splice the way a client would, for the equivalence test below.
+    fn apply_splice(prev: &[SemanticToken], edit: &SemanticTokensEdit) -> Vec<SemanticToken> {
+        assert_eq!(edit.start % 5, 0, "token-aligned");
+        assert_eq!(edit.delete_count % 5, 0, "token-aligned");
+        let start = (edit.start / 5) as usize;
+        let del = (edit.delete_count / 5) as usize;
+        let mut out = prev[..start].to_vec();
+        out.extend(edit.data.clone().unwrap_or_default());
+        out.extend(prev[start + del..].iter().copied());
+        out
+    }
+
+    #[test]
+    fn splice_reproduces_next_from_prev() {
+        let tok = |dl, ds, len, ty| SemanticToken {
+            delta_line: dl,
+            delta_start: ds,
+            length: len,
+            token_type: ty,
+            token_modifiers_bitset: 0,
+        };
+        let prev = vec![tok(0, 0, 6, 0), tok(0, 7, 4, 1), tok(1, 0, 3, 0)];
+        for next in [
+            vec![tok(0, 0, 6, 0), tok(0, 7, 9, 1), tok(1, 0, 3, 0)], // middle change
+            vec![tok(0, 0, 6, 0), tok(1, 0, 3, 0)],                  // deletion
+            prev.clone(),                                            // no change
+            vec![],                                                  // everything gone
+            vec![tok(0, 0, 6, 0), tok(0, 7, 4, 1), tok(0, 5, 2, 2), tok(1, 0, 3, 0)], // insert
+        ] {
+            let edit = semantic_tokens_splice(&prev, &next);
+            assert_eq!(apply_splice(&prev, &edit), next);
+        }
+    }
 
     #[test]
     fn position_offset_round_trip() {

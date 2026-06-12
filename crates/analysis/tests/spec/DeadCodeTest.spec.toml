@@ -1,0 +1,22 @@
+# Expected behavior for DeadCodeTest.ini: the block-local unreachable-set
+# warning fires exactly on PLAYER_UPGRADE sets of objects that have no module
+# capable of setting the flag — and nowhere else (reachable sets, transports,
+# and map.ini override patches stay silent; the exact-count side is pinned by
+# the `set_reachability_*` unit tests in diagnostics.rs).
+
+no_errors = true
+
+# DeadCodeBadTank's WeaponSet: the 2nd PLAYER_UPGRADE token in the file
+# (the 1st is DeadCodeOkTank's, which is reachable and silent).
+[[diag]]
+severity = "warning"
+code = "unreachable-set"
+on = "PLAYER_UPGRADE"
+nth = 2
+
+# DeadCodeBadTank's ArmorSet.
+[[diag]]
+severity = "warning"
+code = "unreachable-set"
+on = "PLAYER_UPGRADE"
+nth = 3

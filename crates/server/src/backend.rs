@@ -11,9 +11,9 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use dashmap::DashMap;
 use genparser_analysis::diagnostics::DiagnosticsCache;
-use genparser_analysis::index::{definitions_in, WorkspaceIndex};
-use genparser_analysis::nav::{hover_at, reference_at, HoverInfo};
-use genparser_analysis::{completion, diagnostics, semantic, Analyzer};
+use genparser_analysis::index::{definitions_in, references_in, WorkspaceIndex};
+use genparser_analysis::nav::{definition_at, hover_at, reference_at, HoverInfo};
+use genparser_analysis::{actions, completion, diagnostics, format, outline, semantic, Analyzer};
 use genparser_syntax::{Edit, Parse};
 use ropey::Rope;
 use tower_lsp::lsp_types::*;
@@ -33,6 +33,9 @@ struct DocumentState {
     version: i32,
     /// Per-block diagnostics, reused across edits for unchanged blocks.
     diag_cache: DiagnosticsCache,
+    /// The last `semanticTokens/full` response (result id + encoded data),
+    /// kept so `full/delta` can answer with a splice instead of the world.
+    last_semantic: Option<(u64, Vec<SemanticToken>)>,
 }
 
 pub struct Backend {
@@ -45,6 +48,8 @@ pub struct Backend {
     roots: Mutex<Vec<PathBuf>>,
     /// Position encoding negotiated at `initialize` (UTF-16 until then).
     encoding: OnceLock<PositionEnc>,
+    /// Monotonic id source for semantic-token results (delta bookkeeping).
+    semantic_result_id: std::sync::atomic::AtomicU64,
 }
 
 /// Read a file leniently: real INIs predate UTF-8 (Windows-1252 comments), so
@@ -53,6 +58,40 @@ fn read_lossy(path: &Path) -> Option<String> {
     std::fs::read(path)
         .ok()
         .map(|b| String::from_utf8_lossy(&b).into_owned())
+}
+
+/// Walk `roots` and index every `.ini` file (definitions + reference sites).
+/// CPU/IO heavy — runs via `spawn_blocking` from [`Backend::scan_workspace`].
+fn scan_roots(
+    analyzer: &Analyzer,
+    roots: &[PathBuf],
+) -> Vec<(
+    String,
+    Vec<genparser_analysis::index::Definition>,
+    Vec<genparser_analysis::index::ReferenceSite>,
+)> {
+    let mut out = Vec::new();
+    for root in roots {
+        for entry in walkdir::WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
+            let path = entry.path();
+            // Real game data mixes extension casing (`*.ini` / `*.INI`,
+            // e.g. the MappedImages files), so compare case-insensitively.
+            if !path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("ini"))
+            {
+                continue;
+            }
+            let Some(text) = read_lossy(path) else { continue };
+            let Ok(uri) = Url::from_file_path(path) else { continue };
+            let parse = analyzer.parse(&text);
+            let defs = definitions_in(analyzer, &parse, uri.as_str());
+            let refs = references_in(analyzer, &parse);
+            out.push((uri.to_string(), defs, refs));
+        }
+    }
+    out
 }
 
 impl Backend {
@@ -64,11 +103,17 @@ impl Backend {
             index: RwLock::new(WorkspaceIndex::new()),
             roots: Mutex::new(Vec::new()),
             encoding: OnceLock::new(),
+            semantic_result_id: std::sync::atomic::AtomicU64::new(1),
         }
     }
 
     fn enc(&self) -> PositionEnc {
         self.encoding.get().copied().unwrap_or_default()
+    }
+
+    fn next_semantic_id(&self) -> u64 {
+        self.semantic_result_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Update the cross-file index from the document's cached parse, run
@@ -90,9 +135,12 @@ impl Backend {
 
         // `set_file` bumps the index generation only when definition *names*
         // changed, so ordinary keystrokes keep diagnostics caches warm.
+        // Reference sites never bump it.
         let defs = definitions_in(&self.analyzer, &parse, uri.as_str());
+        let refs = references_in(&self.analyzer, &parse);
         if let Ok(mut idx) = self.index.write() {
             idx.set_file(uri.as_str(), defs);
+            idx.set_file_refs(uri.as_str(), refs);
         }
 
         let enc = self.enc();
@@ -121,31 +169,19 @@ impl Backend {
     }
 
     /// Best-effort scan of the workspace roots for `.ini` files to seed the
-    /// index, so references resolve before a file is opened.
-    fn scan_workspace(&self) {
+    /// index, so references resolve before a file is opened. The walk +
+    /// parse runs on a blocking thread (full-mod folders take seconds); the
+    /// results are applied under the index lock afterwards.
+    async fn scan_workspace(&self) {
         let roots = self.roots.lock().map(|r| r.clone()).unwrap_or_default();
+        let analyzer = self.analyzer.clone();
+        let scanned = tokio::task::spawn_blocking(move || scan_roots(&analyzer, &roots))
+            .await
+            .unwrap_or_default();
         let Ok(mut idx) = self.index.write() else { return };
-        for root in roots {
-            for entry in walkdir::WalkDir::new(&root)
-                .into_iter()
-                .filter_map(|e| e.ok())
-            {
-                let path = entry.path();
-                // Real game data mixes extension casing (`*.ini` / `*.INI`,
-                // e.g. the MappedImages files), so compare case-insensitively.
-                if !path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .is_some_and(|e| e.eq_ignore_ascii_case("ini"))
-                {
-                    continue;
-                }
-                let Some(text) = read_lossy(path) else { continue };
-                let Ok(uri) = Url::from_file_path(path) else { continue };
-                let parse = self.analyzer.parse(&text);
-                let defs = definitions_in(&self.analyzer, &parse, uri.as_str());
-                idx.set_file(uri.as_str(), defs);
-            }
+        for (uri, defs, refs) in scanned {
+            idx.set_file(&uri, defs);
+            idx.set_file_refs(&uri, refs);
         }
     }
 
@@ -164,6 +200,43 @@ impl Backend {
         }
         let path = uri.to_file_path().ok()?;
         read_lossy(&path).map(|s| Rope::from_str(&s))
+    }
+
+    /// The (kind, name, span) under the cursor — a reference-typed value token
+    /// or a definition's name token. The shared entry point for
+    /// find-references and rename, which work from either end of an edge.
+    fn symbol_at(
+        &self,
+        uri: &Url,
+        pos: Position,
+    ) -> Option<genparser_analysis::nav::ReferenceAt> {
+        let (rope, parse) = self.doc(uri)?;
+        let offset = convert::position_to_offset(&rope, pos, self.enc());
+        reference_at(&self.analyzer, &parse, offset)
+            .or_else(|| definition_at(&self.analyzer, &parse, offset))
+    }
+
+    /// Convert `(file uri, span)` pairs to LSP locations, reading each file's
+    /// rope at most once.
+    fn to_locations(&self, raw: Vec<(String, genparser_analysis::Span)>) -> Vec<Location> {
+        let enc = self.enc();
+        let mut ropes: std::collections::HashMap<String, Option<(Url, Rope)>> =
+            std::collections::HashMap::new();
+        let mut out = Vec::with_capacity(raw.len());
+        for (file, span) in raw {
+            let entry = ropes.entry(file.clone()).or_insert_with(|| {
+                let uri = Url::parse(&file).ok()?;
+                let rope = self.rope_for(&uri)?;
+                Some((uri, rope))
+            });
+            if let Some((uri, rope)) = entry {
+                out.push(Location {
+                    uri: uri.clone(),
+                    range: convert::span_to_range(rope, span, enc),
+                });
+            }
+        }
+        out
     }
 }
 
@@ -206,7 +279,7 @@ impl LanguageServer for Backend {
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
                         SemanticTokensOptions {
                             legend: convert::semantic_legend(),
-                            full: Some(SemanticTokensFullOptions::Bool(true)),
+                            full: Some(SemanticTokensFullOptions::Delta { delta: Some(true) }),
                             range: Some(true),
                             ..Default::default()
                         },
@@ -214,13 +287,28 @@ impl LanguageServer for Backend {
                 ),
                 definition_provider: Some(OneOf::Left(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                document_symbol_provider: Some(OneOf::Left(true)),
+                folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: Default::default(),
+                })),
+                document_formatting_provider: Some(OneOf::Left(true)),
+                code_action_provider: Some(CodeActionProviderCapability::Options(
+                    CodeActionOptions {
+                        code_action_kinds: Some(vec![CodeActionKind::QUICKFIX]),
+                        ..Default::default()
+                    },
+                )),
                 ..Default::default()
             },
         })
     }
 
     async fn initialized(&self, _: InitializedParams) {
-        self.scan_workspace();
+        self.scan_workspace().await;
         // Re-publish diagnostics for any already-open docs now that the index
         // is populated (so cross-file references resolve). The cached parse is
         // still valid — only the index changed.
@@ -251,6 +339,7 @@ impl LanguageServer for Backend {
                 parse,
                 version,
                 diag_cache: DiagnosticsCache::new(),
+                last_semantic: None,
             },
         );
         self.refresh(&uri).await;
@@ -329,10 +418,104 @@ impl LanguageServer for Backend {
         };
         let tokens = semantic::semantic_tokens(&self.analyzer, &parse);
         let data = convert::to_lsp_semantic_tokens(&rope, &tokens, self.enc());
+        let id = self.next_semantic_id();
+        if let Some(mut doc) = self.docs.get_mut(&uri) {
+            doc.last_semantic = Some((id, data.clone()));
+        }
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
-            result_id: None,
+            result_id: Some(id.to_string()),
             data,
         })))
+    }
+
+    async fn semantic_tokens_full_delta(
+        &self,
+        params: SemanticTokensDeltaParams,
+    ) -> Result<Option<SemanticTokensFullDeltaResult>> {
+        let uri = params.text_document.uri;
+        let Some((rope, parse)) = self.doc(&uri) else {
+            return Ok(None);
+        };
+        let tokens = semantic::semantic_tokens(&self.analyzer, &parse);
+        let data = convert::to_lsp_semantic_tokens(&rope, &tokens, self.enc());
+        let id = self.next_semantic_id();
+        let previous = self.docs.get_mut(&uri).and_then(|mut doc| {
+            doc.last_semantic.replace((id, data.clone()))
+        });
+        // Only splice against the exact result the client says it holds;
+        // anything else (stale id, no history) falls back to a full response.
+        match previous {
+            Some((prev_id, prev)) if prev_id.to_string() == params.previous_result_id => {
+                Ok(Some(SemanticTokensFullDeltaResult::TokensDelta(
+                    SemanticTokensDelta {
+                        result_id: Some(id.to_string()),
+                        edits: vec![convert::semantic_tokens_splice(&prev, &data)],
+                    },
+                )))
+            }
+            _ => Ok(Some(SemanticTokensFullDeltaResult::Tokens(SemanticTokens {
+                result_id: Some(id.to_string()),
+                data,
+            }))),
+        }
+    }
+
+    async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        let uri = params.text_document.uri;
+        let Some((rope, parse)) = self.doc(&uri) else {
+            return Ok(None);
+        };
+        let indent = if params.options.insert_spaces {
+            " ".repeat(params.options.tab_size as usize)
+        } else {
+            "\t".to_string()
+        };
+        let text = rope.to_string();
+        let enc = self.enc();
+        let edits = format::format_edits(&parse, &text, &indent)
+            .into_iter()
+            .map(|e| TextEdit {
+                range: convert::span_to_range(&rope, e.span, enc),
+                new_text: e.new_text,
+            })
+            .collect();
+        Ok(Some(edits))
+    }
+
+    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        let uri = params.text_document.uri;
+        let Some((rope, parse)) = self.doc(&uri) else {
+            return Ok(None);
+        };
+        let enc = self.enc();
+        let start = convert::position_to_offset(&rope, params.range.start, enc);
+        let end = convert::position_to_offset(&rope, params.range.end, enc);
+        let text = rope.to_string();
+        let fixes = actions::fixes(
+            &self.analyzer,
+            &parse,
+            &text,
+            genparser_analysis::Span::new(start, end),
+        );
+        let response: CodeActionResponse = fixes
+            .into_iter()
+            .map(|f| {
+                let edit = TextEdit {
+                    range: convert::span_to_range(&rope, f.span, enc),
+                    new_text: f.new_text,
+                };
+                CodeActionOrCommand::CodeAction(CodeAction {
+                    title: f.title,
+                    kind: Some(CodeActionKind::QUICKFIX),
+                    edit: Some(WorkspaceEdit {
+                        changes: Some([(uri.clone(), vec![edit])].into()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                })
+            })
+            .collect();
+        Ok((!response.is_empty()).then_some(response))
     }
 
     async fn semantic_tokens_range(
@@ -396,6 +579,168 @@ impl LanguageServer for Backend {
         } else {
             Ok(Some(GotoDefinitionResponse::Array(out)))
         }
+    }
+
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> Result<Option<DocumentSymbolResponse>> {
+        let Some((rope, parse)) = self.doc(&params.text_document.uri) else {
+            return Ok(None);
+        };
+        let enc = self.enc();
+        let symbols: Vec<DocumentSymbol> = outline::document_symbols(&parse)
+            .iter()
+            .map(|s| convert::to_lsp_document_symbol(&rope, s, enc))
+            .collect();
+        Ok(Some(DocumentSymbolResponse::Nested(symbols)))
+    }
+
+    async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
+        let Some((rope, parse)) = self.doc(&params.text_document.uri) else {
+            return Ok(None);
+        };
+        let enc = self.enc();
+        let ranges = outline::folding_ranges(&parse)
+            .into_iter()
+            .filter_map(|span| convert::to_lsp_folding_range(&rope, span, enc))
+            .collect();
+        Ok(Some(ranges))
+    }
+
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<Vec<SymbolInformation>>> {
+        // Cap the result set: an empty query over full game data matches
+        // thousands of names, and clients re-query as the user types.
+        const MAX_RESULTS: usize = 256;
+        let raw: Vec<(genparser_schema::RefKind, String, String, genparser_analysis::Span)> = {
+            let Ok(idx) = self.index.read() else { return Ok(None) };
+            idx.symbols(&params.query)
+                .take(MAX_RESULTS)
+                .map(|(kind, name, loc)| (kind, name.to_string(), loc.file.clone(), loc.span))
+                .collect()
+        };
+        let enc = self.enc();
+        let mut ropes: std::collections::HashMap<String, Option<(Url, Rope)>> =
+            std::collections::HashMap::new();
+        let mut out = Vec::with_capacity(raw.len());
+        for (kind, name, file, span) in raw {
+            let entry = ropes.entry(file.clone()).or_insert_with(|| {
+                let uri = Url::parse(&file).ok()?;
+                let rope = self.rope_for(&uri)?;
+                Some((uri, rope))
+            });
+            let Some((uri, rope)) = entry else { continue };
+            #[allow(deprecated)] // `deprecated` field is required by the struct literal
+            out.push(SymbolInformation {
+                name,
+                kind: SymbolKind::CLASS,
+                tags: None,
+                deprecated: None,
+                location: Location {
+                    uri: uri.clone(),
+                    range: convert::span_to_range(rope, span, enc),
+                },
+                container_name: Some(format!("{kind:?}")),
+            });
+        }
+        Ok(Some(out))
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let uri = params.text_document_position.text_document.uri;
+        let pos = params.text_document_position.position;
+        let Some(sym) = self.symbol_at(&uri, pos) else {
+            return Ok(None);
+        };
+        let mut raw: Vec<(String, genparser_analysis::Span)> = {
+            let Ok(idx) = self.index.read() else { return Ok(None) };
+            let mut v: Vec<_> = idx
+                .reference_sites(sym.kind, &sym.name)
+                .iter()
+                .map(|l| (l.file.clone(), l.span))
+                .collect();
+            if params.context.include_declaration {
+                v.extend(
+                    idx.locations(sym.kind, &sym.name)
+                        .iter()
+                        .map(|l| (l.file.clone(), l.span)),
+                );
+            }
+            v
+        };
+        raw.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.start.cmp(&b.1.start)));
+        raw.dedup();
+        let out = self.to_locations(raw);
+        Ok((!out.is_empty()).then_some(out))
+    }
+
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
+        let uri = params.text_document.uri;
+        let Some(sym) = self.symbol_at(&uri, params.position) else {
+            return Ok(None);
+        };
+        let Some(rope) = self.rope_for(&uri) else { return Ok(None) };
+        Ok(Some(PrepareRenameResponse::Range(convert::span_to_range(
+            &rope,
+            sym.span,
+            self.enc(),
+        ))))
+    }
+
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        let uri = params.text_document_position.text_document.uri;
+        let pos = params.text_document_position.position;
+        let new_name = params.new_name;
+        // A definition name must survive the engine tokenizer as one token.
+        if new_name.is_empty() || new_name.contains([' ', '\t', '\r', '\n', '=', ';', '"']) {
+            return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                "name must be a single token (no whitespace, `=`, `;` or quotes)",
+            ));
+        }
+        let Some(sym) = self.symbol_at(&uri, pos) else {
+            return Ok(None);
+        };
+        let mut raw: Vec<(String, genparser_analysis::Span)> = {
+            let Ok(idx) = self.index.read() else { return Ok(None) };
+            idx.reference_sites(sym.kind, &sym.name)
+                .iter()
+                .chain(idx.locations(sym.kind, &sym.name).iter())
+                .map(|l| (l.file.clone(), l.span))
+                .collect()
+        };
+        raw.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.start.cmp(&b.1.start)));
+        raw.dedup();
+
+        let enc = self.enc();
+        let mut changes: std::collections::HashMap<Url, Vec<TextEdit>> =
+            std::collections::HashMap::new();
+        let mut ropes: std::collections::HashMap<String, Option<(Url, Rope)>> =
+            std::collections::HashMap::new();
+        for (file, span) in raw {
+            let entry = ropes.entry(file.clone()).or_insert_with(|| {
+                let uri = Url::parse(&file).ok()?;
+                let rope = self.rope_for(&uri)?;
+                Some((uri, rope))
+            });
+            let Some((file_uri, rope)) = entry else { continue };
+            changes.entry(file_uri.clone()).or_default().push(TextEdit {
+                range: convert::span_to_range(rope, span, enc),
+                new_text: new_name.clone(),
+            });
+        }
+        if changes.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(WorkspaceEdit {
+            changes: Some(changes),
+            ..Default::default()
+        }))
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {

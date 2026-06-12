@@ -209,8 +209,84 @@ impl<'a> Ctx<'a> {
                     format!("unknown block type `{}`", keyword.text()),
                 );
             }
+            // Only plain `Object`s: an ObjectReskin inherits its parent's
+            // modules and sets, so neither side of the pairing is visible.
+            if keyword.text() == "Object" {
+                self.check_set_reachability(node);
+            }
         }
         self.walk(node, &schema);
+    }
+
+    /// Block-local dead-code check: a `WeaponSet`/`ArmorSet` carrying the
+    /// `PLAYER_UPGRADE` condition is only ever selected after a module on the
+    /// *same* object sets that flag (WeaponSetUpgrade / the TransportContain
+    /// family with armed passengers; ArmorUpgrade for armor). Both sides live
+    /// in the same top-level block, so the check is sound under the per-block
+    /// diagnostics cache. Skipped for map.ini-style override blocks
+    /// (`AddModule`/`RemoveModule`/`ReplaceModule` present): those are
+    /// partial definitions.
+    fn check_set_reachability(&mut self, node: &SyntaxNode) {
+        /// Modules that can set WEAPONSET_PLAYER_UPGRADE on their object
+        /// (WeaponSetUpgrade.cpp; TransportContain.cpp `onContaining` sets it
+        /// on the transport when a rider has a viable weapon — inherited by
+        /// the whole TransportContain family).
+        const WEAPON_TRIGGERS: [&str; 7] = [
+            "WeaponSetUpgrade",
+            "TransportContain",
+            "HelixContain",
+            "InternetHackContain",
+            "OverlordContain",
+            "RailedTransportContain",
+            "RiderChangeContain",
+        ];
+        /// ArmorUpgrade.cpp is the only setter of ARMORSET_PLAYER_UPGRADE.
+        const ARMOR_TRIGGERS: [&str; 1] = ["ArmorUpgrade"];
+
+        let mut module_names: Vec<String> = Vec::new();
+        // (set keyword, the PLAYER_UPGRADE condition token) per set sub-block.
+        let mut player_upgrade_sets: Vec<(&'static str, SyntaxToken)> = Vec::new();
+        let mut is_override_patch = has_direct_field(node, "RemoveModule");
+
+        for child in node.children().filter(|n| n.kind() == SyntaxKind::MODULE) {
+            let module = Module(child.clone());
+            let Some(slot) = module.slot() else { continue };
+            match slot.text() {
+                "AddModule" | "ReplaceModule" => is_override_patch = true,
+                kw @ ("WeaponSet" | "ArmorSet") => {
+                    if let Some(tok) = direct_condition_token(&child, "PLAYER_UPGRADE") {
+                        let kw = if kw == "WeaponSet" { "WeaponSet" } else { "ArmorSet" };
+                        player_upgrade_sets.push((kw, tok));
+                    }
+                }
+                _ => {
+                    if let Some(name) = module.module_name() {
+                        module_names.push(name.text().to_string());
+                    }
+                }
+            }
+        }
+        if is_override_patch {
+            return;
+        }
+        for (kw, tok) in player_upgrade_sets {
+            let triggers: &[&str] = if kw == "WeaponSet" {
+                &WEAPON_TRIGGERS
+            } else {
+                &ARMOR_TRIGGERS
+            };
+            if !module_names.iter().any(|m| triggers.iter().any(|t| t == m)) {
+                self.warning(
+                    &tok,
+                    "unreachable-set",
+                    format!(
+                        "this `{kw}` requires the `PLAYER_UPGRADE` condition, but no module \
+                         on this object can set it (e.g. `{}`) — the set can never be selected",
+                        triggers[0]
+                    ),
+                );
+            }
+        }
     }
 
     /// Validate every field / nested scope directly inside `node`, given the
@@ -629,6 +705,17 @@ fn has_direct_field(node: &SyntaxNode, name: &str) -> bool {
         .any(|k| k.text() == name)
 }
 
+/// The value token of `node`'s direct `Conditions` field that equals `cond`
+/// (case-insensitive, ignoring a `+` prefix), if any.
+fn direct_condition_token(node: &SyntaxNode, cond: &str) -> Option<SyntaxToken> {
+    node.children()
+        .filter(|n| n.kind() == SyntaxKind::FIELD)
+        .map(Field)
+        .filter(|f| f.key().is_some_and(|k| k.text() == "Conditions"))
+        .flat_map(|f| f.value_tokens())
+        .find(|t| t.text().trim_start_matches('+').eq_ignore_ascii_case(cond))
+}
+
 /// Strip surrounding double quotes from a token's text, if present.
 fn unquote(s: &str) -> &str {
     s.strip_prefix('"')
@@ -658,6 +745,36 @@ mod tests {
     #[test]
     fn unknown_block_is_error() {
         assert!(codes("Wepon AK47\nEnd\n").contains(&"unknown-block"));
+    }
+
+    #[test]
+    fn set_reachability_flags_only_untriggered_player_upgrade_sets() {
+        let upgrade_set = "  WeaponSet\n    Conditions = PLAYER_UPGRADE\n    Weapon = PRIMARY G\n  End\n";
+        let trigger = "  Behavior = WeaponSetUpgrade ModuleTag_01\n    TriggeredBy = Upgrade_X\n  End\n";
+
+        let dead = format!("Object T\n{upgrade_set}End\n");
+        assert_eq!(codes(&dead).iter().filter(|c| **c == "unreachable-set").count(), 1);
+
+        let alive = format!("Object T\n{upgrade_set}{trigger}End\n");
+        assert!(!codes(&alive).contains(&"unreachable-set"), "module triggers the set");
+
+        // The TransportContain family can set the flag without an upgrade.
+        let transport = format!(
+            "Object T\n{upgrade_set}  Behavior = OverlordContain ModuleTag_02\n  End\nEnd\n"
+        );
+        assert!(!codes(&transport).contains(&"unreachable-set"));
+
+        // Override patches (map.ini AddModule/RemoveModule) are partial: silent.
+        let patched = format!("Object T\n  RemoveModule ModuleTag_99\n{upgrade_set}End\n");
+        assert!(!codes(&patched).contains(&"unreachable-set"));
+
+        // ObjectReskin inherits the parent's modules: silent.
+        let reskin = format!("ObjectReskin T P\n{upgrade_set}End\n");
+        assert!(!codes(&reskin).contains(&"unreachable-set"));
+
+        // Other conditions (VETERAN etc.) are set externally: silent.
+        let vet = "Object T\n  WeaponSet\n    Conditions = VETERAN\n    Weapon = PRIMARY G\n  End\nEnd\n";
+        assert!(!codes(vet).contains(&"unreachable-set"));
     }
 
     #[test]
