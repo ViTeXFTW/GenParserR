@@ -16537,7 +16537,7 @@
     {
       "name": "LaserUpdate",
       "interfaces": [
-        "Update"
+        "ClientUpdate"
       ],
       "fields": [
         {
