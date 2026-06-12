@@ -32,3 +32,9 @@ includes = ["W3DModelDraw"]
 [[complete]]
 at = "$2"
 includes = ["PRIMARY", "SECONDARY", "TERTIARY"]
+
+# Blank line inside a Draw module body -> offer module fields, not module names.
+[[complete]]
+at = "$3"
+includes = ["OkToChangeModelColor"]
+excludes = ["ActiveBody", "W3DModelDraw"]

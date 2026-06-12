@@ -280,17 +280,25 @@ fn after_equals(node: &SyntaxNode, offset: u32) -> bool {
     false
 }
 
-/// True if `offset` lies on the header line of a scope (before its first nested
-/// child node).
+/// True if `offset` lies on the header line of a scope.
+///
+/// The header ends at the first NEWLINE token among the node's direct
+/// children_with_tokens. This correctly handles module nodes with empty bodies:
+/// a cursor on the line after the header is NOT on the header, even when the
+/// body has no child nodes yet.
 fn on_header_line(node: &SyntaxNode, offset: u32) -> bool {
-    let first_child_start = node
-        .children()
-        .next()
-        .map(|c| u32::from(c.text_range().start()));
-    match first_child_start {
-        Some(start) => offset <= start,
-        None => true,
+    for el in node.children_with_tokens() {
+        if let Some(t) = el.as_token() {
+            if t.kind() == SyntaxKind::NEWLINE {
+                return offset <= u32::from(t.text_range().start());
+            }
+        } else {
+            // First child node encountered before any NEWLINE; past the header.
+            break;
+        }
     }
+    // No NEWLINE found: single-line node — entire node is header.
+    true
 }
 
 fn type_label(ty: &ValueType) -> String {
