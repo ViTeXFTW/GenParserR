@@ -153,7 +153,9 @@ fn apply_suppressions(parse: &Parse, out: &mut Vec<Diagnostic>) {
     // scanned (the pragma is a whole-file switch, not a local one).
     for el in parse.syntax().children_with_tokens() {
         let Some(tok) = el.as_token() else { continue };
-        let Some((base, rest)) = pragma_rest(&tok) else { continue };
+        let Some((base, rest)) = pragma_rest(tok) else {
+            continue;
+        };
         for (start, end) in pragma_words(rest) {
             let word = &rest[start..end];
             if let Some(code) = KNOWN_CODES.iter().find(|c| **c == word) {
@@ -340,9 +342,9 @@ struct Ctx<'a> {
 /// over a *copy* of the existing template (ThingFactory.cpp `newOverride`),
 /// inheriting its modules and fields.
 fn is_override_layer(file: &str) -> bool {
-    file.rsplit(['/', '\\'])
-        .next()
-        .is_some_and(|name| name.eq_ignore_ascii_case("map.ini") || name.eq_ignore_ascii_case("solo.ini"))
+    file.rsplit(['/', '\\']).next().is_some_and(|name| {
+        name.eq_ignore_ascii_case("map.ini") || name.eq_ignore_ascii_case("solo.ini")
+    })
 }
 
 /// The trailing path segment, for readable diagnostics (`file` may be a URI).
@@ -394,7 +396,9 @@ impl<'a> Ctx<'a> {
         else {
             return false;
         };
-        let Some(name) = block.name() else { return false };
+        let Some(name) = block.name() else {
+            return false;
+        };
         let my_span: Span = name.text_range().into();
         // Definition sites other than this block (the index records the name
         // token's span, so a same-file site at another span is a duplicate).
@@ -479,7 +483,11 @@ impl<'a> Ctx<'a> {
                 "AddModule" | "ReplaceModule" => is_override_patch = true,
                 kw @ ("WeaponSet" | "ArmorSet") => {
                     if let Some(tok) = direct_condition_token(&child, "PLAYER_UPGRADE") {
-                        let kw = if kw == "WeaponSet" { "WeaponSet" } else { "ArmorSet" };
+                        let kw = if kw == "WeaponSet" {
+                            "WeaponSet"
+                        } else {
+                            "ArmorSet"
+                        };
                         player_upgrade_sets.push((kw, tok));
                     }
                 }
@@ -556,7 +564,12 @@ impl<'a> Ctx<'a> {
         // after `=` is an argument, not a module name.
         let is_real_module = module
             .slot()
-            .map(|s| parent.module_slots().iter().any(|ms| ms.keyword == s.text()))
+            .map(|s| {
+                parent
+                    .module_slots()
+                    .iter()
+                    .any(|ms| ms.keyword == s.text())
+            })
             .unwrap_or(false);
 
         let inner = if is_real_module {
@@ -685,7 +698,11 @@ impl<'a> Ctx<'a> {
             if let Some(key) = field.key() {
                 // Most fields require at least one value; lenient types don't.
                 if !matches!(ty, ValueType::Unknown { .. } | ValueType::AsciiStringList) {
-                    self.warning(&key, "missing-value", format!("`{}` expects a value", key.text()));
+                    self.warning(
+                        &key,
+                        "missing-value",
+                        format!("`{}` expects a value", key.text()),
+                    );
                 }
             }
             return;
@@ -746,7 +763,11 @@ impl<'a> Ctx<'a> {
             ValueType::Bool => {
                 let v = unquote(tok.text()).to_ascii_lowercase();
                 if v != "yes" && v != "no" {
-                    self.error(tok, "bad-bool", format!("expected `Yes` or `No`, found `{}`", tok.text()));
+                    self.error(
+                        tok,
+                        "bad-bool",
+                        format!("expected `Yes` or `No`, found `{}`", tok.text()),
+                    );
                 }
             }
             ValueType::Int => self.check_number(tok, NumKind::Int),
@@ -760,7 +781,11 @@ impl<'a> Ctx<'a> {
                 self.check_number(tok, NumKind::Real);
                 if let Ok(n) = tok.text().parse::<f64>() {
                     if n <= 0.0 {
-                        self.warning(tok, "non-positive", format!("`{}` should be greater than 0", tok.text()));
+                        self.warning(
+                            tok,
+                            "non-positive",
+                            format!("`{}` should be greater than 0", tok.text()),
+                        );
                     }
                 }
             }
@@ -849,7 +874,10 @@ impl<'a> Ctx<'a> {
                     this.error(
                         tag_tok,
                         code,
-                        format!("expected `{axis}:`, found `{tag}` (format: `{}`)", expected()),
+                        format!(
+                            "expected `{axis}:`, found `{tag}` (format: `{}`)",
+                            expected()
+                        ),
                     );
                 }
                 return false;
@@ -905,12 +933,18 @@ impl<'a> Ctx<'a> {
                 NumKind::UInt => "a non-negative integer",
                 NumKind::Real => "a number",
             };
-            self.error(tok, "bad-number", format!("expected {what}, found `{text}`"));
+            self.error(
+                tok,
+                "bad-number",
+                format!("expected {what}, found `{text}`"),
+            );
         }
     }
 
     fn check_enum_member(&mut self, value_set: &str, tok: &SyntaxToken) {
-        let Some(set) = self.analyzer.value_set(value_set) else { return };
+        let Some(set) = self.analyzer.value_set(value_set) else {
+            return;
+        };
         if set.members.is_empty() {
             return; // value set we couldn't populate; don't flag
         }
@@ -925,7 +959,9 @@ impl<'a> Ctx<'a> {
     }
 
     fn check_bitflag_member(&mut self, value_set: &str, tok: &SyntaxToken, raw: &str) {
-        let Some(set) = self.analyzer.value_set(value_set) else { return };
+        let Some(set) = self.analyzer.value_set(value_set) else {
+            return;
+        };
         if set.members.is_empty() {
             return;
         }
@@ -1043,14 +1079,25 @@ mod tests {
 
     #[test]
     fn set_reachability_flags_only_untriggered_player_upgrade_sets() {
-        let upgrade_set = "  WeaponSet\n    Conditions = PLAYER_UPGRADE\n    Weapon = PRIMARY G\n  End\n";
-        let trigger = "  Behavior = WeaponSetUpgrade ModuleTag_01\n    TriggeredBy = Upgrade_X\n  End\n";
+        let upgrade_set =
+            "  WeaponSet\n    Conditions = PLAYER_UPGRADE\n    Weapon = PRIMARY G\n  End\n";
+        let trigger =
+            "  Behavior = WeaponSetUpgrade ModuleTag_01\n    TriggeredBy = Upgrade_X\n  End\n";
 
         let dead = format!("Object T\n{upgrade_set}End\n");
-        assert_eq!(codes(&dead).iter().filter(|c| **c == "unreachable-set").count(), 1);
+        assert_eq!(
+            codes(&dead)
+                .iter()
+                .filter(|c| **c == "unreachable-set")
+                .count(),
+            1
+        );
 
         let alive = format!("Object T\n{upgrade_set}{trigger}End\n");
-        assert!(!codes(&alive).contains(&"unreachable-set"), "module triggers the set");
+        assert!(
+            !codes(&alive).contains(&"unreachable-set"),
+            "module triggers the set"
+        );
 
         // The TransportContain family can set the flag without an upgrade.
         let transport = format!(
@@ -1067,7 +1114,8 @@ mod tests {
         assert!(!codes(&reskin).contains(&"unreachable-set"));
 
         // Other conditions (VETERAN etc.) are set externally: silent.
-        let vet = "Object T\n  WeaponSet\n    Conditions = VETERAN\n    Weapon = PRIMARY G\n  End\nEnd\n";
+        let vet =
+            "Object T\n  WeaponSet\n    Conditions = VETERAN\n    Weapon = PRIMARY G\n  End\nEnd\n";
         assert!(!codes(vet).contains(&"unreachable-set"));
     }
 
@@ -1075,7 +1123,9 @@ mod tests {
     fn unknown_field_is_warning() {
         let src = "Weapon AK47\n  PrimaryDamg = 50.0\nEnd\n";
         let d = diags(src);
-        assert!(d.iter().any(|d| d.code == "unknown-field" && d.severity == Severity::Warning));
+        assert!(d
+            .iter()
+            .any(|d| d.code == "unknown-field" && d.severity == Severity::Warning));
     }
 
     #[test]
@@ -1142,7 +1192,10 @@ End
             .iter()
             .find(|d| d.code == "unknown-suppression" && d.severity == Severity::Hint)
             .unwrap_or_else(|| panic!("expected unknown-suppression hint: {d:?}"));
-        assert_eq!(&src[hint.span.start as usize..hint.span.end as usize], "bad-bol");
+        assert_eq!(
+            &src[hint.span.start as usize..hint.span.end as usize],
+            "bad-bol"
+        );
     }
 
     #[test]
@@ -1170,7 +1223,11 @@ End
             &parse,
             src,
             &edited,
-            genparser_syntax::Edit { start: 0, old_end: 0, new_len: pragma.len() },
+            genparser_syntax::Edit {
+                start: 0,
+                old_end: 0,
+                new_len: pragma.len(),
+            },
         );
         let second = diagnose_with_cache(&a, &inc, None, None, &mut cache);
         assert!(!second.iter().any(|d| d.code == "bad-number"), "{second:?}");
@@ -1184,7 +1241,10 @@ End
         let src = "Weapon AK47\n  ClipSize = lots\nEnd\nWeapon B\nEnd\nWeapon C\nEnd\nWeapon D\n  PrimaryDamg = 1\nEnd\n";
         let parse = a.parse(src);
         let mut cache = DiagnosticsCache::new();
-        assert_eq!(diagnose_with_cache(&a, &parse, None, None, &mut cache), diagnose(&a, &parse, None, None));
+        assert_eq!(
+            diagnose_with_cache(&a, &parse, None, None, &mut cache),
+            diagnose(&a, &parse, None, None)
+        );
         assert_eq!(cache.stats().0, 0, "first run is all misses");
 
         // Edit inside the *last* block; the splice widens one sibling, so the
@@ -1196,10 +1256,17 @@ End
             &parse,
             src,
             &edited,
-            genparser_syntax::Edit { start: at, old_end: at + 1, new_len: 1 },
+            genparser_syntax::Edit {
+                start: at,
+                old_end: at + 1,
+                new_len: 1,
+            },
         );
         assert_eq!(strategy, genparser_syntax::Strategy::Spliced);
-        assert_eq!(diagnose_with_cache(&a, &inc, None, None, &mut cache), diagnose(&a, &inc, None, None));
+        assert_eq!(
+            diagnose_with_cache(&a, &inc, None, None, &mut cache),
+            diagnose(&a, &inc, None, None)
+        );
         assert!(cache.stats().0 >= 1, "unchanged block must hit the cache");
     }
 
@@ -1215,7 +1282,10 @@ End
         let mut cache = DiagnosticsCache::new();
         let g0 = index.generation();
         let first = diagnose_with_cache(&a, &parse, Some(&index), None, &mut cache);
-        index.set_file("other.ini", crate::index::definitions_in(&a, &a.parse("Object X\nEnd\n"), "other.ini"));
+        index.set_file(
+            "other.ini",
+            crate::index::definitions_in(&a, &a.parse("Object X\nEnd\n"), "other.ini"),
+        );
         assert_ne!(index.generation(), g0);
         let second = diagnose_with_cache(&a, &parse, Some(&index), None, &mut cache);
         assert_eq!(first, second); // no reference fields here; same result
@@ -1237,11 +1307,16 @@ End
         // (INI_LOAD_CREATE_OVERRIDES), so unreachable-set must stay silent.
         let src = "Object AmericaInfantryRanger\n  WeaponSet\n    Conditions = PLAYER_UPGRADE\n    Weapon = PRIMARY DefaultRangerCombatRifle\n  End\nEnd\n";
         let parse = a.parse(src);
-        index.set_file("maps/Map.ini", crate::index::definitions_in(&a, &parse, "maps/Map.ini"));
+        index.set_file(
+            "maps/Map.ini",
+            crate::index::definitions_in(&a, &parse, "maps/Map.ini"),
+        );
 
         let diags = diagnose(&a, &parse, Some(&index), Some("maps/Map.ini"));
         assert!(
-            diags.iter().any(|d| d.code == "overrides" && d.severity == Severity::Hint),
+            diags
+                .iter()
+                .any(|d| d.code == "overrides" && d.severity == Severity::Hint),
             "expected `overrides` hint: {diags:?}"
         );
         assert!(
@@ -1252,8 +1327,12 @@ End
         // The base-game side is not an override and not a duplicate (the
         // other site lives in an override layer): no diagnostics there.
         let base_parse = a.parse(base);
-        let base_diags =
-            diagnose(&a, &base_parse, Some(&index), Some("data/AmericaInfantry.ini"));
+        let base_diags = diagnose(
+            &a,
+            &base_parse,
+            Some(&index),
+            Some("data/AmericaInfantry.ini"),
+        );
         assert!(
             !base_diags
                 .iter()
@@ -1267,7 +1346,10 @@ End
         let a = Analyzer::embedded();
         let mut index = WorkspaceIndex::new();
         let src = "Object Tank\nEnd\n";
-        index.set_file("a.ini", crate::index::definitions_in(&a, &a.parse(src), "a.ini"));
+        index.set_file(
+            "a.ini",
+            crate::index::definitions_in(&a, &a.parse(src), "a.ini"),
+        );
         let parse = a.parse(src);
         index.set_file("b.ini", crate::index::definitions_in(&a, &parse, "b.ini"));
         // The engine DEBUG_CRASHes on duplicate object templates outside
@@ -1289,7 +1371,10 @@ End
         // Object.weapon references go through WeaponSet (custom parser), so use a
         // field we know maps to a reference: PrimaryDamageRadius is Real, so
         // instead assert the plumbing via a synthetic check below.
-        index.set_file("a.ini", crate::index::definitions_in(&a, &a.parse("Weapon AK47\nEnd\n"), "a.ini"));
+        index.set_file(
+            "a.ini",
+            crate::index::definitions_in(&a, &a.parse("Weapon AK47\nEnd\n"), "a.ini"),
+        );
         assert!(index.is_defined(RefKind::Weapon, "AK47"));
     }
 }

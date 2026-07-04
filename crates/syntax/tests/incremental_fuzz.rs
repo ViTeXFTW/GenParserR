@@ -122,12 +122,20 @@ fn gen_edit(rng: &mut Rng, text: &str) -> (usize, usize, String) {
         3 => {
             // replace a span with a partial line (no trailing newline)
             let end = (start + rng.below(12)).min(len);
-            (start, end, rng.pick(&["End", "Weapon W", "  X = 1", "\r"]).to_string())
+            (
+                start,
+                end,
+                rng.pick(&["End", "Weapon W", "  X = 1", "\r"]).to_string(),
+            )
         }
         _ => {
             // small in-place typing
             let end = (start + rng.below(3)).min(len);
-            (start, end, rng.pick(&["5", "ab", " = ", "End", "\n"]).to_string())
+            (
+                start,
+                end,
+                rng.pick(&["5", "ab", " = ", "End", "\n"]).to_string(),
+            )
         }
     }
 }

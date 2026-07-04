@@ -17,8 +17,16 @@ pub struct ReferenceAt {
 
 /// What the token under the cursor means, for hover.
 pub enum HoverInfo {
-    Block { name: String, span: Span },
-    Field { name: String, ty: ValueType, parse_fn: String, span: Span },
+    Block {
+        name: String,
+        span: Span,
+    },
+    Field {
+        name: String,
+        ty: ValueType,
+        parse_fn: String,
+        span: Span,
+    },
 }
 
 fn token_at(root: &SyntaxNode, offset: u32) -> Option<SyntaxToken> {
@@ -35,9 +43,7 @@ fn token_at(root: &SyntaxNode, offset: u32) -> Option<SyntaxToken> {
 pub fn reference_at(analyzer: &Analyzer, parse: &Parse, offset: u32) -> Option<ReferenceAt> {
     let root = parse.syntax();
     let tok = token_at(&root, offset)?;
-    let field_node = tok
-        .parent()
-        .filter(|p| p.kind() == SyntaxKind::FIELD)?;
+    let field_node = tok.parent().filter(|p| p.kind() == SyntaxKind::FIELD)?;
     let field = Field(field_node.clone());
     // The token must be one of the value tokens, not the key.
     let pos = field.value_tokens().iter().position(|t| t == &tok)?;

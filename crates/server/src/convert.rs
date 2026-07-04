@@ -106,12 +106,7 @@ pub fn position_to_offset(rope: &Rope, pos: Position, enc: PositionEnc) -> u32 {
 /// Apply one LSP `didChange` content change to the rope in place. A change
 /// without a range replaces the whole document (clients may always fall back
 /// to full sync for a single change).
-pub fn apply_change(
-    rope: &mut Rope,
-    range: Option<Range>,
-    text: &str,
-    enc: PositionEnc,
-) {
+pub fn apply_change(rope: &mut Rope, range: Option<Range>, text: &str, enc: PositionEnc) {
     match range {
         None => *rope = Rope::from_str(text),
         Some(r) => {
@@ -155,27 +150,26 @@ pub fn to_lsp_diagnostic(rope: &Rope, d: &AnDiagnostic, enc: PositionEnc) -> Dia
 /// set a `triggerSuggest` command so the module-name popup opens automatically
 /// after the `=` is inserted.
 pub fn to_lsp_completion(c: Completion, snippets_supported: bool) -> CompletionItem {
-    let (insert_text, insert_text_format, command) =
-        if snippets_supported {
-            if let Some(snippet) = c.insert {
-                // Slot completions like `Behavior = $0` — trigger the suggest
-                // popup so the module list appears immediately.
-                let cmd = if snippet.ends_with("= $0") {
-                    Some(Command {
-                        title: "Trigger Suggest".into(),
-                        command: "editor.action.triggerSuggest".into(),
-                        arguments: None,
-                    })
-                } else {
-                    None
-                };
-                (Some(snippet), Some(InsertTextFormat::SNIPPET), cmd)
+    let (insert_text, insert_text_format, command) = if snippets_supported {
+        if let Some(snippet) = c.insert {
+            // Slot completions like `Behavior = $0` — trigger the suggest
+            // popup so the module list appears immediately.
+            let cmd = if snippet.ends_with("= $0") {
+                Some(Command {
+                    title: "Trigger Suggest".into(),
+                    command: "editor.action.triggerSuggest".into(),
+                    arguments: None,
+                })
             } else {
-                (None, None, None)
-            }
+                None
+            };
+            (Some(snippet), Some(InsertTextFormat::SNIPPET), cmd)
         } else {
             (None, None, None)
-        };
+        }
+    } else {
+        (None, None, None)
+    };
 
     CompletionItem {
         label: c.label,
@@ -238,16 +232,16 @@ pub fn to_lsp_folding_range(rope: &Rope, span: Span, enc: PositionEnc) -> Option
 pub fn semantic_legend() -> SemanticTokensLegend {
     SemanticTokensLegend {
         token_types: vec![
-            SemanticTokenType::KEYWORD,    // 0
-            SemanticTokenType::CLASS,      // 1
-            SemanticTokenType::PROPERTY,   // 2
-            SemanticTokenType::TYPE,       // 3
-            SemanticTokenType::ENUM_MEMBER,// 4
-            SemanticTokenType::OPERATOR,   // 5
-            SemanticTokenType::NUMBER,     // 6
-            SemanticTokenType::STRING,     // 7
-            SemanticTokenType::VARIABLE,   // 8
-            SemanticTokenType::COMMENT,    // 9
+            SemanticTokenType::KEYWORD,     // 0
+            SemanticTokenType::CLASS,       // 1
+            SemanticTokenType::PROPERTY,    // 2
+            SemanticTokenType::TYPE,        // 3
+            SemanticTokenType::ENUM_MEMBER, // 4
+            SemanticTokenType::OPERATOR,    // 5
+            SemanticTokenType::NUMBER,      // 6
+            SemanticTokenType::STRING,      // 7
+            SemanticTokenType::VARIABLE,    // 8
+            SemanticTokenType::COMMENT,     // 9
         ],
         token_modifiers: vec![],
     }
@@ -359,7 +353,12 @@ mod tests {
             vec![tok(0, 0, 6, 0), tok(1, 0, 3, 0)],                  // deletion
             prev.clone(),                                            // no change
             vec![],                                                  // everything gone
-            vec![tok(0, 0, 6, 0), tok(0, 7, 4, 1), tok(0, 5, 2, 2), tok(1, 0, 3, 0)], // insert
+            vec![
+                tok(0, 0, 6, 0),
+                tok(0, 7, 4, 1),
+                tok(0, 5, 2, 2),
+                tok(1, 0, 3, 0),
+            ], // insert
         ] {
             let edit = semantic_tokens_splice(&prev, &next);
             assert_eq!(apply_splice(&prev, &edit), next);
@@ -388,7 +387,10 @@ mod tests {
         let byte = "Weapon AK47\n  ".len() as u32;
         assert_eq!(
             offset_to_position(&rope, byte, PositionEnc::Utf16),
-            Position { line: 1, character: 2 }
+            Position {
+                line: 1,
+                character: 2
+            }
         );
     }
 
@@ -404,17 +406,26 @@ mod tests {
         assert_eq!(p16.character, "; émoji ".chars().count() as u32 + 2 + 1);
         // Both round-trip to the same byte.
         assert_eq!(position_to_offset(&rope, p8, PositionEnc::Utf8), byte_of_x);
-        assert_eq!(position_to_offset(&rope, p16, PositionEnc::Utf16), byte_of_x);
+        assert_eq!(
+            position_to_offset(&rope, p16, PositionEnc::Utf16),
+            byte_of_x
+        );
     }
 
     #[test]
     fn position_clamps_to_line_content() {
         let rope = Rope::from_str("abc\r\ndef\n");
         // Past-end character clamps to the line length, not into the \r\n.
-        let pos = Position { line: 0, character: 99 };
+        let pos = Position {
+            line: 0,
+            character: 99,
+        };
         assert_eq!(position_to_offset(&rope, pos, PositionEnc::Utf16), 3);
         // Past-end line clamps to the last line.
-        let pos = Position { line: 99, character: 0 };
+        let pos = Position {
+            line: 99,
+            character: 0,
+        };
         assert_eq!(position_to_offset(&rope, pos, PositionEnc::Utf16), 9);
     }
 
@@ -423,11 +434,20 @@ mod tests {
         let mut rope = Rope::from_str("Weapon AK47\n  PrimaryDamage = 50.0\nEnd\n");
         // Replace "50.0" with "75.5".
         let range = Range {
-            start: Position { line: 1, character: 18 },
-            end: Position { line: 1, character: 22 },
+            start: Position {
+                line: 1,
+                character: 18,
+            },
+            end: Position {
+                line: 1,
+                character: 22,
+            },
         };
         apply_change(&mut rope, Some(range), "75.5", PositionEnc::Utf16);
-        assert_eq!(rope.to_string(), "Weapon AK47\n  PrimaryDamage = 75.5\nEnd\n");
+        assert_eq!(
+            rope.to_string(),
+            "Weapon AK47\n  PrimaryDamage = 75.5\nEnd\n"
+        );
     }
 
     #[test]
@@ -435,17 +455,34 @@ mod tests {
         let mut rope = Rope::from_str("Weapon A\nEnd\nWeapon B\nEnd\n");
         // Delete the whole second block including its leading newline.
         let range = Range {
-            start: Position { line: 2, character: 0 },
-            end: Position { line: 4, character: 0 },
+            start: Position {
+                line: 2,
+                character: 0,
+            },
+            end: Position {
+                line: 4,
+                character: 0,
+            },
         };
         apply_change(&mut rope, Some(range), "", PositionEnc::Utf16);
         assert_eq!(rope.to_string(), "Weapon A\nEnd\n");
         // Insert at EOF.
         let at_eof = Range {
-            start: Position { line: 2, character: 0 },
-            end: Position { line: 2, character: 0 },
+            start: Position {
+                line: 2,
+                character: 0,
+            },
+            end: Position {
+                line: 2,
+                character: 0,
+            },
         };
-        apply_change(&mut rope, Some(at_eof), "Weapon C\nEnd\n", PositionEnc::Utf16);
+        apply_change(
+            &mut rope,
+            Some(at_eof),
+            "Weapon C\nEnd\n",
+            PositionEnc::Utf16,
+        );
         assert_eq!(rope.to_string(), "Weapon A\nEnd\nWeapon C\nEnd\n");
         // Range-less change replaces everything.
         apply_change(&mut rope, None, "GameData\nEnd\n", PositionEnc::Utf16);
@@ -456,8 +493,14 @@ mod tests {
     fn apply_change_crlf_document() {
         let mut rope = Rope::from_str("Weapon AK47\r\n  PrimaryDamage = 50.0\r\nEnd\r\n");
         let range = Range {
-            start: Position { line: 1, character: 18 },
-            end: Position { line: 1, character: 22 },
+            start: Position {
+                line: 1,
+                character: 18,
+            },
+            end: Position {
+                line: 1,
+                character: 22,
+            },
         };
         apply_change(&mut rope, Some(range), "75.5", PositionEnc::Utf16);
         assert_eq!(
@@ -523,8 +566,15 @@ mod tests {
         }
 
         let snippets = [
-            "", "X", "\u{e9}", "\n", "\r\n", "Weapon Z\nEnd\n",
-            "; comment \u{e9}\n", " = 5.0", "End",
+            "",
+            "X",
+            "\u{e9}",
+            "\n",
+            "\r\n",
+            "Weapon Z\nEnd\n",
+            "; comment \u{e9}\n",
+            " = 5.0",
+            "End",
         ];
         let mut state = 0x2545F4914F6CDD1Du64;
         let mut next = move || {
@@ -536,16 +586,21 @@ mod tests {
 
         for enc in [PositionEnc::Utf8, PositionEnc::Utf16] {
             for round in 0..200 {
-                let mut expected =
-                    String::from("Weapon AK47\n  PrimaryDamage = 50.0\nEnd\n");
+                let mut expected = String::from("Weapon AK47\n  PrimaryDamage = 50.0\nEnd\n");
                 let mut rope = Rope::from_str(&expected);
                 for edit in 0..8 {
                     let text = snippets[(next() % snippets.len() as u32) as usize];
                     let range = if next() % 10 == 0 {
                         None // full-replacement fallback
                     } else {
-                        let a = Position { line: next() % 8, character: next() % 40 };
-                        let b = Position { line: next() % 8, character: next() % 40 };
+                        let a = Position {
+                            line: next() % 8,
+                            character: next() % 40,
+                        };
+                        let b = Position {
+                            line: next() % 8,
+                            character: next() % 40,
+                        };
                         // LSP requires start <= end; order by reference bytes.
                         let (s, e) = if ref_byte(&expected, a.line, a.character, enc)
                             <= ref_byte(&expected, b.line, b.character, enc)
@@ -572,9 +627,18 @@ mod tests {
     fn delta_encodes_tokens_across_lines() {
         let rope = Rope::from_str("Weapon AK47\nEnd\n");
         let tokens = vec![
-            SemToken { span: Span::new(0, 6), kind: SemKind::Keyword },   // "Weapon" line0 col0
-            SemToken { span: Span::new(7, 11), kind: SemKind::BlockName },// "AK47"   line0 col7
-            SemToken { span: Span::new(12, 15), kind: SemKind::Keyword }, // "End"    line1 col0
+            SemToken {
+                span: Span::new(0, 6),
+                kind: SemKind::Keyword,
+            }, // "Weapon" line0 col0
+            SemToken {
+                span: Span::new(7, 11),
+                kind: SemKind::BlockName,
+            }, // "AK47"   line0 col7
+            SemToken {
+                span: Span::new(12, 15),
+                kind: SemKind::Keyword,
+            }, // "End"    line1 col0
         ];
         let lsp = to_lsp_semantic_tokens(&rope, &tokens, PositionEnc::Utf16);
         assert_eq!(lsp[0].delta_line, 0);

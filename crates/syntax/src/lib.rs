@@ -12,4 +12,6 @@ pub mod parser;
 
 pub use incremental::{reparse, Edit, Strategy};
 pub use kind::{IniLang, SyntaxKind};
-pub use parser::{parse, OpenerOracle, Parse, SyntaxError, SyntaxErrorKind, SyntaxNode, SyntaxToken};
+pub use parser::{
+    parse, OpenerOracle, Parse, SyntaxError, SyntaxErrorKind, SyntaxNode, SyntaxToken,
+};

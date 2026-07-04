@@ -1,0 +1,72 @@
+# Test gate on pushes and pull requests: the full Rust suite (unit, spec,
+# schema round-trip, incremental fuzz) on Linux and Windows, the wire-level
+# e2e script against the real binary, and a compile check of the VS Code
+# extension. The corpus gate stays local-only (it needs the fetched game
+# data); run it before tagging a release — see docs/release.md.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+# A newer push to the same ref supersedes in-flight runs; cancel them so we
+# don't burn runner minutes on stale commits.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test
+        run: cargo test --locked
+      - name: e2e (stdio wire protocol)
+        shell: bash
+        run: |
+          cargo build --locked -p genparser-server
+          bin=target/debug/genparser-lsp
+          [ "$RUNNER_OS" = "Windows" ] && bin="$bin.exe"
+          # Linux runners expose the interpreter as `python3`; Windows as `python`.
+          if command -v python3 >/dev/null 2>&1; then py=python3; else py=python; fi
+          "$py" crates/server/tests/e2e.py "$bin"
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo fmt
+        run: cargo fmt --all --check
+      - name: cargo clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - name: Compile VS Code extension
+        working-directory: editors/vscode
+        run: |
+          npm ci
+          npm run compile

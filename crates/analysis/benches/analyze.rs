@@ -20,7 +20,7 @@ fn synthetic_ini(target_lines: usize) -> String {
     let mut lines = 0usize;
     let mut i = 0usize;
     while lines < target_lines {
-        if i % 2 == 0 {
+        if i.is_multiple_of(2) {
             out.push_str(&format!(
                 "Weapon GenBenchWeapon{i}\n\
                  \x20 PrimaryDamage = 40.0\n\
@@ -118,7 +118,11 @@ fn bench_analyze(c: &mut Criterion) {
                 let mut cache = DiagnosticsCache::new();
                 // Warm the cache as the server would have after the open.
                 diagnostics::diagnose_with_cache(&analyzer, parse, None, None, &mut cache);
-                let edit = Edit { start: at, old_end: at, new_len: 1 };
+                let edit = Edit {
+                    start: at,
+                    old_end: at,
+                    new_len: 1,
+                };
                 b.iter(|| {
                     let (inc, strategy) = analyzer.reparse(parse, src, edited, edit);
                     assert_eq!(strategy, Strategy::Spliced);
@@ -146,7 +150,11 @@ fn bench_corpus_keystroke(c: &mut Criterion) {
 
     let at = src.len() / 2 + src[src.len() / 2..].find('=').unwrap() + 1;
     let edited = format!("{} 9{}", &src[..at], &src[at..]);
-    let edit = Edit { start: at, old_end: at, new_len: 2 };
+    let edit = Edit {
+        start: at,
+        old_end: at,
+        new_len: 2,
+    };
 
     let mut group = c.benchmark_group("corpus");
     group.sample_size(30);
@@ -162,7 +170,9 @@ fn bench_corpus_keystroke(c: &mut Criterion) {
         b.iter(|| {
             let (inc, strategy) = analyzer.reparse(&parse, &src, &edited, edit);
             assert_eq!(strategy, Strategy::Spliced);
-            black_box(diagnostics::diagnose_with_cache(&analyzer, &inc, None, None, &mut cache))
+            black_box(diagnostics::diagnose_with_cache(
+                &analyzer, &inc, None, None, &mut cache,
+            ))
         })
     });
     group.bench_function("format_edits_ParticleSystem", |b| {

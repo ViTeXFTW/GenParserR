@@ -1,0 +1,215 @@
+# Tag-triggered release pipeline.
+#
+# Push a tag `vX.Y.Z` (matching the workspace version in Cargo.toml) and this
+# workflow builds the server for Windows x64 and Linux x64 (musl-static),
+# packages platform-specific VS Code extensions with the binary bundled,
+# publishes a GitHub Release with SHA-256 checksums, and — when VSCE_PAT is
+# configured as a repository secret — publishes the extension to the VS Code
+# Marketplace (skipped, not failed, when the token is absent).
+#
+# See docs/release.md for the step-by-step release procedure.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  BIN_NAME: genparser-lsp
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  # The tag is the single source of truth for the release version; it must
+  # match the Rust workspace version so the binary's provenance is unambiguous.
+  # (The extension version is stamped from the tag at package time.)
+  check-version:
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches workspace version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          crate="$(cargo metadata --locked --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "genparser-server") | .version')"
+          if [ "$tag" != "$crate" ]; then
+            echo "::error::tag v$tag does not match workspace version $crate" >&2
+            exit 1
+          fi
+
+  build:
+    needs: check-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          # musl => fully static binary, runs on any x64 Linux regardless of
+          # glibc version (all dependencies are pure Rust).
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install musl linker
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Build
+        run: cargo build --locked --release -p genparser-server --target ${{ matrix.target }}
+
+      # Archive on the build machine so the Unix executable bit survives
+      # (upload-artifact does not preserve file permissions).
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        run: |
+          staging="${BIN_NAME}-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          mkdir "$staging" bin
+          cp "target/${{ matrix.target }}/release/${BIN_NAME}" bin/
+          cp "target/${{ matrix.target }}/release/${BIN_NAME}" "$staging/"
+          cp README.md "$staging/"
+          [ -f LICENSE ] && cp LICENSE "$staging/"
+          tar czf "$staging.tar.gz" "$staging"
+          shasum -a 256 "$staging.tar.gz" > "$staging.tar.gz.sha256"
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $staging = "$env:BIN_NAME-$env:GITHUB_REF_NAME-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $staging | Out-Null
+          New-Item -ItemType Directory -Path bin | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/$env:BIN_NAME.exe" bin
+          Copy-Item "target/${{ matrix.target }}/release/$env:BIN_NAME.exe" $staging
+          Copy-Item README.md $staging
+          if (Test-Path LICENSE) { Copy-Item LICENSE $staging }
+          Compress-Archive -Path $staging -DestinationPath "$staging.zip"
+          (Get-FileHash "$staging.zip" -Algorithm SHA256).Hash.ToLower() + "  $staging.zip" `
+            | Out-File -Encoding ascii "$staging.zip.sha256"
+
+      - name: Upload release archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: |
+            *.tar.gz
+            *.tar.gz.sha256
+            *.zip
+            *.zip.sha256
+          if-no-files-found: error
+      # Raw binary for the vsix job (which re-sets the exec bit itself). The
+      # bin/ staging dir holds exactly the binary — a target-dir glob would
+      # also catch .d/.pdb build by-products.
+      - name: Upload raw binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.target }}
+          path: bin/*
+          if-no-files-found: error
+
+  # One .vsix per platform, each with that platform's server binary bundled
+  # under the extension's server/ directory (`vsce package --target`). The
+  # extension still honors the `genparser.server.path` override.
+  vsix:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - vsce-target: win32-x64
+            rust-target: x86_64-pc-windows-msvc
+          - vsce-target: linux-x64
+            rust-target: x86_64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: bin-${{ matrix.rust-target }}
+          path: editors/vscode/server
+      - name: Package extension
+        working-directory: editors/vscode
+        run: |
+          chmod +x server/${BIN_NAME}* || true
+          [ -f ../../LICENSE ] && cp ../../LICENSE .
+          npm ci
+          # Stamp the extension with the release version (tag is authoritative).
+          npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
+          npx --yes @vscode/vsce package --target ${{ matrix.vsce-target }} \
+            -o "genparser-vscode-${{ matrix.vsce-target }}-${GITHUB_REF_NAME#v}.vsix"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.vsce-target }}
+          path: editors/vscode/*.vsix
+          if-no-files-found: error
+
+  release:
+    needs: [build, vsix]
+    runs-on: ubuntu-latest
+    steps:
+      # Only dist-* and vsix-* — merging bin-* would collide the
+      # identically-named raw binaries from different targets.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: vsix-*
+          path: dist
+          merge-multiple: true
+      - name: Aggregate checksums
+        run: |
+          cd dist
+          sha256sum *.tar.gz *.zip *.vsix > SHA256SUMS.txt
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
+
+  # Publishing requires the VSCE_PAT secret configured in the repository;
+  # the job is skipped (not failed) when the token is absent, so the GitHub
+  # Release itself never depends on marketplace credentials.
+  publish-marketplace:
+    needs: release
+    runs-on: ubuntu-latest
+    env:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+    steps:
+      - name: Check token
+        id: token
+        run: |
+          if [ -n "$VSCE_PAT" ]; then echo "present=true" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/download-artifact@v4
+        if: steps.token.outputs.present == 'true'
+        with:
+          pattern: vsix-*
+          path: vsix
+          merge-multiple: true
+      - name: Publish to VS Code Marketplace
+        if: steps.token.outputs.present == 'true'
+        run: |
+          for f in vsix/*.vsix; do
+            npx --yes @vscode/vsce publish --packagePath "$f" --pat "$VSCE_PAT"
+          done
