@@ -1,202 +1,160 @@
-# genparser — a language server for C&C Generals: Zero Hour INI
+# GenParserR
 
-`genparser` is an IDE-agnostic [language server](https://microsoft.github.io/language-server-protocol/)
-for the INI scripting format used by *Command & Conquer Generals: Zero Hour*.
-It helps mappers and modders author `Object`, `Weapon`, `FXList`, and other INI
-definitions with **diagnostics**, **completions**, **hover**, **go-to-definition**,
-**find-references**, workspace-wide **rename**, an **outline** (document
-symbols + folding), **workspace symbol search**, **formatting**, **quick
-fixes**, and schema-aware **semantic highlighting**.
+GenParserR is a language server and VS Code extension for the INI files used by
+*Command & Conquer: Generals - Zero Hour*. It gives modders and map authors
+editor support for the game's object, weapon, upgrade, FX, audio, module, and
+map override definitions.
 
-What makes it faithful to the game: the block/field schema is **hand-written to
-match the engine's own `FieldParse` tables** in the open-sourced C++ source. The
-parse function the engine uses for each field determines the field's data type;
-the table's userData column determines its enum/bitflag value set; the engine's
-dispatch table and `ModuleFactory` enumerate the block and module types. The
-schema lives in `crates/schema/schema.json` and is grown by hand against that
-source.
+The project is built around an IDE-agnostic Language Server Protocol (LSP)
+binary, `genparser-lsp`, plus a reference VS Code extension. The analyzer uses a
+hand-maintained schema modeled on the game's INI parsing tables, so diagnostics
+and completions follow the structure the engine actually expects instead of
+treating the files as generic INI.
 
-## Workspace layout
+## Features
 
+- Diagnostics for unknown blocks, fields, modules, invalid values,
+  unterminated blocks, unresolved references, duplicate module tags, and
+  unreachable upgrade-conditioned sets.
+- Context-aware completions for block names, field names, module slots, module
+  types, enum values, bitflags, and workspace definitions.
+- Hover, go to definition, find references, rename, workspace symbol search,
+  document symbols, and folding ranges.
+- Semantic highlighting for Generals INI syntax and schema-aware tokens.
+- Quick fixes for common issues such as missing `End` statements, misspelled
+  enum values, unresolved references, and suppressing diagnostics.
+- Optional formatter for indentation normalization.
+- Incremental document updates and cached diagnostics for large game files.
+- Reference VS Code extension with bundled syntax highlighting and LSP client
+  integration.
+
+## Getting Started
+
+Install the latest VS Code extension package from the project's releases, then
+open a Zero Hour `.ini` file. The extension activates for the `generals-ini`
+language and starts the bundled language server automatically.
+
+Formatting is off by default. Enable it with `genparser.format.enable` when you
+want the server to advertise document formatting to VS Code.
+
+### Standalone language server
+
+Release assets also include the standalone `genparser-lsp` binary. Any editor
+with generic LSP support can run that binary over stdio for `.ini` files. Pass
+this initialization option if you want formatting:
+
+```json
+{ "format": { "enable": true } }
 ```
-crates/
-  schema/      Serde data model for the schema + the embedded, hand-written schema.json
-  syntax/      logos lexer + rowan lossless CST (error-recovering)
-  analysis/    Diagnostics, completion, semantic tokens, cross-file index
-  server/      tower-lsp server (stdio)  ->  binary `genparser-lsp`
-editors/
-  vscode/      Reference VS Code extension (thin LSP client)
-GeneralsCode/  The engine source the schema is modeled on (not part of the crate)
-```
 
-## Build
+## Common Editor Setup
 
-```sh
-cargo build --release            # builds all crates incl. the server
-cargo test                       # unit + integration tests
-```
-
-The language server binary lands at `target/release/genparser-lsp`.
-
-### End-to-end test
-
-```sh
-cargo build -p genparser-server
-python crates/server/tests/e2e.py target/debug/genparser-lsp     # .exe on Windows
-```
-
-This drives the real binary over stdio (initialize → didOpen → diagnostics,
-completion, semantic tokens).
-
-### Spec-first behavior tests
-
-`crates/analysis/tests/spec/` holds `.ini` files paired with hand-authored
-`*.spec.toml` expectations of the diagnostics and completions they should
-produce. Unlike a snapshot, a spec is written by hand, so an outcome can be
-pinned *before* the feature that produces it exists:
-
-* `[[diag]]` — assert a diagnostic by `severity`, `code`, and the token its span
-  must cover (`on`).
-* `[[complete]]` — assert the completion set at a `$N` cursor marker.
-* `xfail = true` — for behavior not built yet; the suite tolerates it failing
-  today but fails if it ever passes (forcing the flag to be dropped).
-
-Run `cargo test -p genparser-analysis --test spec` to check them. To add a case,
-drop a `.ini` (with `$N` markers at completion points) and a sibling
-`*.spec.toml`.
-
-## Editing the schema
-
-The committed `crates/schema/schema.json` is embedded into the server at compile
-time. It is **hand-written**: to add or fix a block, field, module or value set,
-edit the JSON directly and model each entry on the matching `FieldParse` table
-in `GeneralsCode/`. The engine's parse function for a field maps to a
-`value_type` (e.g. `INI::parseReal` → `real`, `INI::parseBool` → `bool`,
-`INI::parseIndexList` over a name array → an `enum` value set); when a parse
-function has no clean type, use `Unknown { parse_fn }` so the field is treated
-leniently rather than falsely flagged.
-
-After editing, run `cargo test -p genparser-schema` and the spec test to
-validate the JSON and catch new false positives.
-
-## Editor setup
-
-The server speaks LSP over stdio, so any LSP-capable editor works.
-
-Document formatting (indentation normalization) is **opt-in**: the server only
-advertises the formatting capability when the client passes
-`initializationOptions = { "format": { "enable": true } }` at `initialize`.
-Real game files are wildly hand-indented, so an editor's format-on-save would
-otherwise rewrite whole files unasked.
-
-### VS Code
-
-Use the bundled extension in `editors/vscode/` (see its README). It claims the
-`generals-ini` language id for `.ini` files and launches the server. Enable
-formatting with the `genparser.format.enable` setting (the extension restarts
-the server when `genparser.*` settings change).
-
-### Neovim (nvim-lspconfig)
+### Neovim
 
 ```lua
 local configs = require("lspconfig.configs")
 local lspconfig = require("lspconfig")
+
 if not configs.genparser then
   configs.genparser = {
     default_config = {
       cmd = { "genparser-lsp" },
-      filetypes = { "generals_ini" },     -- map your .ini files to this filetype
+      filetypes = { "generals_ini" },
       root_dir = lspconfig.util.root_pattern(".git", "*.ini"),
       single_file_support = true,
-      init_options = { format = { enable = false } },  -- true to opt in to formatting
+      init_options = { format = { enable = false } },
     },
   }
 end
+
 lspconfig.genparser.setup({})
 ```
 
-### Helix (`languages.toml`)
+## Diagnostic Suppression
 
-```toml
-[language-server.genparser]
-command = "genparser-lsp"
-# opt in to formatting:
-# config = { format = { enable = true } }
-
-[[language]]
-name = "generals-ini"
-scope = "source.ini"
-file-types = ["ini"]
-language-servers = ["genparser"]
-```
-
-### Zed / Sublime (LSP) / others
-
-Point the editor's generic LSP integration at the `genparser-lsp` command with
-stdio transport and a document selector for your INI files.
-
-## How faithful is it?
-
-* **Lexing** mirrors the engine: `;` line comments, `"`-quoted strings, and
-  `" \n\r\t="` token separators (so `Key=Value` and `Key = Value` are identical).
-* **Block / field / module catalog** is generated from the engine source, so it
-  matches what the game actually parses.
-* **Diagnostics** are *stricter than the engine by design* (the project's goal):
-  on top of engine-faithful errors (unknown block/field, bad value type, bad
-  enum/bitflag member, unterminated block) it adds modder-helpful warnings such
-  as unresolved cross-file references and unknown modules.
-
-### Suppressing diagnostics per file
-
-If a file intentionally trips a diagnostic (e.g. it references definitions
-that live outside the workspace), opt that file out of specific codes with a
-pragma comment at file scope (outside any block):
+Suppress a diagnostic for one file with a file-scope comment:
 
 ```ini
 ; genparser-disable: unresolved-reference, unreachable-set
 ```
 
-Codes may be separated by commas and/or spaces, the colon is optional, and
-multiple pragma lines accumulate. The code names are exactly what the editor
-shows on each diagnostic (e.g. `genparser(unresolved-reference)` in VS Code's
-hover and Problems panel). A misspelled code is flagged with an
-`unknown-suppression` hint so a typo never silently suppresses nothing.
+Use the diagnostic code shown by your editor. Multiple codes can be separated by
+spaces or commas, and multiple pragma lines accumulate. Unknown suppression codes
+are reported so typos do not silently hide problems.
 
-### Known limitations / future work
+## Feature Showcase
 
-The full phase-by-phase plan and status lives in
-[`docs/roadmap.md`](docs/roadmap.md). Current state in brief:
+### Diagnostic codes
 
-* All 63 top-level block types and all 223 engine-registered modules are
-  modeled; running the analyzer over the complete Zero Hour game data yields
-  **21 diagnostics, all genuine** (dead references, condition-less
-  WeaponSets, and unreachable upgrade-conditioned sets in the shipped
-  INIs) — zero unknown-block / unknown-module / unknown-field noise.
-* Value validators cover Bool/Int/Real/Percent/Color/Coord/Duration, enums,
-  bitflags, references, and typed token lists (`Armor = <DamageType>
-  <percent>`). Module field tables are extracted from the engine's
-  `buildFieldParse` chains; fields that name other definitions (images, FX
-  lists, OCLs, audio events, weapons, upgrades, …) are reference-typed, so
-  they complete from the workspace index and warn when unresolved.
-* **Coverage: 3,656 fields across the 63 blocks + 223 modules; 86% carry a
-  concrete value type, validated/completed against 31 engine-extracted value
-  sets** (ObjectStatus, ModelCondition, death/damage/veterancy flags, KindOf,
-  Locomotor appearance, …). The remaining 14% use multi-token engine parse
-  functions not yet modeled and stay `Unknown` (validation is then skipped,
-  never falsely flagged).
-* Editing is incremental end-to-end (block-splice reparse + per-block
-  diagnostics cache; a keystroke in a 60k-line file costs ~150 µs), and
-  positions honor the negotiated LSP encoding (UTF-8 or UTF-16).
-* The full LSP surface: outline/folding/workspace-symbol, find-references and
-  rename (index-backed, case-insensitive like the engine), semantic tokens
-  (full + range + delta), an indent formatter, quick fixes (insert missing
-  `End`, did-you-mean for enum members), and a block-local dead-code warning
-  (`unreachable-set`) that found 8 genuinely dead WeaponSets/ArmorSets in the
-  shipped game data. Corpus total: **21 diagnostics, all genuine**.
-* Workspace-wide *unused-definition* hints were measured and deliberately not
-  shipped: maps, `.wnd` files, and engine code reference INI entities the
-  index can't see (97% of ParticleSystems would false-flag). See the roadmap.
+GenParserR reports stable diagnostic codes so warnings can be searched,
+suppressed, or tracked consistently:
+
+| Code | Meaning |
+| --- | --- |
+| `syntax` | The file cannot be parsed cleanly, such as a missing `End`. |
+| `stray-field` | A field appears outside a valid block or module. |
+| `unknown-block` | A top-level block name is not known to the Generals INI schema. |
+| `overrides` | A map override redefines an existing object-style definition. |
+| `duplicate-definition` | The same definition is declared more than once. |
+| `unreachable-set` | A `WeaponSet` or `ArmorSet` uses upgrade conditions without the trigger module needed to activate it. |
+| `unknown-field` | A field is not valid in the current block or module. |
+| `missing-module-tag` | A module is missing its required `ModuleTag_*` name. |
+| `unknown-module` | A module type is not known for the current module slot. |
+| `missing-condition` | A conditional state block is missing its condition token. |
+| `missing-value` | A field requires a value but none was provided. |
+| `bad-bool` | A boolean field is not `Yes` or `No`. |
+| `non-positive` | A value must be greater than zero. |
+| `bad-percent` | A percentage value is malformed or out of range. |
+| `bad-color` | A color value is malformed. |
+| `bad-coord` | A coordinate value is malformed. |
+| `bad-number` | A numeric field does not contain a valid number. |
+| `bad-enum` | A value is not a member of the expected enum set. |
+| `bad-flag` | A bitflag value is not a member of the expected flag set. |
+| `unresolved-reference` | A field references a definition that is not found in the workspace. |
+| `unknown-suppression` | A `genparser-disable` comment names a code that does not exist. |
+| `module-wrong-slot` | A module type is used under the wrong slot. |
+| `duplicate-module-tag` | Two modules in the same object use the same module tag. |
+| `editor-default-module` | A placeholder/default module value should be replaced before shipping. |
+
+### Quick fixes
+
+Supported quick fixes appear in the editor's lightbulb/code action menu:
+
+| Quick fix | When it appears |
+| --- | --- |
+| Insert missing `End` | A block or module is unterminated. |
+| Replace with `<value>` | An enum or bitflag value is close to a known valid value. |
+| Create stub `<Block> <Name>` | A reference points to a missing definition that can be scaffolded safely. |
+| Remove unreachable `WeaponSet` / `ArmorSet` | An upgrade-conditioned set can never activate. |
+| Insert `WeaponSetUpgrade` / `ArmorUpgrade` trigger module | An object has an unreachable upgrade-conditioned set and needs a trigger module. |
+| Suppress `<code>` in this file | A warning or hint is intentional for the current file. |
+
+### Example
+
+```ini
+; genparser-disable: unresolved-reference
+
+Weapon DemoCannon
+  PrimaryDamage = lots        ; bad-number
+  DeathType = EXPLODDED       ; quick fix: Replace with `EXPLODED`
+  FireFX = DemoMissingFX      ; suppressed unresolved-reference
+End
+
+Object DemoTank
+  Behavior = PhysicsBehavior ModuleTag_01
+  End
+
+  WeaponSet
+    Conditions = PLAYER_UPGRADE
+    Weapon = PRIMARY DemoCannon
+  End                         ; unreachable-set
+End
+```
+
+In this example, GenParserR can flag the invalid number, suggest the corrected
+death flag, suppress the intentionally missing FX reference, and offer either to
+remove the unreachable `WeaponSet` or insert the matching trigger module.
 
 ## License
 
-GPL-3.0-or-later, matching the engine source the schema derives from.
+GenParserR is licensed under the MIT License. See [LICENSE](LICENSE).
