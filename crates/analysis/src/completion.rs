@@ -78,7 +78,7 @@ enum PosContext {
     /// Completing a module type name after a slot `=`. Carries the slot's
     /// accepted interfaces so completions can be filtered to valid modules only.
     ModuleName { slot_accepts: Vec<String> },
-    /// Completing the argument of a sub-block header (after `=`).
+    /// Completing the argument of a sub-block header.
     SubBlockArg { argument_type: genparser_schema::ValueType },
 }
 
@@ -133,13 +133,16 @@ fn classify_position(analyzer: &Analyzer, root: &SyntaxNode, offset: u32) -> Pos
                 return PosContext::ModuleName { slot_accepts: accepts };
             }
             // Check for a sub-block with an argument_type (e.g. ConditionState = <flags>).
+            if let Some(arg_type) = slot.as_ref().and_then(|s| sub_block_arg_type(parent.as_ref(), s.text())) {
+                return PosContext::SubBlockArg { argument_type: arg_type };
+            }
+        } else if on_header_line(&module_node, offset) {
+            let parent = enclosing_scope(&module_node).map(|p| scope_schema(analyzer, &p));
+            let slot = Module(module_node.clone()).slot();
             if let Some(arg_type) = slot.as_ref().and_then(|s| {
-                parent.as_ref().and_then(|p| {
-                    p.sub_blocks()
-                        .iter()
-                        .find(|sb| sb.keyword == s.text())
-                        .and_then(|sb| sb.argument_type.clone())
-                })
+                (offset >= u32::from(s.text_range().end()))
+                    .then(|| sub_block_arg_type(parent.as_ref(), s.text()))
+                    .flatten()
             }) {
                 return PosContext::SubBlockArg { argument_type: arg_type };
             }
@@ -196,7 +199,12 @@ fn field_key_completions(analyzer: &Analyzer, scope_node: &SyntaxNode) -> Vec<Co
     for sub in scope.sub_blocks() {
         // Snippet: include `= ${1:NONE}` argument placeholder when the sub-block takes one.
         let insert = if sub.argument_type.is_some() {
-            Some(format!("{} = ${{1:NONE}}\n\t$0\nEnd", sub.keyword))
+            let arg = sub.argument_type.as_ref().map(argument_placeholder).unwrap_or("NONE".into());
+            if space_separated_sub_block_arg(&sub.keyword) {
+                Some(format!("{} ${{1:{arg}}}\n\t$0\nEnd", sub.keyword))
+            } else {
+                Some(format!("{} = ${{1:{arg}}}\n\t$0\nEnd", sub.keyword))
+            }
         } else {
             Some(format!("{}\n\t$0\nEnd", sub.keyword))
         };
@@ -208,6 +216,29 @@ fn field_key_completions(analyzer: &Analyzer, scope_node: &SyntaxNode) -> Vec<Co
         });
     }
     out
+}
+
+fn sub_block_arg_type(
+    scope: Option<&crate::model::ScopeSchema<'_>>,
+    keyword: &str,
+) -> Option<genparser_schema::ValueType> {
+    scope?
+        .sub_blocks()
+        .iter()
+        .find(|sb| sb.keyword == keyword)
+        .and_then(|sb| sb.argument_type.clone())
+}
+
+fn space_separated_sub_block_arg(keyword: &str) -> bool {
+    matches!(keyword, "SideInfo" | "SkirmishBuildList" | "Structure")
+}
+
+fn argument_placeholder(ty: &ValueType) -> String {
+    match ty {
+        ValueType::Enum { value_set } if value_set == "ai_side" => "America".into(),
+        ValueType::Reference { ref_kind } => format!("{ref_kind:?}"),
+        _ => "NONE".into(),
+    }
 }
 
 fn field_value_completions(

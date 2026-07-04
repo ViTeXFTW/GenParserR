@@ -1,0 +1,51 @@
+no_errors = true
+
+[[diag]]
+severity = "error"
+code = "unknown-field"
+on = "ResourceGatherersHard"
+absent = true
+
+[[diag]]
+severity = "error"
+code = "unknown-field"
+on = "Science"
+absent = true
+
+[[diag]]
+severity = "error"
+code = "unknown-field"
+on = "Location"
+absent = true
+
+[[complete]]
+at = "$1"
+includes = ["ResourceGatherersEasy", "BaseDefenseStructure1", "SkillSet1"]
+
+[[complete]]
+at = "$2"
+includes = ["SCIENCE_AIDataSpec"]
+
+[[complete]]
+at = "$3"
+includes = ["Science"]
+
+[[complete]]
+at = "$4"
+includes = ["AIDataSpecBuilding"]
+
+[[complete]]
+at = "$5"
+includes = ["Name", "Location", "RallyPointOffset", "AutomaticallyBuild"]
+
+[[complete]]
+at = "$6"
+includes = ["America", "China", "GLAToxinGeneral"]
+
+[[complete]]
+at = "$7"
+includes = ["America", "China", "GLAToxinGeneral"]
+
+[[complete]]
+at = "$8"
+includes = ["AIDataSpecBuilding"]
