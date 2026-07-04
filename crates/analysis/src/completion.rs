@@ -77,9 +77,13 @@ enum PosContext {
     },
     /// Completing a module type name after a slot `=`. Carries the slot's
     /// accepted interfaces so completions can be filtered to valid modules only.
-    ModuleName { slot_accepts: Vec<String> },
+    ModuleName {
+        slot_accepts: Vec<String>,
+    },
     /// Completing the argument of a sub-block header.
-    SubBlockArg { argument_type: genparser_schema::ValueType },
+    SubBlockArg {
+        argument_type: genparser_schema::ValueType,
+    },
 }
 
 fn classify_position(analyzer: &Analyzer, root: &SyntaxNode, offset: u32) -> PosContext {
@@ -95,7 +99,10 @@ fn classify_position(analyzer: &Analyzer, root: &SyntaxNode, offset: u32) -> Pos
         let scope_node = enclosing_scope(&field_node);
         if after_equals(&field_node, offset) {
             let field = Field(field_node.clone());
-            let key = field.key().map(|k| k.text().to_string()).unwrap_or_default();
+            let key = field
+                .key()
+                .map(|k| k.text().to_string())
+                .unwrap_or_default();
             let value_index = field
                 .value_tokens()
                 .iter()
@@ -130,11 +137,18 @@ fn classify_position(analyzer: &Analyzer, root: &SyntaxNode, offset: u32) -> Pos
                 })
             });
             if let Some(accepts) = slot_accepts {
-                return PosContext::ModuleName { slot_accepts: accepts };
+                return PosContext::ModuleName {
+                    slot_accepts: accepts,
+                };
             }
             // Check for a sub-block with an argument_type (e.g. ConditionState = <flags>).
-            if let Some(arg_type) = slot.as_ref().and_then(|s| sub_block_arg_type(parent.as_ref(), s.text())) {
-                return PosContext::SubBlockArg { argument_type: arg_type };
+            if let Some(arg_type) = slot
+                .as_ref()
+                .and_then(|s| sub_block_arg_type(parent.as_ref(), s.text()))
+            {
+                return PosContext::SubBlockArg {
+                    argument_type: arg_type,
+                };
             }
         } else if on_header_line(&module_node, offset) {
             let parent = enclosing_scope(&module_node).map(|p| scope_schema(analyzer, &p));
@@ -144,7 +158,9 @@ fn classify_position(analyzer: &Analyzer, root: &SyntaxNode, offset: u32) -> Pos
                     .then(|| sub_block_arg_type(parent.as_ref(), s.text()))
                     .flatten()
             }) {
-                return PosContext::SubBlockArg { argument_type: arg_type };
+                return PosContext::SubBlockArg {
+                    argument_type: arg_type,
+                };
             }
         }
         // Otherwise we're inside the module body -> completing a field key.
@@ -160,7 +176,8 @@ fn classify_position(analyzer: &Analyzer, root: &SyntaxNode, offset: u32) -> Pos
             .parent()
             .map(|p| p.kind() == SyntaxKind::ROOT)
             .unwrap_or(false);
-        if is_top_level && on_header_line(&block_node, offset) && !after_equals(&block_node, offset) {
+        if is_top_level && on_header_line(&block_node, offset) && !after_equals(&block_node, offset)
+        {
             if let Some(kw) = Block(block_node.clone()).keyword() {
                 if offset <= u32::from(kw.text_range().end()) {
                     return PosContext::TopLevel;
@@ -199,7 +216,11 @@ fn field_key_completions(analyzer: &Analyzer, scope_node: &SyntaxNode) -> Vec<Co
     for sub in scope.sub_blocks() {
         // Snippet: include `= ${1:NONE}` argument placeholder when the sub-block takes one.
         let insert = if sub.argument_type.is_some() {
-            let arg = sub.argument_type.as_ref().map(argument_placeholder).unwrap_or("NONE".into());
+            let arg = sub
+                .argument_type
+                .as_ref()
+                .map(argument_placeholder)
+                .unwrap_or("NONE".into());
             if space_separated_sub_block_arg(&sub.keyword) {
                 Some(format!("{} ${{1:{arg}}}\n\t$0\nEnd", sub.keyword))
             } else {
@@ -275,7 +296,10 @@ fn field_value_completions(
     // DisplayName: add string table keys from the companion .str file when available.
     let mut base = {
         let scope = scope_schema(analyzer, scope_node);
-        scope.field(key).map(|f| completions_for_type(analyzer, &f.value_type, value_index, index)).unwrap_or_default()
+        scope
+            .field(key)
+            .map(|f| completions_for_type(analyzer, &f.value_type, value_index, index))
+            .unwrap_or_default()
     };
     if key.eq_ignore_ascii_case("DisplayName") {
         if let (Some(idx), Some(f)) = (index, file) {
@@ -297,7 +321,10 @@ fn type_snippet_placeholder(ty: &ValueType, n: usize) -> String {
     match ty {
         ValueType::Bool => format!("${{{n}:Yes}}"),
         ValueType::Int | ValueType::UInt => format!("${{{n}:0}}"),
-        ValueType::Real | ValueType::PositiveReal | ValueType::AngleReal | ValueType::Velocity
+        ValueType::Real
+        | ValueType::PositiveReal
+        | ValueType::AngleReal
+        | ValueType::Velocity
         | ValueType::Acceleration => format!("${{{n}:0}}"),
         ValueType::Percent => format!("${{{n}:100%}}"),
         ValueType::Duration => format!("${{{n}:1000}}"),
@@ -444,8 +471,7 @@ fn module_name_completions(analyzer: &Analyzer, slot_accepts: &[String]) -> Vec<
         .modules
         .iter()
         .filter(|m| {
-            slot_accepts.is_empty()
-                || m.interfaces.iter().any(|i| slot_accepts.contains(i))
+            slot_accepts.is_empty() || m.interfaces.iter().any(|i| slot_accepts.contains(i))
         })
         .map(|m| {
             // Snippet: module name + placeholder tag + indented body + End.
@@ -564,7 +590,10 @@ mod tests {
         let src = "Weapon AK47\n  ScaleWeaponSpeed = \nEnd\n";
         let offset = "Weapon AK47\n  ScaleWeaponSpeed = ".len() as u32;
         let out = labels(src, offset);
-        assert!(out.contains(&"Yes".to_string()) && out.contains(&"No".to_string()), "{out:?}");
+        assert!(
+            out.contains(&"Yes".to_string()) && out.contains(&"No".to_string()),
+            "{out:?}"
+        );
     }
 
     #[test]

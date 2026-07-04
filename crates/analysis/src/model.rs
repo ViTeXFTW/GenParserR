@@ -87,9 +87,7 @@ impl<'a> ScopeSchema<'a> {
 pub fn scope_schema<'a>(analyzer: &'a Analyzer, node: &SyntaxNode) -> ScopeSchema<'a> {
     match node.kind() {
         SyntaxKind::BLOCK => {
-            let kw = Block(node.clone())
-                .keyword()
-                .map(|t| t.text().to_string());
+            let kw = Block(node.clone()).keyword().map(|t| t.text().to_string());
             match kw.and_then(|k| analyzer.block(&k)) {
                 Some(b) => ScopeSchema::Block(b),
                 None => ScopeSchema::Unknown,
@@ -97,10 +95,7 @@ pub fn scope_schema<'a>(analyzer: &'a Analyzer, node: &SyntaxNode) -> ScopeSchem
         }
         SyntaxKind::MODULE => {
             let module = Module(node.clone());
-            if let Some(m) = module
-                .module_name()
-                .and_then(|n| analyzer.module(n.text()))
-            {
+            if let Some(m) = module.module_name().and_then(|n| analyzer.module(n.text())) {
                 return ScopeSchema::Module(m);
             }
             let Some(slot) = module.slot() else {

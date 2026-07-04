@@ -17,7 +17,7 @@
 
 use std::collections::BTreeMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use genparser_analysis::{diagnostics, index, Analyzer, WorkspaceIndex};
@@ -43,9 +43,9 @@ fn extra_corpus_dirs() -> Vec<PathBuf> {
         .collect()
 }
 
-fn ini_files(dir: &PathBuf) -> Vec<PathBuf> {
+fn ini_files(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    let mut stack = vec![dir.clone()];
+    let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
         for entry in std::fs::read_dir(&d).unwrap() {
             let p = entry.unwrap().path();
@@ -90,7 +90,10 @@ fn corpus_smoke() {
                 .map(|p| (p.strip_prefix(&base).unwrap().display().to_string(), p)),
         );
     }
-    assert!(!files.is_empty(), "corpus dir exists but holds no .ini files");
+    assert!(
+        !files.is_empty(),
+        "corpus dir exists but holds no .ini files"
+    );
 
     let analyzer = Analyzer::embedded();
 

@@ -55,7 +55,11 @@ fn block_symbol(node: &SyntaxNode) -> Option<DocSymbol> {
             Span::from(n.text_range()),
         ),
         // Singleton blocks (GameData, AudioSettings, …) have no name.
-        None => (keyword.text().to_string(), None, Span::from(keyword.text_range())),
+        None => (
+            keyword.text().to_string(),
+            None,
+            Span::from(keyword.text_range()),
+        ),
     };
     Some(DocSymbol {
         name,

@@ -11,7 +11,9 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use dashmap::DashMap;
 use genparser_analysis::diagnostics::DiagnosticsCache;
-use genparser_analysis::index::{definitions_in, module_tags_in, references_in, WorkspaceIndex};
+use genparser_analysis::index::{
+    definitions_in, module_tags_in, references_in, Definition, ReferenceSite, WorkspaceIndex,
+};
 use genparser_analysis::nav::{definition_at, hover_at, reference_at, HoverInfo};
 use genparser_analysis::{actions, completion, diagnostics, format, outline, semantic, Analyzer};
 use genparser_syntax::{Edit, Parse};
@@ -59,6 +61,13 @@ pub struct Backend {
     /// Monotonic id source for semantic-token results (delta bookkeeping).
     semantic_result_id: std::sync::atomic::AtomicU64,
 }
+
+type ScanEntry = (
+    String,
+    Vec<Definition>,
+    Vec<ReferenceSite>,
+    Vec<(String, String)>,
+);
 
 /// Read a file leniently: real INIs predate UTF-8 (Windows-1252 comments), so
 /// a strict `read_to_string` would silently drop them from the index.
@@ -128,18 +137,13 @@ fn load_sibling_str_keys(ini_url: &Url) -> Vec<String> {
 
 /// Walk `roots` and index every `.ini` file (definitions + reference sites + module tags).
 /// CPU/IO heavy — runs via `spawn_blocking` from [`Backend::scan_workspace`].
-fn scan_roots(
-    analyzer: &Analyzer,
-    roots: &[PathBuf],
-) -> Vec<(
-    String,
-    Vec<genparser_analysis::index::Definition>,
-    Vec<genparser_analysis::index::ReferenceSite>,
-    Vec<(String, String)>,
-)> {
+fn scan_roots(analyzer: &Analyzer, roots: &[PathBuf]) -> Vec<ScanEntry> {
     let mut out = Vec::new();
     for root in roots {
-        for entry in walkdir::WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
+        for entry in walkdir::WalkDir::new(root)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
             let path = entry.path();
             // Real game data mixes extension casing (`*.ini` / `*.INI`,
             // e.g. the MappedImages files), so compare case-insensitively.
@@ -150,8 +154,12 @@ fn scan_roots(
             {
                 continue;
             }
-            let Some(text) = read_lossy(path) else { continue };
-            let Ok(uri) = Url::from_file_path(path) else { continue };
+            let Some(text) = read_lossy(path) else {
+                continue;
+            };
+            let Ok(uri) = Url::from_file_path(path) else {
+                continue;
+            };
             let parse = analyzer.parse(&text);
             let defs = definitions_in(analyzer, &parse, uri.as_str());
             let refs = references_in(analyzer, &parse);
@@ -213,7 +221,7 @@ impl Backend {
         let defs = definitions_in(&self.analyzer, &parse, uri.as_str());
         let refs = references_in(&self.analyzer, &parse);
         let tags = module_tags_in(&self.analyzer, &parse);
-        let str_keys = load_sibling_str_keys(&uri);
+        let str_keys = load_sibling_str_keys(uri);
         if let Ok(mut idx) = self.index.write() {
             idx.set_file(uri.as_str(), defs);
             idx.set_file_refs(uri.as_str(), refs);
@@ -240,7 +248,9 @@ impl Backend {
         // Hand the warmed cache back unless a newer change superseded us (the
         // newer change runs its own refresh against its own parse).
         {
-            let Some(mut entry) = self.docs.get_mut(uri) else { return };
+            let Some(mut entry) = self.docs.get_mut(uri) else {
+                return;
+            };
             if entry.version != version {
                 return;
             }
@@ -269,7 +279,9 @@ impl Backend {
             .iter()
             .map(|e| e.key().as_str().to_string())
             .collect();
-        let Ok(mut idx) = self.index.write() else { return };
+        let Ok(mut idx) = self.index.write() else {
+            return;
+        };
         for (uri, defs, refs, tags) in scanned {
             if !open.contains(&uri) {
                 idx.set_file(&uri, defs);
@@ -299,11 +311,7 @@ impl Backend {
     /// The (kind, name, span) under the cursor — a reference-typed value token
     /// or a definition's name token. The shared entry point for
     /// find-references and rename, which work from either end of an edge.
-    fn symbol_at(
-        &self,
-        uri: &Url,
-        pos: Position,
-    ) -> Option<genparser_analysis::nav::ReferenceAt> {
+    fn symbol_at(&self, uri: &Url, pos: Position) -> Option<genparser_analysis::nav::ReferenceAt> {
         let (rope, parse) = self.doc(uri)?;
         let offset = convert::position_to_offset(&rope, pos, self.enc());
         reference_at(&self.analyzer, &parse, offset)
@@ -468,7 +476,9 @@ impl LanguageServer for Backend {
         let version = params.text_document.version;
         let enc = self.enc();
         {
-            let Some(mut entry) = self.docs.get_mut(&uri) else { return };
+            let Some(mut entry) = self.docs.get_mut(&uri) else {
+                return;
+            };
             let entry = entry.value_mut();
             // Bulk batches (e.g. format-on-save applying coalesced reindent
             // edits) take a different path: incremental reparse needs the full
@@ -503,10 +513,8 @@ impl LanguageServer for Backend {
                 for change in params.content_changes {
                     match change.range {
                         Some(range) => {
-                            let start =
-                                convert::position_to_offset(&entry.rope, range.start, enc);
-                            let old_end =
-                                convert::position_to_offset(&entry.rope, range.end, enc);
+                            let start = convert::position_to_offset(&entry.rope, range.start, enc);
+                            let old_end = convert::position_to_offset(&entry.rope, range.end, enc);
                             convert::apply_change(&mut entry.rope, Some(range), &change.text, enc);
                             let new_text: Arc<str> = entry.rope.to_string().into();
                             let edit = Edit {
@@ -549,11 +557,16 @@ impl LanguageServer for Backend {
         let offset = convert::position_to_offset(&rope, pos, self.enc());
         let idx = self.index.read().ok();
         let snippets = self.snippet_support.get().copied().unwrap_or(false);
-        let items: Vec<CompletionItem> =
-            completion::complete(&self.analyzer, &parse, offset, idx.as_deref(), Some(uri.as_str()))
-                .into_iter()
-                .map(|c| convert::to_lsp_completion(c, snippets))
-                .collect();
+        let items: Vec<CompletionItem> = completion::complete(
+            &self.analyzer,
+            &parse,
+            offset,
+            idx.as_deref(),
+            Some(uri.as_str()),
+        )
+        .into_iter()
+        .map(|c| convert::to_lsp_completion(c, snippets))
+        .collect();
         Ok(Some(CompletionResponse::Array(items)))
     }
 
@@ -588,24 +601,25 @@ impl LanguageServer for Backend {
         let tokens = semantic::semantic_tokens(&self.analyzer, &parse);
         let data = convert::to_lsp_semantic_tokens(&rope, &tokens, self.enc());
         let id = self.next_semantic_id();
-        let previous = self.docs.get_mut(&uri).and_then(|mut doc| {
-            doc.last_semantic.replace((id, data.clone()))
-        });
+        let previous = self
+            .docs
+            .get_mut(&uri)
+            .and_then(|mut doc| doc.last_semantic.replace((id, data.clone())));
         // Only splice against the exact result the client says it holds;
         // anything else (stale id, no history) falls back to a full response.
         match previous {
-            Some((prev_id, prev)) if prev_id.to_string() == params.previous_result_id => {
-                Ok(Some(SemanticTokensFullDeltaResult::TokensDelta(
-                    SemanticTokensDelta {
-                        result_id: Some(id.to_string()),
-                        edits: vec![convert::semantic_tokens_splice(&prev, &data)],
-                    },
-                )))
-            }
-            _ => Ok(Some(SemanticTokensFullDeltaResult::Tokens(SemanticTokens {
-                result_id: Some(id.to_string()),
-                data,
-            }))),
+            Some((prev_id, prev)) if prev_id.to_string() == params.previous_result_id => Ok(Some(
+                SemanticTokensFullDeltaResult::TokensDelta(SemanticTokensDelta {
+                    result_id: Some(id.to_string()),
+                    edits: vec![convert::semantic_tokens_splice(&prev, &data)],
+                }),
+            )),
+            _ => Ok(Some(SemanticTokensFullDeltaResult::Tokens(
+                SemanticTokens {
+                    result_id: Some(id.to_string()),
+                    data,
+                },
+            ))),
         }
     }
 
@@ -646,17 +660,15 @@ impl LanguageServer for Backend {
 
         // Take the diagnostics cache out without holding the DashMap entry
         // across the index lock (avoids lock-order deadlock with the index RwLock).
-        let Some((rope, parse, text, version, mut cache)) =
-            self.docs.get_mut(&uri).map(|mut d| {
-                (
-                    d.rope.clone(),
-                    d.parse.clone(),
-                    Arc::clone(&d.text),
-                    d.version,
-                    std::mem::take(&mut d.diag_cache),
-                )
-            })
-        else {
+        let Some((rope, parse, text, version, mut cache)) = self.docs.get_mut(&uri).map(|mut d| {
+            (
+                d.rope.clone(),
+                d.parse.clone(),
+                Arc::clone(&d.text),
+                d.version,
+                std::mem::take(&mut d.diag_cache),
+            )
+        }) else {
             return Ok(None);
         };
 
@@ -696,10 +708,7 @@ impl LanguageServer for Backend {
                         if let Some(doc) = self.docs.get(base_uri) {
                             return Some(doc.text.as_ref().to_string());
                         }
-                        base_uri
-                            .to_file_path()
-                            .ok()
-                            .and_then(|p| read_lossy(&p))
+                        base_uri.to_file_path().ok().and_then(|p| read_lossy(&p))
                     },
                 ));
             }
@@ -773,7 +782,9 @@ impl LanguageServer for Backend {
         };
 
         let locations: Vec<(String, genparser_analysis::Span)> = {
-            let Ok(idx) = self.index.read() else { return Ok(None) };
+            let Ok(idx) = self.index.read() else {
+                return Ok(None);
+            };
             idx.locations(reference.kind, &reference.name)
                 .iter()
                 .map(|l| (l.file.clone(), l.span))
@@ -782,7 +793,9 @@ impl LanguageServer for Backend {
 
         let mut out = Vec::new();
         for (file, span) in locations {
-            let Ok(target_uri) = Url::parse(&file) else { continue };
+            let Ok(target_uri) = Url::parse(&file) else {
+                continue;
+            };
             if let Some(target_rope) = self.rope_for(&target_uri) {
                 out.push(Location {
                     uri: target_uri,
@@ -833,8 +846,15 @@ impl LanguageServer for Backend {
         // Cap the result set: an empty query over full game data matches
         // thousands of names, and clients re-query as the user types.
         const MAX_RESULTS: usize = 256;
-        let raw: Vec<(genparser_schema::RefKind, String, String, genparser_analysis::Span)> = {
-            let Ok(idx) = self.index.read() else { return Ok(None) };
+        let raw: Vec<(
+            genparser_schema::RefKind,
+            String,
+            String,
+            genparser_analysis::Span,
+        )> = {
+            let Ok(idx) = self.index.read() else {
+                return Ok(None);
+            };
             idx.symbols(&params.query)
                 .take(MAX_RESULTS)
                 .map(|(kind, name, loc)| (kind, name.to_string(), loc.file.clone(), loc.span))
@@ -874,7 +894,9 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let mut raw: Vec<(String, genparser_analysis::Span)> = {
-            let Ok(idx) = self.index.read() else { return Ok(None) };
+            let Ok(idx) = self.index.read() else {
+                return Ok(None);
+            };
             let mut v: Vec<_> = idx
                 .reference_sites(sym.kind, &sym.name)
                 .iter()
@@ -903,7 +925,9 @@ impl LanguageServer for Backend {
         let Some(sym) = self.symbol_at(&uri, params.position) else {
             return Ok(None);
         };
-        let Some(rope) = self.rope_for(&uri) else { return Ok(None) };
+        let Some(rope) = self.rope_for(&uri) else {
+            return Ok(None);
+        };
         Ok(Some(PrepareRenameResponse::Range(convert::span_to_range(
             &rope,
             sym.span,
@@ -925,7 +949,9 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let mut raw: Vec<(String, genparser_analysis::Span)> = {
-            let Ok(idx) = self.index.read() else { return Ok(None) };
+            let Ok(idx) = self.index.read() else {
+                return Ok(None);
+            };
             idx.reference_sites(sym.kind, &sym.name)
                 .iter()
                 .chain(idx.locations(sym.kind, &sym.name).iter())
@@ -946,7 +972,9 @@ impl LanguageServer for Backend {
                 let rope = self.rope_for(&uri)?;
                 Some((uri, rope))
             });
-            let Some((file_uri, rope)) = entry else { continue };
+            let Some((file_uri, rope)) = entry else {
+                continue;
+            };
             changes.entry(file_uri.clone()).or_default().push(TextEdit {
                 range: convert::span_to_range(rope, span, enc),
                 new_text: new_name.clone(),
@@ -1036,30 +1064,38 @@ fn origin_copy_fixes(
                 let nr = n.text_range();
                 u32::from(nr.start()) <= d.span.start && d.span.end <= u32::from(nr.end())
             });
-        let Some(block_node) = block_node else { continue };
+        let Some(block_node) = block_node else {
+            continue;
+        };
         let block = Block(block_node.clone());
         let Some(kw) = block.keyword() else { continue };
-        let Some(schema_block) = analyzer.block(kw.text()) else { continue };
-        let Some(kind) = schema_block.defines else { continue };
-        let Some(name_tok) = block.name() else { continue };
+        let Some(schema_block) = analyzer.block(kw.text()) else {
+            continue;
+        };
+        let Some(kind) = schema_block.defines else {
+            continue;
+        };
+        let Some(name_tok) = block.name() else {
+            continue;
+        };
         let name = name_tok.text().to_string();
         if !seen.insert(name.to_ascii_lowercase()) {
             continue;
         }
         // Find a base-game (non-override-layer) definition location.
-        let base_loc: Option<&Location> = index
-            .locations(kind, &name)
-            .iter()
-            .find(|l| {
-                !l.file.rsplit(['/', '\\']).next()
-                    .is_some_and(|f| f.eq_ignore_ascii_case("map.ini") || f.eq_ignore_ascii_case("solo.ini"))
-            });
+        let base_loc: Option<&Location> = index.locations(kind, &name).iter().find(|l| {
+            !l.file.rsplit(['/', '\\']).next().is_some_and(|f| {
+                f.eq_ignore_ascii_case("map.ini") || f.eq_ignore_ascii_case("solo.ini")
+            })
+        });
         let Some(base_loc) = base_loc else { continue };
         let base_url = match Url::parse(&base_loc.file) {
             Ok(u) => u,
             Err(_) => continue,
         };
-        let Some(base_text) = read_file(&base_url) else { continue };
+        let Some(base_text) = read_file(&base_url) else {
+            continue;
+        };
         // Re-parse the base file and extract the block at the name token.
         let base_parse = analyzer.parse(&base_text);
         let base_block_text: Option<String> = base_parse
@@ -1076,12 +1112,18 @@ fn origin_copy_fixes(
                 let r = n.text_range();
                 base_text[usize::from(r.start())..usize::from(r.end())].to_string()
             });
-        let Some(block_text) = base_block_text else { continue };
+        let Some(block_text) = base_block_text else {
+            continue;
+        };
         let base_short = base_url
             .path_segments()
-            .and_then(|s| s.last())
+            .and_then(|mut s| s.next_back())
             .unwrap_or("base");
-        let lead = if text.is_empty() || text.ends_with('\n') { "" } else { "\n" };
+        let lead = if text.is_empty() || text.ends_with('\n') {
+            ""
+        } else {
+            "\n"
+        };
         let at = text.len() as u32;
         out.push(actions::Fix {
             title: format!("Insert reference copy of `{name}` from {base_short}"),

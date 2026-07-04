@@ -67,6 +67,10 @@ impl Token {
     pub fn len(&self) -> usize {
         self.end - self.start
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.start == self.end
+    }
 }
 
 /// Tokenize `src` into a flat list of tokens covering the entire input.
@@ -164,7 +168,10 @@ mod tests {
     #[test]
     fn unterminated_string_still_lexes() {
         use SyntaxKind::*;
-        assert_eq!(kinds(r#"Name = "oops"#), vec![WORD, WHITESPACE, EQUALS, WHITESPACE, STRING]);
+        assert_eq!(
+            kinds(r#"Name = "oops"#),
+            vec![WORD, WHITESPACE, EQUALS, WHITESPACE, STRING]
+        );
         assert_lossless(r#"Name = "oops"#);
     }
 

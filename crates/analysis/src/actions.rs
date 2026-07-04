@@ -54,7 +54,11 @@ fn insert_missing_ends(parse: &Parse, text: &str, range: Span, out: &mut Vec<Fix
         let line_start = text[..err.start].rfind('\n').map_or(0, |i| i + 1);
         let indent = &text[line_start..err.start];
         let head = text[err.start..].split_whitespace().next().unwrap_or("?");
-        let lead = if text.ends_with('\n') || text.is_empty() { "" } else { "\n" };
+        let lead = if text.ends_with('\n') || text.is_empty() {
+            ""
+        } else {
+            "\n"
+        };
         let at = text.len() as u32;
         out.push(Fix {
             title: format!("Insert missing `End` for `{head}`"),
@@ -78,9 +82,7 @@ fn suggest_in_node(analyzer: &Analyzer, node: &SyntaxNode, range: Span, out: &mu
         }
         match child.kind() {
             SyntaxKind::FIELD => suggest_in_field(analyzer, &child, range, out),
-            SyntaxKind::BLOCK | SyntaxKind::MODULE => {
-                suggest_in_node(analyzer, &child, range, out)
-            }
+            SyntaxKind::BLOCK | SyntaxKind::MODULE => suggest_in_node(analyzer, &child, range, out),
             _ => {}
         }
     }
@@ -97,7 +99,9 @@ fn suggest_in_field(analyzer: &Analyzer, node: &SyntaxNode, range: Span, out: &m
         return;
     };
     let schema = scope_schema(analyzer, &scope);
-    let Some(schema_field) = schema.field(key.text()) else { return };
+    let Some(schema_field) = schema.field(key.text()) else {
+        return;
+    };
     let tokens = field.value_tokens();
     let mut check = |tok: &SyntaxToken, value_set: &str, flags: bool| {
         let span = Span::from(tok.text_range());
@@ -116,7 +120,9 @@ fn suggest_in_field(analyzer: &Analyzer, node: &SyntaxNode, range: Span, out: &m
         {
             return;
         }
-        let Some(set) = analyzer.value_set(value_set) else { return };
+        let Some(set) = analyzer.value_set(value_set) else {
+            return;
+        };
         if set.members.iter().any(|m| m.name.eq_ignore_ascii_case(raw)) {
             return; // valid member, nothing to fix
         }
@@ -177,7 +183,10 @@ fn diagnostic_fixes(
     // (block_start, trigger): deduplicates scaffold inserts per object.
     let mut scaffold_seen: HashSet<(u32, &'static str)> = HashSet::new();
 
-    for d in diags.iter().filter(|d| d.span.end >= range.start && d.span.start <= range.end) {
+    for d in diags
+        .iter()
+        .filter(|d| d.span.end >= range.start && d.span.start <= range.end)
+    {
         match d.code {
             "unreachable-set" => {
                 unreachable_set_fixes(parse, text, d, &mut scaffold_seen, out);
@@ -221,10 +230,14 @@ fn unreachable_set_fixes(
         .parent()
         .and_then(|n| n.parent())
         .filter(|n| n.kind() == SyntaxKind::MODULE);
-    let Some(set_module_node) = set_module_node else { return };
+    let Some(set_module_node) = set_module_node else {
+        return;
+    };
 
     let set_ast = Module(set_module_node.clone());
-    let Some(slot_tok) = set_ast.slot() else { return };
+    let Some(slot_tok) = set_ast.slot() else {
+        return;
+    };
     let set_keyword = slot_tok.text();
 
     let trigger: &'static str = match set_keyword {
@@ -316,7 +329,9 @@ fn stub_definition_fix(
     index: Option<&WorkspaceIndex>,
     out: &mut Vec<Fix>,
 ) {
-    let Some(ref_at) = nav::reference_at(analyzer, parse, d.span.start) else { return };
+    let Some(ref_at) = nav::reference_at(analyzer, parse, d.span.start) else {
+        return;
+    };
     let name = &ref_at.name;
     if name.contains(char::is_whitespace) {
         return; // Quoted multi-word names can't be a block header.
@@ -324,8 +339,14 @@ fn stub_definition_fix(
     if index.is_some_and(|i| i.is_defined(ref_at.kind, name)) {
         return; // Defensive: already defined, diagnostic shouldn't have fired.
     }
-    let Some(keyword) = stub_keyword(analyzer, ref_at.kind) else { return };
-    let lead = if text.is_empty() || text.ends_with('\n') { "" } else { "\n" };
+    let Some(keyword) = stub_keyword(analyzer, ref_at.kind) else {
+        return;
+    };
+    let lead = if text.is_empty() || text.ends_with('\n') {
+        ""
+    } else {
+        "\n"
+    };
     let at = text.len() as u32;
     out.push(Fix {
         title: format!("Create stub `{keyword} {name}`"),
@@ -341,7 +362,12 @@ fn stub_keyword<'a>(analyzer: &'a Analyzer, kind: RefKind) -> Option<&'a str> {
     // ObjectReskin requires a parent-object argument, so it is never a valid stub.
     const PREFERRED: &[(RefKind, &str)] = &[(RefKind::Object, "Object")];
     if let Some(&(_, kw)) = PREFERRED.iter().find(|(k, _)| *k == kind) {
-        if analyzer.schema().blocks.iter().any(|b| b.defines == Some(kind)) {
+        if analyzer
+            .schema()
+            .blocks
+            .iter()
+            .any(|b| b.defines == Some(kind))
+        {
             return Some(kw);
         }
     }
@@ -366,7 +392,9 @@ fn suppress_fix(parse: &Parse, text: &str, code: &'static str, out: &mut Vec<Fix
 
     for el in root.children_with_tokens() {
         let Some(tok) = el.as_token() else { continue };
-        let Some((_base, rest)) = pragma_rest(&tok) else { continue };
+        let Some((_base, rest)) = pragma_rest(tok) else {
+            continue;
+        };
         let code_listed = pragma_words(rest).any(|(s, e)| &rest[s..e] == code);
         if code_listed {
             already_suppressed = true;
@@ -375,7 +403,11 @@ fn suppress_fix(parse: &Parse, text: &str, code: &'static str, out: &mut Vec<Fix
         if first_pragma.is_none() {
             let tok_end = u32::from(tok.text_range().end());
             // CRLF: the COMMENT token includes the trailing \r; insert before it.
-            let insert_at = if tok.text().ends_with('\r') { tok_end - 1 } else { tok_end };
+            let insert_at = if tok.text().ends_with('\r') {
+                tok_end - 1
+            } else {
+                tok_end
+            };
             let has_words = pragma_words(rest).next().is_some();
             first_pragma = Some((insert_at, has_words));
         }
@@ -398,7 +430,11 @@ fn suppress_fix(parse: &Parse, text: &str, code: &'static str, out: &mut Vec<Fix
         });
     } else {
         // No existing pragma: insert a new one at the top (after any BOM).
-        let bom_offset = if text.starts_with('\u{feff}') { 3u32 } else { 0u32 };
+        let bom_offset = if text.starts_with('\u{feff}') {
+            3u32
+        } else {
+            0u32
+        };
         out.push(Fix {
             title: format!("Suppress `{code}` in this file"),
             span: Span::new(bom_offset, bom_offset),
@@ -440,7 +476,14 @@ mod tests {
         let mut idx = WorkspaceIndex::new();
         idx.set_file("test.ini", definitions_in(&a, &parse, "test.ini"));
         let diags = diagnose(&a, &parse, Some(&idx), Some("test.ini"));
-        fixes(&a, &parse, src, Span::new(0, src.len() as u32), &diags, Some(&idx))
+        fixes(
+            &a,
+            &parse,
+            src,
+            Span::new(0, src.len() as u32),
+            &diags,
+            Some(&idx),
+        )
     }
 
     #[test]
@@ -467,7 +510,14 @@ mod tests {
         // Bitflag with prefix op: the `+` is preserved in the replacement.
         let src2 = "Object T\n  Behavior = SlowDeathBehavior ModuleTag_01\n    DeathTypes = NONE +EXPLODDED\n  End\nEnd\n";
         let parse2 = a.parse(src2);
-        let fx2 = fixes(&a, &parse2, src2, Span::new(0, src2.len() as u32), &[], None);
+        let fx2 = fixes(
+            &a,
+            &parse2,
+            src2,
+            Span::new(0, src2.len() as u32),
+            &[],
+            None,
+        );
         assert!(fx2.iter().any(|f| f.new_text == "+EXPLODED"), "{fx2:?}");
     }
 
@@ -496,7 +546,8 @@ mod tests {
         );
         let fx = all_fixes(src);
         assert!(
-            fx.iter().any(|f| f.title.contains("Remove unreachable") && f.title.contains("WeaponSet")),
+            fx.iter()
+                .any(|f| f.title.contains("Remove unreachable") && f.title.contains("WeaponSet")),
             "missing remove fix: {fx:?}"
         );
         assert!(
@@ -504,19 +555,43 @@ mod tests {
             "missing insert fix: {fx:?}"
         );
         // Apply remove fix: the WeaponSet sub-block should disappear.
-        let remove = fx.iter().find(|f| f.title.contains("Remove unreachable")).unwrap();
+        let remove = fx
+            .iter()
+            .find(|f| f.title.contains("Remove unreachable"))
+            .unwrap();
         let mut result = src.to_string();
-        result.replace_range(remove.span.start as usize..remove.span.end as usize, &remove.new_text);
-        assert!(!result.contains("WeaponSet"), "WeaponSet not removed: {result}");
-        assert!(result.contains("End\n"), "Object End should survive: {result}");
+        result.replace_range(
+            remove.span.start as usize..remove.span.end as usize,
+            &remove.new_text,
+        );
+        assert!(
+            !result.contains("WeaponSet"),
+            "WeaponSet not removed: {result}"
+        );
+        assert!(
+            result.contains("End\n"),
+            "Object End should survive: {result}"
+        );
 
         // Apply insert fix: scaffold appears before the Object's End.
-        let insert = fx.iter().find(|f| f.title.contains("WeaponSetUpgrade")).unwrap();
+        let insert = fx
+            .iter()
+            .find(|f| f.title.contains("WeaponSetUpgrade"))
+            .unwrap();
         let mut result2 = src.to_string();
-        result2.replace_range(insert.span.start as usize..insert.span.end as usize, &insert.new_text);
-        assert!(result2.contains("Behavior = WeaponSetUpgrade"), "scaffold missing: {result2}");
+        result2.replace_range(
+            insert.span.start as usize..insert.span.end as usize,
+            &insert.new_text,
+        );
+        assert!(
+            result2.contains("Behavior = WeaponSetUpgrade"),
+            "scaffold missing: {result2}"
+        );
         assert!(result2.contains("ModuleTag_01"), "tag missing: {result2}");
-        assert!(result2.contains("TriggeredBy = Upgrade_TODO"), "TriggeredBy missing: {result2}");
+        assert!(
+            result2.contains("TriggeredBy = Upgrade_TODO"),
+            "TriggeredBy missing: {result2}"
+        );
     }
 
     #[test]
@@ -540,8 +615,15 @@ mod tests {
             "End\n",
         );
         let fx = all_fixes(src);
-        let insert = fx.iter().find(|f| f.title.contains("WeaponSetUpgrade")).unwrap();
-        assert!(insert.new_text.contains("ModuleTag_03"), "wrong tag: {}", insert.new_text);
+        let insert = fx
+            .iter()
+            .find(|f| f.title.contains("WeaponSetUpgrade"))
+            .unwrap();
+        assert!(
+            insert.new_text.contains("ModuleTag_03"),
+            "wrong tag: {}",
+            insert.new_text
+        );
     }
 
     #[test]
@@ -563,7 +645,8 @@ mod tests {
             "ArmorUpgrade scaffold not offered: {fx:?}"
         );
         assert!(
-            fx.iter().any(|f| f.title.contains("Remove unreachable") && f.title.contains("ArmorSet")),
+            fx.iter()
+                .any(|f| f.title.contains("Remove unreachable") && f.title.contains("ArmorSet")),
             "ArmorSet remove not offered: {fx:?}"
         );
     }
@@ -583,11 +666,20 @@ mod tests {
             "End\n",
         );
         let fx = all_fixes(src);
-        let remove = fx.iter().find(|f| f.title.contains("Remove unreachable")).unwrap();
+        let remove = fx
+            .iter()
+            .find(|f| f.title.contains("Remove unreachable"))
+            .unwrap();
         let mut result = src.to_string();
-        result.replace_range(remove.span.start as usize..remove.span.end as usize, &remove.new_text);
+        result.replace_range(
+            remove.span.start as usize..remove.span.end as usize,
+            &remove.new_text,
+        );
         // Object End must be present.
-        assert!(result.contains("Object Tank\nEnd\n"), "Object End corrupted: {result}");
+        assert!(
+            result.contains("Object Tank\nEnd\n"),
+            "Object End corrupted: {result}"
+        );
     }
 
     #[test]
@@ -609,8 +701,14 @@ mod tests {
             "End\n",
         );
         let fx = all_fixes(src);
-        let removes: Vec<_> = fx.iter().filter(|f| f.title.contains("Remove unreachable")).collect();
-        let inserts: Vec<_> = fx.iter().filter(|f| f.title.contains("WeaponSetUpgrade")).collect();
+        let removes: Vec<_> = fx
+            .iter()
+            .filter(|f| f.title.contains("Remove unreachable"))
+            .collect();
+        let inserts: Vec<_> = fx
+            .iter()
+            .filter(|f| f.title.contains("WeaponSetUpgrade"))
+            .collect();
         assert_eq!(removes.len(), 2, "expected 2 remove fixes: {fx:?}");
         assert_eq!(inserts.len(), 1, "expected 1 insert fix (deduped): {fx:?}");
     }
@@ -622,17 +720,35 @@ mod tests {
         // Weapon block with FireFX referencing a non-existent FXList.
         let src = "Weapon MyWeapon\n  FireFX = NoSuchFX\nEnd\n";
         let fx = all_fixes(src);
-        let stub = fx.iter().find(|f| f.title.contains("Create stub")).expect("stub fix not offered");
-        assert!(stub.new_text.contains("FXList NoSuchFX"), "wrong stub: {}", stub.new_text);
-        assert!(stub.new_text.ends_with("End\n"), "stub not terminated: {}", stub.new_text);
+        let stub = fx
+            .iter()
+            .find(|f| f.title.contains("Create stub"))
+            .expect("stub fix not offered");
+        assert!(
+            stub.new_text.contains("FXList NoSuchFX"),
+            "wrong stub: {}",
+            stub.new_text
+        );
+        assert!(
+            stub.new_text.ends_with("End\n"),
+            "stub not terminated: {}",
+            stub.new_text
+        );
         // Applied at EOF.
         assert_eq!(stub.span.start, src.len() as u32);
 
         // File without trailing newline: stub gets a leading blank line.
         let src2 = "Weapon MyWeapon\n  FireFX = NoSuchFX\nEnd";
         let fx2 = all_fixes(src2);
-        let stub2 = fx2.iter().find(|f| f.title.contains("Create stub")).unwrap();
-        assert!(stub2.new_text.starts_with('\n'), "missing lead newline: {:?}", stub2.new_text);
+        let stub2 = fx2
+            .iter()
+            .find(|f| f.title.contains("Create stub"))
+            .unwrap();
+        assert!(
+            stub2.new_text.starts_with('\n'),
+            "missing lead newline: {:?}",
+            stub2.new_text
+        );
     }
 
     #[test]
@@ -647,7 +763,8 @@ mod tests {
         );
         let fx = all_fixes(src_upgrade);
         assert!(
-            fx.iter().any(|f| f.title.contains("Create stub") && f.title.contains("Upgrade")),
+            fx.iter()
+                .any(|f| f.title.contains("Create stub") && f.title.contains("Upgrade")),
             "Upgrade stub not offered: {fx:?}"
         );
 
@@ -667,9 +784,16 @@ mod tests {
         // Warning diagnostic, no existing pragma → inserts at offset 0.
         let src = "Weapon MyWeapon\n  FireFX = NoSuchFX\nEnd\n";
         let fx = all_fixes(src);
-        let sup = fx.iter().find(|f| f.title.contains("Suppress")).expect("suppress not offered");
+        let sup = fx
+            .iter()
+            .find(|f| f.title.contains("Suppress"))
+            .expect("suppress not offered");
         assert_eq!(sup.span.start, 0, "should insert at top");
-        assert!(sup.new_text.starts_with("; genparser-disable:"), "wrong pragma: {}", sup.new_text);
+        assert!(
+            sup.new_text.starts_with("; genparser-disable:"),
+            "wrong pragma: {}",
+            sup.new_text
+        );
         assert!(sup.new_text.ends_with('\n'), "pragma must end with newline");
 
         // No existing pragma → inserts at offset 0 (suppress_fix has a BOM guard
@@ -681,23 +805,43 @@ mod tests {
     #[test]
     fn suppress_fix_appends_to_existing_pragma() {
         // Existing pragma with another code → appends ", <code>".
-        let src = "; genparser-disable: unknown-module\nWeapon MyWeapon\n  FireFX = NoSuchFX\nEnd\n";
+        let src =
+            "; genparser-disable: unknown-module\nWeapon MyWeapon\n  FireFX = NoSuchFX\nEnd\n";
         let fx = all_fixes(src);
-        let sup = fx.iter().find(|f| f.title.contains("Suppress")).expect("suppress not offered: {fx:?}");
-        assert!(sup.new_text.starts_with(", "), "should append with comma: {:?}", sup.new_text);
-        assert!(sup.new_text.contains("unresolved-reference"), "wrong code: {:?}", sup.new_text);
+        let sup = fx
+            .iter()
+            .find(|f| f.title.contains("Suppress"))
+            .expect("suppress not offered: {fx:?}");
+        assert!(
+            sup.new_text.starts_with(", "),
+            "should append with comma: {:?}",
+            sup.new_text
+        );
+        assert!(
+            sup.new_text.contains("unresolved-reference"),
+            "wrong code: {:?}",
+            sup.new_text
+        );
 
         // Bare pragma (colon only, no codes yet) → appends " <code>".
         let src2 = "; genparser-disable:\nWeapon MyWeapon\n  FireFX = NoSuchFX\nEnd\n";
         let fx2 = all_fixes(src2);
-        let sup2 = fx2.iter().find(|f| f.title.contains("Suppress")).expect("suppress not offered for bare pragma");
-        assert!(sup2.new_text.starts_with(' '), "bare pragma: should prepend space: {:?}", sup2.new_text);
+        let sup2 = fx2
+            .iter()
+            .find(|f| f.title.contains("Suppress"))
+            .expect("suppress not offered for bare pragma");
+        assert!(
+            sup2.new_text.starts_with(' '),
+            "bare pragma: should prepend space: {:?}",
+            sup2.new_text
+        );
 
         // Code already listed → no action.
         let src3 = "; genparser-disable: unresolved-reference\nWeapon MyWeapon\n  FireFX = NoSuchFX\nEnd\n";
         let fx3 = all_fixes(src3);
         assert!(
-            !fx3.iter().any(|f| f.title.contains("Suppress") && f.title.contains("unresolved-reference")),
+            !fx3.iter()
+                .any(|f| f.title.contains("Suppress") && f.title.contains("unresolved-reference")),
             "should not offer suppress for already-listed code: {fx3:?}"
         );
     }
@@ -707,13 +851,21 @@ mod tests {
         // bad-bool is Error severity → no Suppress action.
         let src_err = "Weapon W\n  ScaleWeaponSpeed = Maybe\nEnd\n";
         let fx_err = all_fixes(src_err);
-        let has_suppress_for_error = fx_err.iter().any(|f| f.title.contains("Suppress") && f.title.contains("bad-bool"));
-        assert!(!has_suppress_for_error, "errors must not get suppress: {fx_err:?}");
+        let has_suppress_for_error = fx_err
+            .iter()
+            .any(|f| f.title.contains("Suppress") && f.title.contains("bad-bool"));
+        assert!(
+            !has_suppress_for_error,
+            "errors must not get suppress: {fx_err:?}"
+        );
 
         // Two unresolved references with the same code → only one Suppress action.
         let src_dup = "Weapon W\n  FireFX = NoSuchFX\n  FireFX = NoSuchFX2\nEnd\n";
         let fx_dup = all_fixes(src_dup);
-        let suppress_count = fx_dup.iter().filter(|f| f.title.contains("Suppress") && f.title.contains("unresolved-reference")).count();
+        let suppress_count = fx_dup
+            .iter()
+            .filter(|f| f.title.contains("Suppress") && f.title.contains("unresolved-reference"))
+            .count();
         assert_eq!(suppress_count, 1, "duplicate suppress actions: {fx_dup:?}");
     }
 
@@ -730,7 +882,8 @@ mod tests {
         // Range = first byte only (nowhere near the unresolved-reference token).
         let fx = fixes(&a, &parse, src, Span::new(0, 1), &diags, Some(&idx));
         assert!(
-            !fx.iter().any(|f| f.title.contains("Suppress") || f.title.contains("Create stub")),
+            !fx.iter()
+                .any(|f| f.title.contains("Suppress") || f.title.contains("Create stub")),
             "diagnostic fixes should be out of range: {fx:?}"
         );
     }

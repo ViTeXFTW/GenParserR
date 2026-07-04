@@ -10,8 +10,8 @@ use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use genparser_syntax::lexer::tokenize;
-use genparser_syntax::parser::FixedOpeners;
 use genparser_syntax::parse;
+use genparser_syntax::parser::FixedOpeners;
 
 /// Generate a synthetic document of roughly `target_lines` lines, shaped like
 /// real ZH data: a mix of flat `Weapon` blocks and `Object` blocks with nested
@@ -21,7 +21,7 @@ fn synthetic_ini(target_lines: usize) -> String {
     let mut lines = 0usize;
     let mut i = 0usize;
     while lines < target_lines {
-        if i % 2 == 0 {
+        if i.is_multiple_of(2) {
             out.push_str(&format!(
                 "Weapon GenBenchWeapon{i}\n\
                  \x20 PrimaryDamage = 40.0\n\

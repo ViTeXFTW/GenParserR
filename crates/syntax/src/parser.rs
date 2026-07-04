@@ -305,8 +305,7 @@ impl<'a> Parser<'a> {
 
     fn emit_tokens(&mut self, start: usize, end: usize) {
         for tok in &self.tokens[start..end] {
-            self.builder
-                .token(tok.kind.into(), tok.text(self.src));
+            self.builder.token(tok.kind.into(), tok.text(self.src));
         }
     }
 }
@@ -348,10 +347,7 @@ mod tests {
         let src = "Weapon AK47\n  PrimaryDamage = 50.0\n  ClipSize = 30\nEnd\n";
         assert_round_trips(src);
         assert_eq!(child_kinds(src), vec![SyntaxKind::BLOCK]);
-        let block = parse(src, &opener_set())
-            .syntax()
-            .first_child()
-            .unwrap();
+        let block = parse(src, &opener_set()).syntax().first_child().unwrap();
         let fields = block
             .children()
             .filter(|n| n.kind() == SyntaxKind::FIELD)
@@ -413,7 +409,11 @@ End
         let parse = parse(src, &openers);
         assert!(parse.errors.is_empty(), "{:?}", parse.errors);
         assert_eq!(
-            parse.syntax().children().map(|n| n.kind()).collect::<Vec<_>>(),
+            parse
+                .syntax()
+                .children()
+                .map(|n| n.kind())
+                .collect::<Vec<_>>(),
             vec![SyntaxKind::BLOCK]
         );
     }
