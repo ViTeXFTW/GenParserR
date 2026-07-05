@@ -1,0 +1,15 @@
+no_errors = true
+
+[[diag]]
+severity = "warning"
+code = "map-forward-reference"
+on = "Command_Suppressed"
+nth = 1
+absent = true
+
+[[diag]]
+severity = "warning"
+code = "map-projectile-object"
+on = "SuppressedProjectile"
+nth = 1
+absent = true

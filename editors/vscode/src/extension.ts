@@ -9,6 +9,7 @@ import {
 } from "vscode-languageclient/node";
 
 let client: LanguageClient | undefined;
+let baseIniRootsHintShown = false;
 
 export function activate(context: vscode.ExtensionContext) {
   const serverPath = resolveServerPath(context);
@@ -39,6 +40,10 @@ export function activate(context: vscode.ExtensionContext) {
           .getConfiguration("genparser")
           .get<boolean>("format.enable", false),
       },
+      baseIniRoots: vscode.workspace
+        .getConfiguration("genparser")
+        .get<string[]>("baseIniRoots", []),
+      clientBaseIniHint: true,
     }),
   };
 
@@ -49,12 +54,28 @@ export function activate(context: vscode.ExtensionContext) {
     clientOptions
   );
 
+  context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider(
+      "big",
+      new BigIniDocumentProvider(() => client)
+    )
+  );
+
   client.start();
   context.subscriptions.push({
     dispose: () => {
       void client?.stop();
     },
   });
+
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenTextDocument((document) => {
+      void maybeShowBaseIniRootsHint(document);
+    })
+  );
+  for (const editor of vscode.window.visibleTextEditors) {
+    void maybeShowBaseIniRootsHint(editor.document);
+  }
 
   // Server settings (initializationOptions, server path) are read once at
   // startup, so any genparser.* change needs a clean restart to apply.
@@ -95,4 +116,54 @@ function resolveServerPath(context: vscode.ExtensionContext): string | undefined
 
   // Fall back to PATH lookup; the OS resolves the bare command name.
   return exe;
+}
+
+async function maybeShowBaseIniRootsHint(document: vscode.TextDocument) {
+  if (baseIniRootsHintShown || !isMapLayerDocument(document)) {
+    return;
+  }
+
+  const roots = vscode.workspace
+    .getConfiguration("genparser")
+    .get<string[]>("baseIniRoots", []);
+  if (roots.length > 0) {
+    return;
+  }
+
+  baseIniRootsHintShown = true;
+  const configure = "Configure base INI roots";
+  const choice = await vscode.window.showWarningMessage(
+    "GenParserR: map/solo.ini diagnostics are limited until base game or mod INIs are configured.",
+    configure
+  );
+  if (choice === configure) {
+    await vscode.commands.executeCommand(
+      "workbench.action.openSettings",
+      "genparser.baseIniRoots"
+    );
+  }
+}
+
+function isMapLayerDocument(document: vscode.TextDocument): boolean {
+  if (document.uri.scheme !== "file" || document.languageId !== "generals-ini") {
+    return false;
+  }
+  const name = path.basename(document.uri.fsPath).toLowerCase();
+  return name === "map.ini" || name === "solo.ini";
+}
+
+class BigIniDocumentProvider implements vscode.TextDocumentContentProvider {
+  constructor(private readonly getClient: () => LanguageClient | undefined) {}
+
+  async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
+    const activeClient = this.getClient();
+    if (!activeClient) {
+      return "";
+    }
+    return (
+      (await activeClient.sendRequest<string | null>("genparser/readVirtualFile", {
+        uri: uri.toString(),
+      })) ?? ""
+    );
+  }
 }

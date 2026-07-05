@@ -1,0 +1,8 @@
+no_errors = true
+
+[[diag]]
+severity = "warning"
+code = "map-forward-reference"
+on = "Command_NonMap"
+nth = 1
+absent = true

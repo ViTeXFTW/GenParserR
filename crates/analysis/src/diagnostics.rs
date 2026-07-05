@@ -57,6 +57,7 @@ pub fn diagnose(
     for node in parse.syntax().children() {
         out.extend(diagnose_root_child(analyzer, index, file, &node));
     }
+    out.extend(map_layer_diagnostics(analyzer, parse, index, file));
     apply_suppressions(parse, &mut out);
     out
 }
@@ -71,6 +72,8 @@ pub const KNOWN_CODES: &[&str] = &[
     "unknown-block",
     "overrides",
     "duplicate-definition",
+    "map-forward-reference",
+    "map-projectile-object",
     "unreachable-set",
     "unknown-field",
     "missing-module-tag",
@@ -321,6 +324,7 @@ pub fn diagnose_with_cache(
     }
     // Entries for children no longer in the tree are dropped here.
     cache.map = next;
+    out.extend(map_layer_diagnostics(analyzer, parse, index, file));
     apply_suppressions(parse, &mut out);
     out
 }
@@ -350,6 +354,177 @@ fn is_override_layer(file: &str) -> bool {
 /// The trailing path segment, for readable diagnostics (`file` may be a URI).
 fn short_file(file: &str) -> &str {
     file.rsplit(['/', '\\']).next().unwrap_or(file)
+}
+
+#[derive(Clone, Copy)]
+struct MapDef {
+    order: usize,
+}
+
+type MapDefs = HashMap<(RefKind, String), Vec<MapDef>>;
+
+fn map_layer_diagnostics(
+    analyzer: &Analyzer,
+    parse: &Parse,
+    index: Option<&WorkspaceIndex>,
+    file: Option<&str>,
+) -> Vec<Diagnostic> {
+    if !file.is_some_and(is_override_layer) {
+        return Vec::new();
+    }
+
+    let defs = map_top_level_defs(analyzer, parse);
+    let mut out = Vec::new();
+    for (order, node) in parse
+        .syntax()
+        .children()
+        .filter(|n| n.kind() == SyntaxKind::BLOCK)
+        .enumerate()
+    {
+        collect_map_reference_diags(analyzer, &node, order, &defs, index, &mut out);
+        collect_map_projectile_diags(&node, &defs, &mut out);
+    }
+    out
+}
+
+fn map_top_level_defs(analyzer: &Analyzer, parse: &Parse) -> MapDefs {
+    let mut out: MapDefs = HashMap::new();
+    for (order, node) in parse
+        .syntax()
+        .children()
+        .filter(|n| n.kind() == SyntaxKind::BLOCK)
+        .enumerate()
+    {
+        let block = Block(node);
+        let Some(kind) = block
+            .keyword()
+            .and_then(|k| analyzer.block(k.text()))
+            .and_then(|b| b.defines)
+        else {
+            continue;
+        };
+        let Some(name) = block.name() else { continue };
+        out.entry((kind, name.text().to_ascii_lowercase()))
+            .or_default()
+            .push(MapDef { order });
+    }
+    out
+}
+
+fn collect_map_reference_diags(
+    analyzer: &Analyzer,
+    node: &SyntaxNode,
+    order: usize,
+    defs: &MapDefs,
+    index: Option<&WorkspaceIndex>,
+    out: &mut Vec<Diagnostic>,
+) {
+    let scope = scope_schema(analyzer, node);
+    for child in node.children() {
+        match child.kind() {
+            SyntaxKind::FIELD => {
+                let field = Field(child);
+                let Some(key) = field.key() else { continue };
+                let Some(schema_field) = scope.field(key.text()) else {
+                    continue;
+                };
+                for (kind, tok) in reference_tokens(&field, &schema_field.value_type) {
+                    let name = unquote(tok.text());
+                    if name.eq_ignore_ascii_case("None") {
+                        continue;
+                    }
+                    if index.is_some_and(|idx| {
+                        idx.locations(kind, name)
+                            .iter()
+                            .any(|loc| !is_override_layer(&loc.file))
+                    }) {
+                        continue;
+                    }
+                    let later = defs
+                        .get(&(kind, name.to_ascii_lowercase()))
+                        .is_some_and(|sites| sites.iter().any(|site| site.order > order));
+                    if later {
+                        out.push(Diagnostic {
+                            span: tok.text_range().into(),
+                            severity: Severity::Warning,
+                            code: "map-forward-reference",
+                            message: format!(
+                                "`{name}` is defined later in this map file; map.ini/solo.ini \
+                                 loads in order, so this reference binds before that definition \
+                                 and the later map entry will not take effect here"
+                            ),
+                        });
+                    }
+                }
+            }
+            SyntaxKind::MODULE | SyntaxKind::BLOCK => {
+                collect_map_reference_diags(analyzer, &child, order, defs, index, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn reference_tokens(field: &Field, ty: &ValueType) -> Vec<(RefKind, SyntaxToken)> {
+    let tokens = field.value_tokens();
+    match ty {
+        ValueType::Reference { ref_kind } => tokens
+            .first()
+            .map(|tok| vec![(*ref_kind, tok.clone())])
+            .unwrap_or_default(),
+        ValueType::ReferenceList { ref_kind } => tokens
+            .into_iter()
+            .map(|tok| (*ref_kind, tok))
+            .collect::<Vec<_>>(),
+        ValueType::TokenList { tokens: specs } => specs
+            .iter()
+            .zip(tokens)
+            .filter_map(|(spec, tok)| match spec {
+                ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } => {
+                    Some((*ref_kind, tok))
+                }
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn collect_map_projectile_diags(node: &SyntaxNode, defs: &MapDefs, out: &mut Vec<Diagnostic>) {
+    let block = Block(node.clone());
+    if !block
+        .keyword()
+        .is_some_and(|kw| kw.text().eq_ignore_ascii_case("Weapon"))
+    {
+        return;
+    }
+    for field in block.fields() {
+        if !field
+            .key()
+            .is_some_and(|key| key.text().eq_ignore_ascii_case("ProjectileObject"))
+        {
+            continue;
+        }
+        let Some(tok) = field.value_tokens().first().cloned() else {
+            continue;
+        };
+        let name = unquote(tok.text());
+        if name.eq_ignore_ascii_case("None")
+            || !defs.contains_key(&(RefKind::Object, name.to_ascii_lowercase()))
+        {
+            continue;
+        }
+        out.push(Diagnostic {
+            span: tok.text_range().into(),
+            severity: Severity::Warning,
+            code: "map-projectile-object",
+            message: format!(
+                "`ProjectileObject` uses map-defined object `{name}`; weapon projectile \
+                 templates are cached before map.ini/solo.ini loads, so new map projectile \
+                 objects do not resolve reliably in game"
+            ),
+        });
+    }
 }
 
 impl<'a> Ctx<'a> {
@@ -1338,6 +1513,38 @@ End
                 .iter()
                 .any(|d| d.code == "overrides" || d.code == "duplicate-definition"),
             "base definition must stay clean: {base_diags:?}"
+        );
+    }
+
+    #[test]
+    fn map_forward_reference_allows_base_game_definition() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        let base = "CommandButton Command_ConstructTank\n  Command = UNIT_BUILD\nEnd\n";
+        index.set_file(
+            "Data/INI/CommandButton.ini",
+            crate::index::definitions_in(&a, &a.parse(base), "Data/INI/CommandButton.ini"),
+        );
+
+        let src = "\
+CommandSet MapSet
+  1 = Command_ConstructTank
+End
+
+CommandButton Command_ConstructTank
+  Command = UNIT_BUILD
+End
+";
+        let parse = a.parse(src);
+        index.set_file(
+            "maps/map.ini",
+            crate::index::definitions_in(&a, &parse, "maps/map.ini"),
+        );
+
+        let diags = diagnose(&a, &parse, Some(&index), Some("maps/map.ini"));
+        assert!(
+            !diags.iter().any(|d| d.code == "map-forward-reference"),
+            "base-game definitions are already loaded before map.ini: {diags:?}"
         );
     }
 

@@ -17,3 +17,34 @@ severity = "hint"
 code = "overrides"
 on = "CINE_RangerPatch"
 nth = 2
+
+[[diag]]
+severity = "warning"
+code = "map-forward-reference"
+on = "Command_ConstructMapTank"
+nth = 1
+
+[[diag]]
+severity = "warning"
+code = "map-forward-reference"
+on = "MapLateSet"
+nth = 1
+
+[[diag]]
+severity = "warning"
+code = "map-forward-reference"
+on = "MapTankGun"
+nth = 1
+
+[[diag]]
+severity = "warning"
+code = "map-forward-reference"
+on = "Command_Ordered"
+nth = 2
+absent = true
+
+[[diag]]
+severity = "warning"
+code = "map-projectile-object"
+on = "MapProjectile"
+nth = 2
