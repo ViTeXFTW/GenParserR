@@ -6,7 +6,9 @@
 //! `didChange` deltas are applied to the rope and the document is re-parsed
 //! once per change batch; read-only requests reuse the cached parse.
 
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use dashmap::DashMap;
@@ -18,6 +20,7 @@ use genparser_analysis::nav::{definition_at, hover_at, reference_at, HoverInfo};
 use genparser_analysis::{actions, completion, diagnostics, format, outline, semantic, Analyzer};
 use genparser_syntax::{Edit, Parse};
 use ropey::Rope;
+use serde::Deserialize;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{jsonrpc::Result, Client, LanguageServer};
 
@@ -45,9 +48,22 @@ pub struct Backend {
     analyzer: Arc<Analyzer>,
     /// Open documents, keyed by URI.
     docs: DashMap<Url, DocumentState>,
+    /// Read-only documents synthesized from configured `.big` archives.
+    virtual_files: DashMap<String, Arc<str>>,
     index: RwLock<WorkspaceIndex>,
     /// Workspace roots, captured at `initialize` and scanned in `initialized`.
     roots: Mutex<Vec<PathBuf>>,
+    /// User-configured game/mod INI roots. Entries may be directories or `.big`
+    /// archives; both seed definitions that map.ini/solo.ini can rely on.
+    base_roots: Mutex<Vec<PathBuf>>,
+    /// Number of base INI files indexed from configured base roots.
+    base_indexed_count: AtomicUsize,
+    /// Whether the initial workspace/base scan has completed at least once.
+    scan_finished: AtomicBool,
+    /// One-shot guard for the map/solo.ini configuration hint.
+    base_roots_hint_shown: AtomicBool,
+    /// Whether this client shows the empty `baseIniRoots` hint itself.
+    client_base_ini_hint: OnceLock<bool>,
     /// Position encoding negotiated at `initialize` (UTF-16 until then).
     encoding: OnceLock<PositionEnc>,
     /// Whether `textDocument/formatting` is enabled, from the client's
@@ -67,7 +83,19 @@ type ScanEntry = (
     Vec<Definition>,
     Vec<ReferenceSite>,
     Vec<(String, String)>,
+    Option<Arc<str>>,
 );
+
+#[derive(Deserialize)]
+pub struct VirtualFileParams {
+    uri: String,
+}
+
+struct BigEntry {
+    name: String,
+    offset: u64,
+    size: usize,
+}
 
 /// Read a file leniently: real INIs predate UTF-8 (Windows-1252 comments), so
 /// a strict `read_to_string` would silently drop them from the index.
@@ -93,6 +121,12 @@ fn canonical_uri(uri: Url) -> Url {
         }
     }
     uri
+}
+
+fn is_map_layer_file(file: &str) -> bool {
+    file.rsplit(['/', '\\']).next().is_some_and(|name| {
+        name.eq_ignore_ascii_case("map.ini") || name.eq_ignore_ascii_case("solo.ini")
+    })
 }
 
 /// Parse string table key names from a `.str` file (the Generals INI string format).
@@ -135,11 +169,97 @@ fn load_sibling_str_keys(ini_url: &Url) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn read_u32_be<R: Read>(reader: &mut R) -> std::io::Result<u32> {
+    let mut buf = [0u8; 4];
+    reader.read_exact(&mut buf)?;
+    Ok(u32::from_be_bytes(buf))
+}
+
+fn read_c_string<R: Read>(reader: &mut R) -> std::io::Result<String> {
+    let mut buf = Vec::new();
+    let mut byte = [0u8; 1];
+    loop {
+        reader.read_exact(&mut byte)?;
+        if byte[0] == 0 {
+            break;
+        }
+        buf.push(byte[0]);
+    }
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
+fn big_entries(path: &Path) -> std::io::Result<Vec<BigEntry>> {
+    let mut file = std::fs::File::open(path)?;
+    let mut magic = [0u8; 4];
+    file.read_exact(&mut magic)?;
+    if &magic != b"BIGF" {
+        return Ok(Vec::new());
+    }
+
+    let _archive_size = read_u32_be(&mut file)?;
+    let count = read_u32_be(&mut file)?;
+    file.seek(SeekFrom::Start(0x10))?;
+
+    let mut entries = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        let offset = read_u32_be(&mut file)? as u64;
+        let size = read_u32_be(&mut file)? as usize;
+        let name = read_c_string(&mut file)?.replace('\\', "/");
+        entries.push(BigEntry { name, offset, size });
+    }
+    Ok(entries)
+}
+
+fn read_big_entry(path: &Path, entry: &BigEntry) -> Option<String> {
+    let mut file = std::fs::File::open(path).ok()?;
+    file.seek(SeekFrom::Start(entry.offset)).ok()?;
+    let mut bytes = vec![0; entry.size];
+    file.read_exact(&mut bytes).ok()?;
+    Some(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn big_uri(path: &Path, entry: &str) -> String {
+    let archive = path.to_string_lossy().replace('\\', "/");
+    let mut uri = Url::parse("big:///").expect("static big URI is valid");
+    uri.set_path(&format!("{archive}!/{entry}"));
+    uri.to_string()
+}
+
+fn scan_big(analyzer: &Analyzer, path: &Path) -> Vec<ScanEntry> {
+    let mut out = Vec::new();
+    let Ok(entries) = big_entries(path) else {
+        return out;
+    };
+    for entry in entries {
+        if !entry.name.ends_with(".ini") && !entry.name.ends_with(".INI") {
+            continue;
+        }
+        let Some(text) = read_big_entry(path, &entry) else {
+            continue;
+        };
+        let file = big_uri(path, &entry.name);
+        let parse = analyzer.parse(&text);
+        let defs = definitions_in(analyzer, &parse, &file);
+        let refs = references_in(analyzer, &parse);
+        let tags = module_tags_in(analyzer, &parse);
+        out.push((file, defs, refs, tags, Some(Arc::from(text))));
+    }
+    out
+}
+
 /// Walk `roots` and index every `.ini` file (definitions + reference sites + module tags).
 /// CPU/IO heavy — runs via `spawn_blocking` from [`Backend::scan_workspace`].
 fn scan_roots(analyzer: &Analyzer, roots: &[PathBuf]) -> Vec<ScanEntry> {
     let mut out = Vec::new();
     for root in roots {
+        if root
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("big"))
+        {
+            out.extend(scan_big(analyzer, root));
+            continue;
+        }
         for entry in walkdir::WalkDir::new(root)
             .into_iter()
             .filter_map(|e| e.ok())
@@ -150,8 +270,16 @@ fn scan_roots(analyzer: &Analyzer, roots: &[PathBuf]) -> Vec<ScanEntry> {
             if !path
                 .extension()
                 .and_then(|e| e.to_str())
-                .is_some_and(|e| e.eq_ignore_ascii_case("ini"))
+                .is_some_and(|e| e.eq_ignore_ascii_case("ini") || e.eq_ignore_ascii_case("big"))
             {
+                continue;
+            }
+            if path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| e.eq_ignore_ascii_case("big"))
+            {
+                out.extend(scan_big(analyzer, path));
                 continue;
             }
             let Some(text) = read_lossy(path) else {
@@ -164,7 +292,7 @@ fn scan_roots(analyzer: &Analyzer, roots: &[PathBuf]) -> Vec<ScanEntry> {
             let defs = definitions_in(analyzer, &parse, uri.as_str());
             let refs = references_in(analyzer, &parse);
             let tags = module_tags_in(analyzer, &parse);
-            out.push((uri.to_string(), defs, refs, tags));
+            out.push((uri.to_string(), defs, refs, tags, None));
         }
     }
     out
@@ -176,10 +304,16 @@ impl Backend {
             client,
             analyzer: Arc::new(Analyzer::embedded()),
             docs: DashMap::new(),
+            virtual_files: DashMap::new(),
             index: RwLock::new(WorkspaceIndex::new()),
             roots: Mutex::new(Vec::new()),
             encoding: OnceLock::new(),
             format_enabled: OnceLock::new(),
+            base_roots: Mutex::new(Vec::new()),
+            base_indexed_count: AtomicUsize::new(0),
+            scan_finished: AtomicBool::new(false),
+            base_roots_hint_shown: AtomicBool::new(false),
+            client_base_ini_hint: OnceLock::new(),
             snippet_support: OnceLock::new(),
             semantic_result_id: std::sync::atomic::AtomicU64::new(1),
         }
@@ -259,6 +393,36 @@ impl Backend {
         self.client
             .publish_diagnostics(uri.clone(), lsp_diags, Some(version))
             .await;
+        self.maybe_warn_missing_base_roots(uri).await;
+    }
+
+    async fn maybe_warn_missing_base_roots(&self, uri: &Url) {
+        if !is_map_layer_file(uri.as_str()) {
+            return;
+        }
+        if !self.scan_finished.load(Ordering::Relaxed) {
+            return;
+        }
+        if self.base_indexed_count.load(Ordering::Relaxed) > 0 {
+            return;
+        }
+        let roots_empty = self.base_roots.lock().map(|r| r.is_empty()).unwrap_or(true);
+        if roots_empty && self.client_base_ini_hint.get().copied().unwrap_or(false) {
+            return;
+        }
+        if self
+            .base_roots_hint_shown
+            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+            .is_err()
+        {
+            return;
+        }
+        self.client
+            .show_message(
+                MessageType::WARNING,
+                "GenParserR: map/solo.ini diagnostics are limited until base game or mod INIs are configured. Set `genparser.baseIniRoots` to your game/mod `.big` files or INI folder.",
+            )
+            .await;
     }
 
     /// Best-effort scan of the workspace roots for `.ini` files to seed the
@@ -267,10 +431,23 @@ impl Backend {
     /// results are applied under the index lock afterwards.
     async fn scan_workspace(&self) {
         let roots = self.roots.lock().map(|r| r.clone()).unwrap_or_default();
-        let analyzer = self.analyzer.clone();
-        let scanned = tokio::task::spawn_blocking(move || scan_roots(&analyzer, &roots))
-            .await
+        let base_roots = self
+            .base_roots
+            .lock()
+            .map(|r| r.clone())
             .unwrap_or_default();
+        let analyzer = self.analyzer.clone();
+        let (scanned, base_scanned) = tokio::task::spawn_blocking(move || {
+            (
+                scan_roots(&analyzer, &roots),
+                scan_roots(&analyzer, &base_roots),
+            )
+        })
+        .await
+        .unwrap_or_default();
+        self.base_indexed_count
+            .store(base_scanned.len(), Ordering::Relaxed);
+        self.scan_finished.store(true, Ordering::Relaxed);
         // Don't overwrite index entries for already-open documents with stale
         // disk content; `initialized` calls `refresh` for each open doc right
         // after this returns, so they will populate the index from live text.
@@ -282,7 +459,10 @@ impl Backend {
         let Ok(mut idx) = self.index.write() else {
             return;
         };
-        for (uri, defs, refs, tags) in scanned {
+        for (uri, defs, refs, tags, text) in base_scanned.into_iter().chain(scanned) {
+            if let Some(text) = text {
+                self.virtual_files.insert(uri.clone(), text);
+            }
             if !open.contains(&uri) {
                 idx.set_file(&uri, defs);
                 idx.set_file_refs(&uri, refs);
@@ -304,8 +484,21 @@ impl Backend {
         if let Some(doc) = self.docs.get(uri) {
             return Some(doc.rope.clone());
         }
+        if uri.scheme() == "big" {
+            return self
+                .virtual_files
+                .get(uri.as_str())
+                .map(|text| Rope::from_str(&text));
+        }
         let path = uri.to_file_path().ok()?;
         read_lossy(&path).map(|s| Rope::from_str(&s))
+    }
+
+    pub async fn read_virtual_file(&self, params: VirtualFileParams) -> Result<Option<String>> {
+        Ok(self
+            .virtual_files
+            .get(&params.uri)
+            .map(|text| text.to_string()))
     }
 
     /// The (kind, name, span) under the cursor — a reference-typed value token
@@ -365,7 +558,9 @@ impl LanguageServer for Backend {
 
         // Editor-facing settings arrive as `initializationOptions`; a change
         // requires a client restart (the VS Code extension does this
-        // automatically). Currently just `{"format": {"enable": bool}}`.
+        // automatically). Shape:
+        // `{ "format": {"enable": bool}, "baseIniRoots": ["dir-or-big", ...],
+        //    "clientBaseIniHint": bool }`.
         let format_enabled = params
             .initialization_options
             .as_ref()
@@ -374,6 +569,31 @@ impl LanguageServer for Backend {
             .and_then(|e| e.as_bool())
             .unwrap_or(false);
         let _ = self.format_enabled.set(format_enabled);
+
+        let base_roots = params
+            .initialization_options
+            .as_ref()
+            .and_then(|v| v.get("baseIniRoots"))
+            .and_then(|v| v.as_array())
+            .map(|roots| {
+                roots
+                    .iter()
+                    .filter_map(|root| root.as_str())
+                    .filter(|root| !root.trim().is_empty())
+                    .map(PathBuf::from)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if let Ok(mut roots) = self.base_roots.lock() {
+            *roots = base_roots;
+        }
+        let client_base_ini_hint = params
+            .initialization_options
+            .as_ref()
+            .and_then(|v| v.get("clientBaseIniHint"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let _ = self.client_base_ini_hint.set(client_base_ini_hint);
 
         let snippet_support = params
             .capabilities
@@ -703,13 +923,7 @@ impl LanguageServer for Backend {
                     range_span,
                     &diags,
                     idx,
-                    |base_uri| {
-                        // Prefer the in-memory rope; fall back to disk.
-                        if let Some(doc) = self.docs.get(base_uri) {
-                            return Some(doc.text.as_ref().to_string());
-                        }
-                        base_uri.to_file_path().ok().and_then(|p| read_lossy(&p))
-                    },
+                    |base_uri| self.rope_for(base_uri).map(|rope| rope.to_string()),
                 ));
             }
             f
@@ -1144,6 +1358,46 @@ mod tests {
     fn canonical_uri_pass_through_non_file() {
         let u = Url::parse("untitled:///buffer").unwrap();
         assert_eq!(canonical_uri(u.clone()), u);
+    }
+
+    #[test]
+    fn detects_map_layer_filenames() {
+        assert!(is_map_layer_file("file:///C:/Maps/Foo/map.ini"));
+        assert!(is_map_layer_file("C:\\Maps\\Foo\\solo.ini"));
+        assert!(!is_map_layer_file("C:/Data/INI/Object.ini"));
+    }
+
+    #[test]
+    fn scans_ini_from_big_archive() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("genparser-test-{}.big", std::process::id()));
+        let entry_name = b"Data\\INI\\Test.ini\0";
+        let ini = b"Object BigArchiveObject\nEnd\n";
+        let data_offset = 0x10 + 8 + entry_name.len();
+        let archive_size = data_offset + ini.len();
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"BIGF");
+        bytes.extend_from_slice(&(archive_size as u32).to_be_bytes());
+        bytes.extend_from_slice(&1u32.to_be_bytes());
+        bytes.extend_from_slice(&0u32.to_be_bytes());
+        bytes.extend_from_slice(&(data_offset as u32).to_be_bytes());
+        bytes.extend_from_slice(&(ini.len() as u32).to_be_bytes());
+        bytes.extend_from_slice(entry_name);
+        bytes.extend_from_slice(ini);
+        std::fs::write(&path, bytes).unwrap();
+
+        let analyzer = Analyzer::embedded();
+        let scanned = scan_big(&analyzer, &path);
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(scanned.len(), 1);
+        assert!(Url::parse(&scanned[0].0).is_ok());
+        assert!(scanned[0].1.iter().any(|d| d.name == "BigArchiveObject"));
+        assert_eq!(
+            scanned[0].4.as_deref(),
+            Some("Object BigArchiveObject\nEnd\n")
+        );
     }
 
     #[test]

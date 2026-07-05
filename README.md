@@ -37,14 +37,21 @@ language and starts the bundled language server automatically.
 Formatting is off by default. Enable it with `genparser.format.enable` when you
 want the server to advertise document formatting to VS Code.
 
+For map/solo.ini diagnostics, set `genparser.baseIniRoots` to game or mod INI
+directories and/or `.big` archives. Those definitions are treated as already
+loaded before the map file.
+
 ### Standalone language server
 
 Release assets also include the standalone `genparser-lsp` binary. Any editor
 with generic LSP support can run that binary over stdio for `.ini` files. Pass
-this initialization option if you want formatting:
+these initialization options if you want formatting or base INI roots:
 
 ```json
-{ "format": { "enable": true } }
+{
+  "format": { "enable": true },
+  "baseIniRoots": ["C:/Games/Zero Hour", "C:/Mods/MyMod/Data/INI", "C:/Mods/MyMod.big"]
+}
 ```
 
 ## Common Editor Setup
@@ -62,7 +69,10 @@ if not configs.genparser then
       filetypes = { "generals_ini" },
       root_dir = lspconfig.util.root_pattern(".git", "*.ini"),
       single_file_support = true,
-      init_options = { format = { enable = false } },
+      init_options = {
+        format = { enable = false },
+        baseIniRoots = { "C:/Games/Zero Hour" },
+      },
     },
   }
 end

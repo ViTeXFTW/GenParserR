@@ -405,6 +405,7 @@ dependencies = [
  "genparser-schema",
  "genparser-syntax",
  "ropey",
+ "serde",
  "serde_json",
  "tokio",
  "tower-lsp",

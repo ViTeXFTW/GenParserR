@@ -54,6 +54,14 @@
           "default": false,
           "markdownDescription": "Enable document formatting (indentation normalization). When off — the default — the server does not advertise the formatting capability, so `#editor.formatOnSave#` will not invoke it for Generals INI files. Changing this restarts the language server."
         },
+        "genparser.baseIniRoots": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "markdownDescription": "Directories or `.big` archives containing base game/mod INI files that should be treated as already loaded before `map.ini`/`solo.ini`. Changing this restarts the language server."
+        },
         "genparser.trace.server": {
           "type": "string",
           "enum": [
