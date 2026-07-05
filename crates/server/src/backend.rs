@@ -923,13 +923,7 @@ impl LanguageServer for Backend {
                     range_span,
                     &diags,
                     idx,
-                    |base_uri| {
-                        // Prefer the in-memory rope; fall back to disk.
-                        if let Some(doc) = self.docs.get(base_uri) {
-                            return Some(doc.text.as_ref().to_string());
-                        }
-                        base_uri.to_file_path().ok().and_then(|p| read_lossy(&p))
-                    },
+                    |base_uri| self.rope_for(base_uri).map(|rope| rope.to_string()),
                 ));
             }
             f
