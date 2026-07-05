@@ -2,7 +2,7 @@
   "name": "genparser-vscode",
   "displayName": "Generals Zero Hour INI",
   "description": "Language support (diagnostics, completion, semantic highlighting) for C&C Generals: Zero Hour INI files, powered by the genparser language server.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "license": "MIT",
   "repository": {
     "type": "GitHub",

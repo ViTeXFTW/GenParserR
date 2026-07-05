@@ -377,7 +377,7 @@ dependencies = [
 
 [[package]]
 name = "genparser-analysis"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "criterion",
  "genparser-schema",
@@ -389,7 +389,7 @@ dependencies = [
 
 [[package]]
 name = "genparser-schema"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -397,7 +397,7 @@ dependencies = [
 
 [[package]]
 name = "genparser-server"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "dashmap 6.2.1",
@@ -416,7 +416,7 @@ dependencies = [
 
 [[package]]
 name = "genparser-syntax"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "criterion",
  "logos",
