@@ -23,7 +23,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # syntax
-logos = "0.15"
+logos = "0.16"
 rowan = "0.16"
 
 # server
