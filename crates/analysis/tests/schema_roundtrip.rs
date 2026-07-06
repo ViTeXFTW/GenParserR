@@ -1,5 +1,5 @@
-use genparser_analysis::Analyzer;
-use genparser_schema::{Schema, EMBEDDED_SCHEMA_JSON};
+use zerosyntax_analysis::Analyzer;
+use zerosyntax_schema::{Schema, EMBEDDED_SCHEMA_JSON};
 
 #[test]
 fn committed_schema_round_trips_and_builds_analyzer() {
