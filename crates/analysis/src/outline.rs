@@ -2,8 +2,8 @@
 //! and foldable scope spans (`textDocument/foldingRange`). Purely structural —
 //! derived from the CST alone, no schema needed.
 
-use genparser_syntax::ast::{Block, Module};
-use genparser_syntax::{Parse, SyntaxKind, SyntaxNode};
+use zerosyntax_syntax::ast::{Block, Module};
+use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode};
 
 use crate::Span;
 

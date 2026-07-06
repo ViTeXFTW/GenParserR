@@ -6,9 +6,9 @@
 //! * after `=` -> enum/bitflag members, `Yes`/`No`, module names, or (with the
 //!   workspace index) names of the referenced definition kind.
 
-use genparser_schema::ValueType;
-use genparser_syntax::ast::{Block, Field, Module};
-use genparser_syntax::{Parse, SyntaxKind, SyntaxNode};
+use zerosyntax_schema::ValueType;
+use zerosyntax_syntax::ast::{Block, Field, Module};
+use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode};
 
 use crate::model::scope_schema;
 use crate::{Analyzer, WorkspaceIndex};
@@ -82,7 +82,7 @@ enum PosContext {
     },
     /// Completing the argument of a sub-block header.
     SubBlockArg {
-        argument_type: genparser_schema::ValueType,
+        argument_type: zerosyntax_schema::ValueType,
     },
 }
 
@@ -242,7 +242,7 @@ fn field_key_completions(analyzer: &Analyzer, scope_node: &SyntaxNode) -> Vec<Co
 fn sub_block_arg_type(
     scope: Option<&crate::model::ScopeSchema<'_>>,
     keyword: &str,
-) -> Option<genparser_schema::ValueType> {
+) -> Option<zerosyntax_schema::ValueType> {
     scope?
         .sub_blocks()
         .iter()

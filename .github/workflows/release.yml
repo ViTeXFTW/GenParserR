@@ -19,7 +19,7 @@ permissions:
   contents: write
 
 env:
-  BIN_NAME: genparser-lsp
+  BIN_NAME: zerosyntax-lsp
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -41,7 +41,7 @@ jobs:
         run: |
           tag="${GITHUB_REF_NAME#v}"
           crate="$(cargo metadata --locked --no-deps --format-version 1 \
-            | jq -r '.packages[] | select(.name == "genparser-server") | .version')"
+            | jq -r '.packages[] | select(.name == "zerosyntax-server") | .version')"
           if [ "$tag" != "$crate" ]; then
             echo "::error::tag v$tag does not match workspace version $crate" >&2
             exit 1
@@ -71,7 +71,7 @@ jobs:
         with:
           key: ${{ matrix.target }}
       - name: Build
-        run: cargo build --locked --release -p genparser-server --target ${{ matrix.target }}
+        run: cargo build --locked --release -p zerosyntax-server --target ${{ matrix.target }}
 
       # Archive on the build machine so the Unix executable bit survives
       # (upload-artifact does not preserve file permissions).
@@ -123,7 +123,7 @@ jobs:
 
   # One .vsix per platform, each with that platform's server binary bundled
   # under the extension's server/ directory (`vsce package --target`). The
-  # extension still honors the `genparser.server.path` override.
+  # extension still honors the `zerosyntax.server.path` override.
   vsix:
     needs: build
     runs-on: ubuntu-latest
@@ -154,8 +154,8 @@ jobs:
           npm ci
           # Stamp the extension with the release version (tag is authoritative).
           npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
-          ./node_modules/.bin/vsce package --target ${{ matrix.vsce-target }} \
-            -o "genparser-vscode-${{ matrix.vsce-target }}-${GITHUB_REF_NAME#v}.vsix"
+          npx --yes @vscode/vsce package --target ${{ matrix.vsce-target }} \
+            -o "zerosyntax-vscode-${{ matrix.vsce-target }}-${GITHUB_REF_NAME#v}.vsix"
       - uses: actions/upload-artifact@v4
         with:
           name: vsix-${{ matrix.vsce-target }}

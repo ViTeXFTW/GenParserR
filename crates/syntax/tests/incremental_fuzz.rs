@@ -6,8 +6,8 @@
 //! Deterministic (fixed LCG seeds) so failures are reproducible; on failure
 //! the seed, round, and edit are printed.
 
-use genparser_syntax::parser::FixedOpeners;
-use genparser_syntax::{parse, reparse, Edit, Strategy};
+use zerosyntax_syntax::parser::FixedOpeners;
+use zerosyntax_syntax::{parse, reparse, Edit, Strategy};
 
 /// Minimal deterministic LCG (same constants as MMIX).
 struct Rng(u64);

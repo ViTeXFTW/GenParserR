@@ -8,8 +8,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use genparser_schema::{BlockType, ModuleType, RefKind, Schema, ValueSet};
-use genparser_syntax::{parse, Edit, OpenerOracle, Parse, Strategy};
+use zerosyntax_schema::{BlockType, ModuleType, RefKind, Schema, ValueSet};
+use zerosyntax_syntax::{parse, Edit, OpenerOracle, Parse, Strategy};
 
 pub mod actions;
 pub mod completion;
@@ -60,7 +60,7 @@ pub struct Analyzer {
 }
 
 impl Analyzer {
-    /// Build an analyzer from a schema (typically [`genparser_schema::embedded`]).
+    /// Build an analyzer from a schema (typically [`zerosyntax_schema::embedded`]).
     pub fn new(schema: Schema) -> Self {
         let block_by_name = schema
             .blocks
@@ -98,7 +98,7 @@ impl Analyzer {
 
     /// Build an analyzer from the embedded schema.
     pub fn embedded() -> Self {
-        Self::new(genparser_schema::embedded())
+        Self::new(zerosyntax_schema::embedded())
     }
 
     pub fn schema(&self) -> &Schema {
@@ -110,7 +110,7 @@ impl Analyzer {
         parse(src, &self.openers)
     }
 
-    /// Incrementally reparse after an edit (see [`genparser_syntax::reparse`]):
+    /// Incrementally reparse after an edit (see [`zerosyntax_syntax::reparse`]):
     /// splices the reparsed region into `old` when possible, falling back to a
     /// full parse. Always identical to `self.parse(new_text)`.
     pub fn reparse(
@@ -120,7 +120,7 @@ impl Analyzer {
         new_text: &str,
         edit: Edit,
     ) -> (Parse, Strategy) {
-        genparser_syntax::reparse(old, old_text, new_text, edit, &self.openers)
+        zerosyntax_syntax::reparse(old, old_text, new_text, edit, &self.openers)
     }
 
     pub fn block(&self, name: &str) -> Option<&BlockType> {
@@ -219,7 +219,7 @@ impl SchemaOpeners {
         fn add_subblocks(
             map: &mut HashMap<String, HashSet<String>>,
             parent: &str,
-            subs: &[genparser_schema::SubBlock],
+            subs: &[zerosyntax_schema::SubBlock],
         ) {
             for sub in subs {
                 map.entry(parent.to_string())

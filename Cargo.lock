@@ -376,54 +376,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "genparser-analysis"
-version = "1.0.2"
-dependencies = [
- "criterion",
- "genparser-schema",
- "genparser-syntax",
- "rowan",
- "serde",
- "toml",
-]
-
-[[package]]
-name = "genparser-schema"
-version = "1.0.2"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "genparser-server"
-version = "1.0.2"
-dependencies = [
- "anyhow",
- "dashmap 6.2.1",
- "genparser-analysis",
- "genparser-schema",
- "genparser-syntax",
- "ropey",
- "serde",
- "serde_json",
- "tokio",
- "tower-lsp",
- "tracing",
- "tracing-subscriber",
- "walkdir",
-]
-
-[[package]]
-name = "genparser-syntax"
-version = "1.0.2"
-dependencies = [
- "criterion",
- "logos",
- "rowan",
-]
-
-[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1555,6 +1507,54 @@ dependencies = [
  "quote",
  "syn",
  "synstructure",
+]
+
+[[package]]
+name = "zerosyntax-analysis"
+version = "1.0.2"
+dependencies = [
+ "criterion",
+ "rowan",
+ "serde",
+ "toml",
+ "zerosyntax-schema",
+ "zerosyntax-syntax",
+]
+
+[[package]]
+name = "zerosyntax-schema"
+version = "1.0.2"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "zerosyntax-server"
+version = "1.0.2"
+dependencies = [
+ "anyhow",
+ "dashmap 6.2.1",
+ "ropey",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower-lsp",
+ "tracing",
+ "tracing-subscriber",
+ "walkdir",
+ "zerosyntax-analysis",
+ "zerosyntax-schema",
+ "zerosyntax-syntax",
+]
+
+[[package]]
+name = "zerosyntax-syntax"
+version = "1.0.2"
+dependencies = [
+ "criterion",
+ "logos",
+ "rowan",
 ]
 
 [[package]]

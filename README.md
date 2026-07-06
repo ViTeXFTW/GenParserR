@@ -1,12 +1,16 @@
-# GenParserR
+# ZeroSyntax v2
 
-GenParserR is a language server and VS Code extension for the INI files used by
+[![CI](https://github.com/ViTeXFTW/ZeroSyntaxV2/actions/workflows/ci.yml/badge.svg)](https://github.com/ViTeXFTW/ZeroSyntaxV2/actions/workflows/ci.yml)
+[![Release](https://github.com/ViTeXFTW/ZeroSyntaxV2/actions/workflows/release.yml/badge.svg)](https://github.com/ViTeXFTW/ZeroSyntaxV2/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+ZeroSyntax v2 is a language server and VS Code extension for the INI files used by
 *Command & Conquer: Generals - Zero Hour*. It gives modders and map authors
 editor support for the game's object, weapon, upgrade, FX, audio, module, and
 map override definitions.
 
 The project is built around an IDE-agnostic Language Server Protocol (LSP)
-binary, `genparser-lsp`, plus a reference VS Code extension. The analyzer uses a
+binary, `zerosyntax-lsp`, plus a reference VS Code extension. The analyzer uses a
 hand-maintained schema modeled on the game's INI parsing tables, so diagnostics
 and completions follow the structure the engine actually expects instead of
 treating the files as generic INI.
@@ -28,22 +32,28 @@ treating the files as generic INI.
 - Reference VS Code extension with bundled syntax highlighting and LSP client
   integration.
 
+## Supported platforms
+
+Release assets are built for Windows x64 and Linux x64. Other platforms can
+build from source with Rust and Node.js.
+
 ## Getting Started
 
-Install the latest VS Code extension package from the project's releases, then
-open a Zero Hour `.ini` file. The extension activates for the `generals-ini`
-language and starts the bundled language server automatically.
+Install the latest platform-specific VS Code extension package from
+[GitHub Releases](https://github.com/ViTeXFTW/ZeroSyntaxV2/releases), then open a
+Zero Hour `.ini` file. The extension activates for the `generals-ini` language
+and starts the bundled language server automatically.
 
-Formatting is off by default. Enable it with `genparser.format.enable` when you
+Formatting is off by default. Enable it with `zerosyntax.format.enable` when you
 want the server to advertise document formatting to VS Code.
 
-For map/solo.ini diagnostics, set `genparser.baseIniRoots` to game or mod INI
+For map/solo.ini diagnostics, set `zerosyntax.baseIniRoots` to game or mod INI
 directories and/or `.big` archives. Those definitions are treated as already
 loaded before the map file.
 
 ### Standalone language server
 
-Release assets also include the standalone `genparser-lsp` binary. Any editor
+Release assets also include the standalone `zerosyntax-lsp` binary. Any editor
 with generic LSP support can run that binary over stdio for `.ini` files. Pass
 these initialization options if you want formatting or base INI roots:
 
@@ -54,6 +64,25 @@ these initialization options if you want formatting or base INI roots:
 }
 ```
 
+## Development
+
+```sh
+cargo test --locked
+cargo fmt --all --check
+cargo clippy --locked --all-targets --all-features -- -D warnings
+
+cd editors/vscode
+npm ci
+npm run compile
+```
+
+The optional `GeneralsCode/`, `corpus/`, and `examples/` directories are local
+inputs only and are intentionally not committed. Generated binaries,
+`node_modules`, compiled extension output, and `.vsix` packages are also ignored.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for pull request guidance and
+[docs/release.md](docs/release.md) for the release process.
+
 ## Common Editor Setup
 
 ### Neovim
@@ -62,10 +91,10 @@ these initialization options if you want formatting or base INI roots:
 local configs = require("lspconfig.configs")
 local lspconfig = require("lspconfig")
 
-if not configs.genparser then
-  configs.genparser = {
+if not configs.zerosyntax then
+  configs.zerosyntax = {
     default_config = {
-      cmd = { "genparser-lsp" },
+      cmd = { "zerosyntax-lsp" },
       filetypes = { "generals_ini" },
       root_dir = lspconfig.util.root_pattern(".git", "*.ini"),
       single_file_support = true,
@@ -77,7 +106,7 @@ if not configs.genparser then
   }
 end
 
-lspconfig.genparser.setup({})
+lspconfig.zerosyntax.setup({})
 ```
 
 ## Diagnostic Suppression
@@ -85,18 +114,19 @@ lspconfig.genparser.setup({})
 Suppress a diagnostic for one file with a file-scope comment:
 
 ```ini
-; genparser-disable: unresolved-reference, unreachable-set
+; zerosyntax-disable: unresolved-reference, unreachable-set
 ```
 
 Use the diagnostic code shown by your editor. Multiple codes can be separated by
 spaces or commas, and multiple pragma lines accumulate. Unknown suppression codes
-are reported so typos do not silently hide problems.
+are reported so typos do not silently hide problems. The old
+`; genparser-disable:` spelling remains supported for existing files.
 
 ## Feature Showcase
 
 ### Diagnostic codes
 
-GenParserR reports stable diagnostic codes so warnings can be searched,
+ZeroSyntax v2 reports stable diagnostic codes so warnings can be searched,
 suppressed, or tracked consistently:
 
 | Code | Meaning |
@@ -121,7 +151,7 @@ suppressed, or tracked consistently:
 | `bad-enum` | A value is not a member of the expected enum set. |
 | `bad-flag` | A bitflag value is not a member of the expected flag set. |
 | `unresolved-reference` | A field references a definition that is not found in the workspace. |
-| `unknown-suppression` | A `genparser-disable` comment names a code that does not exist. |
+| `unknown-suppression` | A `zerosyntax-disable` comment names a code that does not exist. |
 | `module-wrong-slot` | A module type is used under the wrong slot. |
 | `duplicate-module-tag` | Two modules in the same object use the same module tag. |
 | `editor-default-module` | A placeholder/default module value should be replaced before shipping. |
@@ -142,7 +172,7 @@ Supported quick fixes appear in the editor's lightbulb/code action menu:
 ### Example
 
 ```ini
-; genparser-disable: unresolved-reference
+; zerosyntax-disable: unresolved-reference
 
 Weapon DemoCannon
   PrimaryDamage = lots        ; bad-number
@@ -161,10 +191,14 @@ Object DemoTank
 End
 ```
 
-In this example, GenParserR can flag the invalid number, suggest the corrected
+In this example, ZeroSyntax v2 can flag the invalid number, suggest the corrected
 death flag, suppress the intentionally missing FX reference, and offer either to
 remove the unreachable `WeaponSet` or insert the matching trigger module.
 
 ## License
 
-GenParserR is licensed under the MIT License. See [LICENSE](LICENSE).
+ZeroSyntax v2 is licensed under the MIT License. See [LICENSE](LICENSE).
+
+ZeroSyntax v2 is an unofficial community project and is not affiliated with,
+endorsed by, or sponsored by Electronic Arts. Command & Conquer and related
+names are trademarks of their respective owners.

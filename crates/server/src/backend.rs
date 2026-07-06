@@ -12,17 +12,17 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use dashmap::DashMap;
-use genparser_analysis::diagnostics::DiagnosticsCache;
-use genparser_analysis::index::{
-    definitions_in, module_tags_in, references_in, Definition, ReferenceSite, WorkspaceIndex,
-};
-use genparser_analysis::nav::{definition_at, hover_at, reference_at, HoverInfo};
-use genparser_analysis::{actions, completion, diagnostics, format, outline, semantic, Analyzer};
-use genparser_syntax::{Edit, Parse};
 use ropey::Rope;
 use serde::Deserialize;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{jsonrpc::Result, Client, LanguageServer};
+use zerosyntax_analysis::diagnostics::DiagnosticsCache;
+use zerosyntax_analysis::index::{
+    definitions_in, module_tags_in, references_in, Definition, ReferenceSite, WorkspaceIndex,
+};
+use zerosyntax_analysis::nav::{definition_at, hover_at, reference_at, HoverInfo};
+use zerosyntax_analysis::{actions, completion, diagnostics, format, outline, semantic, Analyzer};
+use zerosyntax_syntax::{Edit, Parse};
 
 use crate::convert::{self, PositionEnc};
 
@@ -420,7 +420,7 @@ impl Backend {
         self.client
             .show_message(
                 MessageType::WARNING,
-                "GenParserR: map/solo.ini diagnostics are limited until base game or mod INIs are configured. Set `genparser.baseIniRoots` to your game/mod `.big` files or INI folder.",
+                "ZeroSyntax v2: map/solo.ini diagnostics are limited until base game or mod INIs are configured. Set `zerosyntax.baseIniRoots` to your game/mod `.big` files or INI folder.",
             )
             .await;
     }
@@ -504,7 +504,7 @@ impl Backend {
     /// The (kind, name, span) under the cursor — a reference-typed value token
     /// or a definition's name token. The shared entry point for
     /// find-references and rename, which work from either end of an edge.
-    fn symbol_at(&self, uri: &Url, pos: Position) -> Option<genparser_analysis::nav::ReferenceAt> {
+    fn symbol_at(&self, uri: &Url, pos: Position) -> Option<zerosyntax_analysis::nav::ReferenceAt> {
         let (rope, parse) = self.doc(uri)?;
         let offset = convert::position_to_offset(&rope, pos, self.enc());
         reference_at(&self.analyzer, &parse, offset)
@@ -513,7 +513,7 @@ impl Backend {
 
     /// Convert `(file uri, span)` pairs to LSP locations, reading each file's
     /// rope at most once.
-    fn to_locations(&self, raw: Vec<(String, genparser_analysis::Span)>) -> Vec<Location> {
+    fn to_locations(&self, raw: Vec<(String, zerosyntax_analysis::Span)>) -> Vec<Location> {
         let enc = self.enc();
         let mut ropes: std::collections::HashMap<String, Option<(Url, Rope)>> =
             std::collections::HashMap::new();
@@ -607,7 +607,7 @@ impl LanguageServer for Backend {
 
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
-                name: "genparser-lsp".into(),
+                name: "zerosyntax-lsp".into(),
                 version: Some(env!("CARGO_PKG_VERSION").into()),
             }),
             capabilities: ServerCapabilities {
@@ -663,7 +663,7 @@ impl LanguageServer for Backend {
             self.refresh(&uri).await;
         }
         self.client
-            .log_message(MessageType::INFO, "genparser language server ready")
+            .log_message(MessageType::INFO, "zerosyntax language server ready")
             .await;
     }
 
@@ -896,7 +896,7 @@ impl LanguageServer for Backend {
         let start = convert::position_to_offset(&rope, params.range.start, enc);
         let end = convert::position_to_offset(&rope, params.range.end, enc);
 
-        let range_span = genparser_analysis::Span::new(start, end);
+        let range_span = zerosyntax_analysis::Span::new(start, end);
         let fixes = {
             let idx = self.index.read().ok();
             let diags = diagnostics::diagnose_with_cache(
@@ -971,7 +971,7 @@ impl LanguageServer for Backend {
         let tokens = semantic::semantic_tokens_range(
             &self.analyzer,
             &parse,
-            genparser_analysis::Span::new(start, end),
+            zerosyntax_analysis::Span::new(start, end),
         );
         let data = convert::to_lsp_semantic_tokens(&rope, &tokens, enc);
         Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
@@ -995,7 +995,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let locations: Vec<(String, genparser_analysis::Span)> = {
+        let locations: Vec<(String, zerosyntax_analysis::Span)> = {
             let Ok(idx) = self.index.read() else {
                 return Ok(None);
             };
@@ -1061,10 +1061,10 @@ impl LanguageServer for Backend {
         // thousands of names, and clients re-query as the user types.
         const MAX_RESULTS: usize = 256;
         let raw: Vec<(
-            genparser_schema::RefKind,
+            zerosyntax_schema::RefKind,
             String,
             String,
-            genparser_analysis::Span,
+            zerosyntax_analysis::Span,
         )> = {
             let Ok(idx) = self.index.read() else {
                 return Ok(None);
@@ -1107,7 +1107,7 @@ impl LanguageServer for Backend {
         let Some(sym) = self.symbol_at(&uri, pos) else {
             return Ok(None);
         };
-        let mut raw: Vec<(String, genparser_analysis::Span)> = {
+        let mut raw: Vec<(String, zerosyntax_analysis::Span)> = {
             let Ok(idx) = self.index.read() else {
                 return Ok(None);
             };
@@ -1162,7 +1162,7 @@ impl LanguageServer for Backend {
         let Some(sym) = self.symbol_at(&uri, pos) else {
             return Ok(None);
         };
-        let mut raw: Vec<(String, genparser_analysis::Span)> = {
+        let mut raw: Vec<(String, zerosyntax_analysis::Span)> = {
             let Ok(idx) = self.index.read() else {
                 return Ok(None);
             };
@@ -1248,16 +1248,16 @@ impl LanguageServer for Backend {
 /// extracts the full Object block text to insert at the end of the current file.
 fn origin_copy_fixes(
     analyzer: &Analyzer,
-    parse: &genparser_syntax::Parse,
+    parse: &zerosyntax_syntax::Parse,
     text: &str,
-    range: genparser_analysis::Span,
-    diags: &[genparser_analysis::diagnostics::Diagnostic],
+    range: zerosyntax_analysis::Span,
+    diags: &[zerosyntax_analysis::diagnostics::Diagnostic],
     index: &WorkspaceIndex,
     read_file: impl Fn(&Url) -> Option<String>,
 ) -> Vec<actions::Fix> {
-    use genparser_analysis::index::Location;
-    use genparser_syntax::ast::Block;
-    use genparser_syntax::SyntaxKind;
+    use zerosyntax_analysis::index::Location;
+    use zerosyntax_syntax::ast::Block;
+    use zerosyntax_syntax::SyntaxKind;
 
     let mut out = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -1341,7 +1341,7 @@ fn origin_copy_fixes(
         let at = text.len() as u32;
         out.push(actions::Fix {
             title: format!("Insert reference copy of `{name}` from {base_short}"),
-            span: genparser_analysis::Span::new(at, at),
+            span: zerosyntax_analysis::Span::new(at, at),
             new_text: format!(
                 "{lead}\n; === Reference copy of {name} from {base_short} ===\n; Remove the fields and modules you don't need.\n{block_text}\n"
             ),
@@ -1370,7 +1370,7 @@ mod tests {
     #[test]
     fn scans_ini_from_big_archive() {
         let dir = std::env::temp_dir();
-        let path = dir.join(format!("genparser-test-{}.big", std::process::id()));
+        let path = dir.join(format!("zerosyntax-test-{}.big", std::process::id()));
         let entry_name = b"Data\\INI\\Test.ini\0";
         let ini = b"Object BigArchiveObject\nEnd\n";
         let data_offset = 0x10 + 8 + entry_name.len();

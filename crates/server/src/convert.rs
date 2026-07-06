@@ -6,13 +6,13 @@
 //! advertises support and we pick it at `initialize`. Every conversion here
 //! therefore takes the negotiated [`PositionEnc`].
 
-use genparser_analysis::completion::{Completion, CompletionKind};
-use genparser_analysis::diagnostics::{Diagnostic as AnDiagnostic, Severity};
-use genparser_analysis::outline::{DocSymbol, SymKind};
-use genparser_analysis::semantic::SemKind;
-use genparser_analysis::Span;
 use ropey::Rope;
 use tower_lsp::lsp_types::*;
+use zerosyntax_analysis::completion::{Completion, CompletionKind};
+use zerosyntax_analysis::diagnostics::{Diagnostic as AnDiagnostic, Severity};
+use zerosyntax_analysis::outline::{DocSymbol, SymKind};
+use zerosyntax_analysis::semantic::SemKind;
+use zerosyntax_analysis::Span;
 
 /// The position encoding negotiated with the client at `initialize`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -136,7 +136,7 @@ pub fn to_lsp_diagnostic(rope: &Rope, d: &AnDiagnostic, enc: PositionEnc) -> Dia
             Severity::Hint => DiagnosticSeverity::HINT,
         }),
         code: Some(NumberOrString::String(d.code.to_string())),
-        source: Some("genparser".to_string()),
+        source: Some("zerosyntax".to_string()),
         message: d.message.clone(),
         ..Default::default()
     }
@@ -267,7 +267,7 @@ fn sem_kind_index(kind: SemKind) -> u32 {
 /// lines, so `length` is the column difference in negotiated units.
 pub fn to_lsp_semantic_tokens(
     rope: &Rope,
-    tokens: &[genparser_analysis::semantic::SemToken],
+    tokens: &[zerosyntax_analysis::semantic::SemToken],
     enc: PositionEnc,
 ) -> Vec<SemanticToken> {
     let mut out = Vec::with_capacity(tokens.len());
@@ -324,7 +324,7 @@ pub fn semantic_tokens_splice(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use genparser_analysis::semantic::{SemKind, SemToken};
+    use zerosyntax_analysis::semantic::{SemKind, SemToken};
 
     /// Apply a splice the way a client would, for the equivalence test below.
     fn apply_splice(prev: &[SemanticToken], edit: &SemanticTokensEdit) -> Vec<SemanticToken> {

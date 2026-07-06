@@ -9,9 +9,9 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use genparser_analysis::diagnostics::DiagnosticsCache;
-use genparser_analysis::{diagnostics, index, semantic, Analyzer};
-use genparser_syntax::{Edit, Strategy};
+use zerosyntax_analysis::diagnostics::DiagnosticsCache;
+use zerosyntax_analysis::{diagnostics, index, semantic, Analyzer};
+use zerosyntax_syntax::{Edit, Strategy};
 
 /// Same shape as the syntax-crate generator, but kept schema-conformant so the
 /// diagnostics pass runs its real (non-error) field/value validation paths.
@@ -176,12 +176,16 @@ fn bench_corpus_keystroke(c: &mut Criterion) {
         })
     });
     group.bench_function("format_edits_ParticleSystem", |b| {
-        b.iter(|| black_box(genparser_analysis::format::format_edits(&parse, &src, "  ")))
+        b.iter(|| {
+            black_box(zerosyntax_analysis::format::format_edits(
+                &parse, &src, "  ",
+            ))
+        })
     });
     group.bench_function("semantic_tokens_range_ParticleSystem", |b| {
         // A ~60-line viewport in the middle of the file.
         let start = (src.len() / 2) as u32;
-        let span = genparser_analysis::Span::new(start, start + 2_000);
+        let span = zerosyntax_analysis::Span::new(start, start + 2_000);
         b.iter(|| black_box(semantic::semantic_tokens_range(&analyzer, &parse, span)))
     });
     group.finish();

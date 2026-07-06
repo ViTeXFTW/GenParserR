@@ -37,8 +37,8 @@ jobs:
       - name: e2e (stdio wire protocol)
         shell: bash
         run: |
-          cargo build --locked -p genparser-server
-          bin=target/debug/genparser-lsp
+          cargo build --locked -p zerosyntax-server
+          bin=target/debug/zerosyntax-lsp
           [ "$RUNNER_OS" = "Windows" ] && bin="$bin.exe"
           # Linux runners expose the interpreter as `python3`; Windows as `python`.
           if command -v python3 >/dev/null 2>&1; then py=python3; else py=python; fi
