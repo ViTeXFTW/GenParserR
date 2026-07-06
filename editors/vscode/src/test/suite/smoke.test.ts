@@ -4,13 +4,13 @@ import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
 
-suite("GenParser VS Code extension", () => {
+suite("ZeroSyntax VS Code extension", () => {
   test("activates the server and returns diagnostics and completions", async () => {
-    const serverPath = process.env.GENPARSER_LSP_PATH;
-    assert.ok(serverPath, "GENPARSER_LSP_PATH must point at genparser-lsp");
+    const serverPath = process.env.ZEROSYNTAX_LSP_PATH;
+      assert.ok(serverPath, "ZEROSYNTAX_LSP_PATH must point at ZeroSyntax-lsp");
     assert.ok(fs.existsSync(serverPath), `${serverPath} does not exist`);
 
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "genparser-vscode-"));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "zerosyntax-vscode-"));
     const uri = vscode.Uri.file(path.join(dir, "Smoke.ini"));
     await vscode.workspace.fs.writeFile(
       uri,
@@ -21,10 +21,8 @@ suite("GenParser VS Code extension", () => {
     await vscode.languages.setTextDocumentLanguage(document, "generals-ini");
     await vscode.window.showTextDocument(document);
 
-    const extension = vscode.extensions.all.find(
-      (ext) => ext.packageJSON?.name === "genparser-vscode"
-    );
-    assert.ok(extension, "genparser-vscode extension not loaded");
+    const extension = vscode.extensions.getExtension("ViTeXFTW.zerosyntax-vscode");
+    assert.ok(extension, "zerosyntax-vscode extension not loaded");
     await extension.activate();
 
     const diagnostics = await waitFor(

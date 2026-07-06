@@ -77,7 +77,7 @@ export function activate(context: vscode.ExtensionContext) {
   // startup, so any zerosyntax.* change needs a clean restart to apply.
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("zerosyntax") || e.affectsConfiguration("genparser")) {
+      if (e.affectsConfiguration("zerosyntax")) {
         void client?.restart();
       }
     })
@@ -97,7 +97,7 @@ function resolveServerPath(context: vscode.ExtensionContext): string | undefined
 
   // Set by the repo's launch.json so the Extension Development Host picks up
   // the locally built debug binary without copying it into the extension.
-  const fromEnv = process.env.ZEROSYNTAX_LSP_PATH ?? process.env.GENPARSER_LSP_PATH;
+  const fromEnv = process.env.ZEROSYNTAX_LSP_PATH;
   if (fromEnv && fs.existsSync(fromEnv)) {
     return fromEnv;
   }
@@ -149,7 +149,7 @@ function setting<T>(key: string, fallback: T): T {
   ) {
     return current.get<T>(key, fallback);
   }
-  return vscode.workspace.getConfiguration("genparser").get<T>(key, fallback);
+  return vscode.workspace.getConfiguration("zerosyntax").get<T>(key, fallback);
 }
 
 function isMapLayerDocument(document: vscode.TextDocument): boolean {

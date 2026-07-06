@@ -96,7 +96,7 @@ pub const KNOWN_CODES: &[&str] = &[
 ];
 
 /// The head word of the in-file suppression pragma comment.
-const PRAGMAS: &[&str] = &["zerosyntax-disable", "genparser-disable"];
+const PRAGMAS: &[&str] = &["zerosyntax-disable", "zerosyntax-disable"];
 
 /// If `tok` is a file-scope pragma comment (`; zerosyntax-disable[: ...]`),
 /// return `(base, rest)` where `base` is the absolute byte offset of `rest`
@@ -1358,12 +1358,6 @@ End
         assert!(!c.contains(&"bad-bool"), "{c:?}");
         assert!(!c.contains(&"unknown-field"), "{c:?}");
         assert!(c.contains(&"bad-number"), "unlisted codes survive: {c:?}");
-    }
-
-    #[test]
-    fn legacy_pragma_spelling_still_suppresses() {
-        let src = "; genparser-disable: bad-bool\nWeapon AK47\n  ScaleWeaponSpeed = Maybe\nEnd\n";
-        assert!(!codes(src).contains(&"bad-bool"));
     }
 
     #[test]

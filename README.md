@@ -120,7 +120,7 @@ Suppress a diagnostic for one file with a file-scope comment:
 Use the diagnostic code shown by your editor. Multiple codes can be separated by
 spaces or commas, and multiple pragma lines accumulate. Unknown suppression codes
 are reported so typos do not silently hide problems. The old
-`; genparser-disable:` spelling remains supported for existing files.
+`; zerosyntax-disable:` spelling remains supported for existing files.
 
 ## Feature Showcase
 

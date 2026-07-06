@@ -24,6 +24,6 @@ jobs:
       - name: Fetch corpus
         run: bash scripts/fetch-corpus.sh
       - name: Corpus diagnostics
-        run: cargo test --release --locked -p genparser-analysis --test corpus -- --ignored --nocapture
+        run: cargo test --release --locked -p zerosyntax-analysis --test corpus -- --ignored --nocapture
       - name: Corpus incremental equivalence
-        run: cargo test --release --locked -p genparser-analysis --test incremental corpus_edit_sequences_match_full_parse -- --ignored --nocapture
+        run: cargo test --release --locked -p zerosyntax-analysis --test incremental corpus_edit_sequences_match_full_parse -- --ignored --nocapture

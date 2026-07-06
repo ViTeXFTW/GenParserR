@@ -65,11 +65,11 @@ jobs:
           cache: npm
           cache-dependency-path: editors/vscode/package-lock.json
       - name: Build language server
-        run: cargo build --locked -p genparser-server
+        run: cargo build --locked -p zerosyntax-server
       - name: VS Code extension smoke
         working-directory: editors/vscode
         env:
-          GENPARSER_LSP_PATH: ${{ github.workspace }}/target/debug/genparser-lsp
+          ZEROSYNTAX_LSP_PATH: ${{ github.workspace }}/target/debug/zerosyntax-lsp
         run: |
           npm ci
           xvfb-run -a npm test
