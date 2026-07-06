@@ -77,16 +77,22 @@
   },
   "scripts": {
     "compile": "tsc -p ./",
+    "compile:test": "tsc -p ./tsconfig.test.json",
     "watch": "tsc -watch -p ./",
     "vscode:prepublish": "npm run compile",
-    "package": "npx --yes @vscode/vsce package --allow-missing-repository"
+    "package": "vsce package --allow-missing-repository",
+    "test": "npm run compile && npm run compile:test && node ./out-test/src/test/runTest.js"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.84.0",
+    "@vscode/test-electron": "^3.0.0",
+    "@vscode/vsce": "^3.9.2",
+    "mocha": "^11.7.6",
     "typescript": "^5.4.0"
   }
 }
