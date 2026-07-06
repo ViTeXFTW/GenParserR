@@ -1,4 +1,4 @@
-# Expected behavior for SuppressPragma.ini: the `; genparser-disable: <codes>`
+# Expected behavior for SuppressPragma.ini: the `; zerosyntax-disable: <codes>`
 # file-scope pragma drops the listed diagnostic codes from the whole file,
 # while every other code is unaffected.
 

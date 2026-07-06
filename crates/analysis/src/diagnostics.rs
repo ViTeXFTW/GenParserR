@@ -10,15 +10,15 @@
 //! (see [`apply_suppressions`]):
 //!
 //! ```ini
-//! ; genparser-disable: unresolved-reference, unreachable-set
+//! ; zerosyntax-disable: unresolved-reference, unreachable-set
 //! ```
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use genparser_schema::{RefKind, ValueType};
-use genparser_syntax::ast::{Block, Field, Module};
-use genparser_syntax::{Parse, SyntaxKind, SyntaxNode, SyntaxToken};
+use zerosyntax_schema::{RefKind, ValueType};
+use zerosyntax_syntax::ast::{Block, Field, Module};
+use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode, SyntaxToken};
 
 use crate::model::{module_fits_slot, scope_schema, ScopeSchema};
 use crate::{Analyzer, Span, WorkspaceIndex};
@@ -96,9 +96,9 @@ pub const KNOWN_CODES: &[&str] = &[
 ];
 
 /// The head word of the in-file suppression pragma comment.
-const PRAGMA: &str = "genparser-disable";
+const PRAGMAS: &[&str] = &["zerosyntax-disable", "genparser-disable"];
 
-/// If `tok` is a file-scope pragma comment (`; genparser-disable[: ...]`),
+/// If `tok` is a file-scope pragma comment (`; zerosyntax-disable[: ...]`),
 /// return `(base, rest)` where `base` is the absolute byte offset of `rest`
 /// inside the file and `rest` is the code-list portion (after the pragma
 /// keyword and optional `:`). Returns `None` if the token is not a pragma.
@@ -108,7 +108,9 @@ pub(crate) fn pragma_rest(tok: &SyntaxToken) -> Option<(u32, &str)> {
     }
     let text = tok.text();
     let body = text.trim_start_matches(';').trim_start();
-    let rest = body.strip_prefix(PRAGMA)?;
+    let rest = PRAGMAS
+        .iter()
+        .find_map(|pragma| body.strip_prefix(pragma))?;
     let rest = rest.trim_start();
     let rest = rest.strip_prefix(':').unwrap_or(rest);
     let base = u32::from(tok.text_range().start()) + (text.len() - rest.len()) as u32;
@@ -138,7 +140,7 @@ pub(crate) fn pragma_words(rest: &str) -> impl Iterator<Item = (usize, usize)> +
 }
 
 /// Honor file-scope suppression pragmas: a comment line outside any block of
-/// the form `; genparser-disable: code, code …` (colon optional; codes
+/// the form `; zerosyntax-disable: code, code …` (colon optional; codes
 /// separated by commas and/or whitespace; multiple pragma comments
 /// accumulate) drops every diagnostic with a listed code from the file's
 /// output. Unrecognized codes produce an `unknown-suppression` hint spanning
@@ -1351,7 +1353,7 @@ End
 
     #[test]
     fn pragma_suppresses_listed_codes_file_wide() {
-        let src = "; genparser-disable: bad-bool, unknown-field\nWeapon AK47\n  ScaleWeaponSpeed = Maybe\n  ClipSize = lots\n  PrimaryDamg = 1\nEnd\n";
+        let src = "; zerosyntax-disable: bad-bool, unknown-field\nWeapon AK47\n  ScaleWeaponSpeed = Maybe\n  ClipSize = lots\n  PrimaryDamg = 1\nEnd\n";
         let c = codes(src);
         assert!(!c.contains(&"bad-bool"), "{c:?}");
         assert!(!c.contains(&"unknown-field"), "{c:?}");
@@ -1359,8 +1361,14 @@ End
     }
 
     #[test]
+    fn legacy_pragma_spelling_still_suppresses() {
+        let src = "; genparser-disable: bad-bool\nWeapon AK47\n  ScaleWeaponSpeed = Maybe\nEnd\n";
+        assert!(!codes(src).contains(&"bad-bool"));
+    }
+
+    #[test]
     fn pragma_typo_hints_and_suppresses_nothing() {
-        let src = "; genparser-disable: bad-bol\nWeapon AK47\n  ScaleWeaponSpeed = Maybe\nEnd\n";
+        let src = "; zerosyntax-disable: bad-bol\nWeapon AK47\n  ScaleWeaponSpeed = Maybe\nEnd\n";
         let d = diags(src);
         assert!(d.iter().any(|d| d.code == "bad-bool"), "{d:?}");
         let hint = d
@@ -1375,7 +1383,8 @@ End
 
     #[test]
     fn pragma_inside_a_block_is_ignored() {
-        let src = "Weapon AK47\n  ; genparser-disable: bad-bool\n  ScaleWeaponSpeed = Maybe\nEnd\n";
+        let src =
+            "Weapon AK47\n  ; zerosyntax-disable: bad-bool\n  ScaleWeaponSpeed = Maybe\nEnd\n";
         assert!(codes(src).contains(&"bad-bool"));
     }
 
@@ -1392,13 +1401,13 @@ End
         assert!(first.iter().any(|d| d.code == "bad-bool"));
         assert!(first.iter().any(|d| d.code == "bad-number"));
 
-        let pragma = "; genparser-disable: bad-number\n";
+        let pragma = "; zerosyntax-disable: bad-number\n";
         let edited = format!("{pragma}{src}");
         let (inc, _strategy) = a.reparse(
             &parse,
             src,
             &edited,
-            genparser_syntax::Edit {
+            zerosyntax_syntax::Edit {
                 start: 0,
                 old_end: 0,
                 new_len: pragma.len(),
@@ -1431,13 +1440,13 @@ End
             &parse,
             src,
             &edited,
-            genparser_syntax::Edit {
+            zerosyntax_syntax::Edit {
                 start: at,
                 old_end: at + 1,
                 new_len: 1,
             },
         );
-        assert_eq!(strategy, genparser_syntax::Strategy::Spliced);
+        assert_eq!(strategy, zerosyntax_syntax::Strategy::Spliced);
         assert_eq!(
             diagnose_with_cache(&a, &inc, None, None, &mut cache),
             diagnose(&a, &inc, None, None)

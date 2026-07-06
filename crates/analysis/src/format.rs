@@ -3,7 +3,7 @@
 //! touches nothing else — token spacing, casing, blank lines, and comment
 //! lines (whose intended scope is ambiguous) are left exactly as written.
 
-use genparser_syntax::{Parse, SyntaxKind};
+use zerosyntax_syntax::{Parse, SyntaxKind};
 
 use crate::Span;
 
@@ -93,7 +93,7 @@ fn coalesce(edits: Vec<FmtEdit>, text: &str) -> Vec<FmtEdit> {
 /// one level inside their scope; a scope's own header and `End` tokens (those
 /// parented directly by the `BLOCK`/`MODULE` node) sit at the depth of the
 /// scope's parent.
-fn token_depths(root: &genparser_syntax::SyntaxNode) -> Vec<(u32, u32)> {
+fn token_depths(root: &zerosyntax_syntax::SyntaxNode) -> Vec<(u32, u32)> {
     let mut depths = Vec::new();
     let mut depth: u32 = 0;
     let mut parents: Vec<SyntaxKind> = Vec::new();

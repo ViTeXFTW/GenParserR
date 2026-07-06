@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`genparser` is an IDE-agnostic LSP language server for the INI scripting format
+`zerosyntax` is an IDE-agnostic LSP language server for the INI scripting format
 of *Command & Conquer Generals: Zero Hour*. The block/field/module schema is a
 **hand-written `crates/schema/schema.json`**, modeled directly on the engine's
 own C++ `FieldParse` tables (in `GeneralsCode/`) — so diagnostics/completions
@@ -22,29 +22,29 @@ leniently.
 ## Commands
 
 ```sh
-cargo build --release            # all crates; binary -> target/release/genparser-lsp
+cargo build --release            # all crates; binary -> target/release/zerosyntax-lsp
 cargo test                       # all unit + integration tests
-cargo test -p genparser-analysis --test spec         # spec-first behavior tests
-cargo test -p genparser-schema   # schema round-trip + embedded-schema validity
+cargo test -p zerosyntax-analysis --test spec         # spec-first behavior tests
+cargo test -p zerosyntax-schema   # schema round-trip + embedded-schema validity
 
 # run a single test by name substring:
-cargo test -p genparser-analysis opens_scope
+cargo test -p zerosyntax-analysis opens_scope
 
 # end-to-end (drives the real binary over stdio):
-cargo build -p genparser-server
-python crates/server/tests/e2e.py target/debug/genparser-lsp.exe   # .exe on Windows
+cargo build -p zerosyntax-server
+python crates/server/tests/e2e.py target/debug/zerosyntax-lsp.exe   # .exe on Windows
 
 # real-corpus gate (fetch once, then run): zero panics, zero syntax /
 # unknown-block diagnostics over the full ZH game data; the printed warning
 # histogram is the schema-coverage backlog.
 pwsh scripts/fetch-corpus.ps1            # or scripts/fetch-corpus.sh
-cargo test --release -p genparser-analysis --test corpus -- --ignored --nocapture
+cargo test --release -p zerosyntax-analysis --test corpus -- --ignored --nocapture
 
 cargo bench                              # parse/analysis benchmarks (criterion)
 ```
 
 Editing the schema is a manual workflow: hand-edit `crates/schema/schema.json`,
-then run `cargo test -p genparser-schema` (validates the embedded JSON parses
+then run `cargo test -p zerosyntax-schema` (validates the embedded JSON parses
 and contains the core blocks) and the spec test below (catches new false
 positives and pins intended behavior). Cross-check new entries against the
 relevant `FieldParse` table in `GeneralsCode/`. Run the corpus gate after any
@@ -59,7 +59,7 @@ outcome so a behavior can be pinned *before* the feature that produces it exists
 `crates/analysis/tests/spec.rs`:
 
 ```sh
-cargo test -p genparser-analysis --test spec
+cargo test -p zerosyntax-analysis --test spec
 ```
 
 Each case is a pair: `Foo.ini` (real INI, plus `$1`/`$2` cursor markers at
@@ -140,7 +140,7 @@ schema.json ──embedded──▶ schema ──▶ analysis ──▶ server
   offers it, else the UTF-16 baseline). Advertises `semanticTokens` `full`
   **and** `range`. Formatting is **opt-in**: the capability is advertised
   only when `initializationOptions` carries `{"format": {"enable": true}}`
-  (the VS Code setting `genparser.format.enable`, default off — real game
+  (the VS Code setting `zerosyntax.format.enable`, default off — real game
   files are wildly hand-indented, so format-on-save must never fire
   unasked). Phase-3 numbers (`docs/phase3-incremental.md`): keystroke on the
   61k-line ParticleSystem.ini ≈ 147 µs vs 44 ms full reparse.
@@ -185,7 +185,7 @@ reference). Each diagnostic carries a stable string `code` (e.g.
 `unknown-field`, `syntax`) — the spec tests pin these by `code`, so changing a
 code or span requires updating the affected `*.spec.toml` files. A file can
 opt out of specific codes with a file-scope pragma comment
-(`; genparser-disable: <code>, …`): the filter runs *after* the per-block
+(`; zerosyntax-disable: <code>, …`): the filter runs *after* the per-block
 cache assembles its output (cached entries stay unfiltered, so pragma edits
 apply file-wide while sibling blocks stay cached), every emitted code must be
 registered in `KNOWN_CODES` (a debug-assert in `push` enforces it), and a

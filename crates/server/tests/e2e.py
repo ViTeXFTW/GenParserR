@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end smoke test: drive the genparser-lsp binary over stdio.
+"""End-to-end smoke test: drive the zerosyntax-lsp binary over stdio.
 
 Sends initialize -> initialized -> didOpen (a Weapon block with a bad value and
 an unknown field), then asserts we get publishDiagnostics, completions, and
@@ -56,7 +56,7 @@ def main() -> int:
     import pathlib
     import tempfile
 
-    workspace = pathlib.Path(tempfile.mkdtemp(prefix="genparser-e2e-"))
+    workspace = pathlib.Path(tempfile.mkdtemp(prefix="zerosyntax-e2e-"))
     (workspace / "Images.INI").write_text("MappedImage TestScanImage\nEnd\n")
     root_uri = workspace.as_uri()
 

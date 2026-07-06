@@ -4,9 +4,9 @@
 
 use std::collections::BTreeMap;
 
-use genparser_schema::ValueType;
-use genparser_syntax::ast::{Block, Field, Module};
-use genparser_syntax::{Parse, SyntaxKind, SyntaxNode, SyntaxToken};
+use zerosyntax_schema::ValueType;
+use zerosyntax_syntax::ast::{Block, Field, Module};
+use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode, SyntaxToken};
 
 use crate::model::{scope_schema, ScopeSchema};
 use crate::{Analyzer, Span};

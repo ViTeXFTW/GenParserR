@@ -9,9 +9,9 @@
 
 use std::path::PathBuf;
 
-use genparser_analysis::diagnostics::{self, DiagnosticsCache};
-use genparser_analysis::Analyzer;
-use genparser_syntax::{Edit, Strategy};
+use zerosyntax_analysis::diagnostics::{self, DiagnosticsCache};
+use zerosyntax_analysis::Analyzer;
+use zerosyntax_syntax::{Edit, Strategy};
 
 struct Rng(u64);
 

@@ -3,9 +3,9 @@
 //! by edit distance against the value set), and diagnostic-tied fixes (remove
 //! unreachable sets, scaffold stub definitions, suppress diagnostics in-file).
 
-use genparser_schema::{RefKind, ValueType};
-use genparser_syntax::ast::{Field, Module};
-use genparser_syntax::{Parse, SyntaxErrorKind, SyntaxKind, SyntaxNode, SyntaxToken};
+use zerosyntax_schema::{RefKind, ValueType};
+use zerosyntax_syntax::ast::{Field, Module};
+use zerosyntax_syntax::{Parse, SyntaxErrorKind, SyntaxKind, SyntaxNode, SyntaxToken};
 
 use crate::diagnostics::{pragma_rest, pragma_words, Diagnostic, Severity};
 use crate::model::scope_schema;
@@ -383,7 +383,7 @@ fn stub_keyword<'a>(analyzer: &'a Analyzer, kind: RefKind) -> Option<&'a str> {
     found
 }
 
-/// Offer to add `; genparser-disable: <code>` at the top of the file (or
+/// Offer to add `; zerosyntax-disable: <code>` at the top of the file (or
 /// append to an existing pragma line) for warning/hint diagnostics.
 fn suppress_fix(parse: &Parse, text: &str, code: &'static str, out: &mut Vec<Fix>) {
     let root = parse.syntax();
@@ -438,7 +438,7 @@ fn suppress_fix(parse: &Parse, text: &str, code: &'static str, out: &mut Vec<Fix
         out.push(Fix {
             title: format!("Suppress `{code}` in this file"),
             span: Span::new(bom_offset, bom_offset),
-            new_text: format!("; genparser-disable: {code}\n"),
+            new_text: format!("; zerosyntax-disable: {code}\n"),
         });
     }
 }
@@ -790,7 +790,7 @@ mod tests {
             .expect("suppress not offered");
         assert_eq!(sup.span.start, 0, "should insert at top");
         assert!(
-            sup.new_text.starts_with("; genparser-disable:"),
+            sup.new_text.starts_with("; zerosyntax-disable:"),
             "wrong pragma: {}",
             sup.new_text
         );
@@ -806,7 +806,7 @@ mod tests {
     fn suppress_fix_appends_to_existing_pragma() {
         // Existing pragma with another code → appends ", <code>".
         let src =
-            "; genparser-disable: unknown-module\nWeapon MyWeapon\n  FireFX = NoSuchFX\nEnd\n";
+            "; zerosyntax-disable: unknown-module\nWeapon MyWeapon\n  FireFX = NoSuchFX\nEnd\n";
         let fx = all_fixes(src);
         let sup = fx
             .iter()
@@ -824,7 +824,7 @@ mod tests {
         );
 
         // Bare pragma (colon only, no codes yet) → appends " <code>".
-        let src2 = "; genparser-disable:\nWeapon MyWeapon\n  FireFX = NoSuchFX\nEnd\n";
+        let src2 = "; zerosyntax-disable:\nWeapon MyWeapon\n  FireFX = NoSuchFX\nEnd\n";
         let fx2 = all_fixes(src2);
         let sup2 = fx2
             .iter()
@@ -837,7 +837,7 @@ mod tests {
         );
 
         // Code already listed → no action.
-        let src3 = "; genparser-disable: unresolved-reference\nWeapon MyWeapon\n  FireFX = NoSuchFX\nEnd\n";
+        let src3 = "; zerosyntax-disable: unresolved-reference\nWeapon MyWeapon\n  FireFX = NoSuchFX\nEnd\n";
         let fx3 = all_fixes(src3);
         assert!(
             !fx3.iter()

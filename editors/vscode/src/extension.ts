@@ -15,8 +15,8 @@ export function activate(context: vscode.ExtensionContext) {
   const serverPath = resolveServerPath(context);
   if (!serverPath) {
     vscode.window.showErrorMessage(
-      "genparser: could not find the language server binary. Set `genparser.server.path` " +
-        "or place `genparser-lsp` under the extension's `server/` directory or on your PATH."
+      "zerosyntax: could not find the language server binary. Set `zerosyntax.server.path` " +
+        "or place `zerosyntax-lsp` under the extension's `server/` directory or on your PATH."
     );
     return;
   }
@@ -36,20 +36,16 @@ export function activate(context: vscode.ExtensionContext) {
     // the current values. The server reads these once at `initialize`.
     initializationOptions: () => ({
       format: {
-        enable: vscode.workspace
-          .getConfiguration("genparser")
-          .get<boolean>("format.enable", false),
+        enable: setting<boolean>("format.enable", false),
       },
-      baseIniRoots: vscode.workspace
-        .getConfiguration("genparser")
-        .get<string[]>("baseIniRoots", []),
+      baseIniRoots: setting<string[]>("baseIniRoots", []),
       clientBaseIniHint: true,
     }),
   };
 
   client = new LanguageClient(
-    "genparser",
-    "Generals INI Language Server",
+    "zerosyntax",
+    "ZeroSyntax v2 Language Server",
     serverOptions,
     clientOptions
   );
@@ -78,10 +74,10 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   // Server settings (initializationOptions, server path) are read once at
-  // startup, so any genparser.* change needs a clean restart to apply.
+  // startup, so any zerosyntax.* change needs a clean restart to apply.
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("genparser")) {
+      if (e.affectsConfiguration("zerosyntax") || e.affectsConfiguration("genparser")) {
         void client?.restart();
       }
     })
@@ -94,21 +90,19 @@ export function deactivate(): Thenable<void> | undefined {
 
 /** Resolve the server binary: explicit setting > env override > bundled > PATH. */
 function resolveServerPath(context: vscode.ExtensionContext): string | undefined {
-  const configured = vscode.workspace
-    .getConfiguration("genparser")
-    .get<string>("server.path");
+  const configured = setting<string>("server.path", "");
   if (configured && configured.trim().length > 0) {
     return configured;
   }
 
   // Set by the repo's launch.json so the Extension Development Host picks up
   // the locally built debug binary without copying it into the extension.
-  const fromEnv = process.env.GENPARSER_LSP_PATH;
+  const fromEnv = process.env.ZEROSYNTAX_LSP_PATH ?? process.env.GENPARSER_LSP_PATH;
   if (fromEnv && fs.existsSync(fromEnv)) {
     return fromEnv;
   }
 
-  const exe = process.platform === "win32" ? "genparser-lsp.exe" : "genparser-lsp";
+  const exe = process.platform === "win32" ? "zerosyntax-lsp.exe" : "zerosyntax-lsp";
   const bundled = context.asAbsolutePath(path.join("server", exe));
   if (fs.existsSync(bundled)) {
     return bundled;
@@ -123,9 +117,7 @@ async function maybeShowBaseIniRootsHint(document: vscode.TextDocument) {
     return;
   }
 
-  const roots = vscode.workspace
-    .getConfiguration("genparser")
-    .get<string[]>("baseIniRoots", []);
+  const roots = setting<string[]>("baseIniRoots", []);
   if (roots.length > 0) {
     return;
   }
@@ -133,15 +125,31 @@ async function maybeShowBaseIniRootsHint(document: vscode.TextDocument) {
   baseIniRootsHintShown = true;
   const configure = "Configure base INI roots";
   const choice = await vscode.window.showWarningMessage(
-    "GenParserR: map/solo.ini diagnostics are limited until base game or mod INIs are configured.",
+    "ZeroSyntax v2: map/solo.ini diagnostics are limited until base game or mod INIs are configured.",
     configure
   );
   if (choice === configure) {
     await vscode.commands.executeCommand(
       "workbench.action.openSettings",
-      "genparser.baseIniRoots"
+      "zerosyntax.baseIniRoots"
     );
   }
+}
+
+function setting<T>(key: string, fallback: T): T {
+  const current = vscode.workspace.getConfiguration("zerosyntax");
+  const inspected = current.inspect<T>(key);
+  if (
+    inspected?.globalValue !== undefined ||
+    inspected?.workspaceValue !== undefined ||
+    inspected?.workspaceFolderValue !== undefined ||
+    inspected?.globalLanguageValue !== undefined ||
+    inspected?.workspaceLanguageValue !== undefined ||
+    inspected?.workspaceFolderLanguageValue !== undefined
+  ) {
+    return current.get<T>(key, fallback);
+  }
+  return vscode.workspace.getConfiguration("genparser").get<T>(key, fallback);
 }
 
 function isMapLayerDocument(document: vscode.TextDocument): boolean {
@@ -161,7 +169,7 @@ class BigIniDocumentProvider implements vscode.TextDocumentContentProvider {
       return "";
     }
     return (
-      (await activeClient.sendRequest<string | null>("genparser/readVirtualFile", {
+      (await activeClient.sendRequest<string | null>("zerosyntax/readVirtualFile", {
         uri: uri.toString(),
       })) ?? ""
     );

@@ -1,12 +1,12 @@
 {
-  "name": "genparser-vscode",
-  "displayName": "Generals Zero Hour INI",
-  "description": "Language support (diagnostics, completion, semantic highlighting) for C&C Generals: Zero Hour INI files, powered by the genparser language server.",
+  "name": "zerosyntax-vscode",
+  "displayName": "ZeroSyntax v2",
+  "description": "Language support (diagnostics, completion, semantic highlighting) for C&C Generals: Zero Hour INI files, powered by ZeroSyntax v2.",
   "version": "1.0.1",
   "license": "MIT",
   "repository": {
     "type": "GitHub",
-    "url": "https://github.com/ViTeXFTW/GenParserR"
+    "url": "https://github.com/ViTeXFTW/ZeroSyntaxV2"
   },
   "publisher": "ViTeXFTW",
   "engines": {
@@ -25,6 +25,7 @@
       {
         "id": "generals-ini",
         "aliases": [
+          "ZeroSyntax v2",
           "Generals INI",
           "generals-ini"
         ],
@@ -42,19 +43,19 @@
       }
     ],
     "configuration": {
-      "title": "Generals INI",
+      "title": "ZeroSyntax v2",
       "properties": {
-        "genparser.server.path": {
+        "zerosyntax.server.path": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Absolute path to the `genparser-lsp` server binary. If empty, the extension uses the bundled binary under `server/`, then falls back to `genparser-lsp` on your PATH."
+          "markdownDescription": "Absolute path to the `zerosyntax-lsp` server binary. If empty, the extension uses the bundled binary under `server/`, then falls back to `zerosyntax-lsp` on your PATH."
         },
-        "genparser.format.enable": {
+        "zerosyntax.format.enable": {
           "type": "boolean",
           "default": false,
           "markdownDescription": "Enable document formatting (indentation normalization). When off — the default — the server does not advertise the formatting capability, so `#editor.formatOnSave#` will not invoke it for Generals INI files. Changing this restarts the language server."
         },
-        "genparser.baseIniRoots": {
+        "zerosyntax.baseIniRoots": {
           "type": "array",
           "default": [],
           "items": {
@@ -62,7 +63,7 @@
           },
           "markdownDescription": "Directories or `.big` archives containing base game/mod INI files that should be treated as already loaded before `map.ini`/`solo.ini`. Changing this restarts the language server."
         },
-        "genparser.trace.server": {
+        "zerosyntax.trace.server": {
           "type": "string",
           "enum": [
             "off",

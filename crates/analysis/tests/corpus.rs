@@ -5,7 +5,7 @@
 //! Ignored by default so plain `cargo test` stays corpus-free; run with:
 //!
 //! ```sh
-//! cargo test --release -p genparser-analysis --test corpus -- --ignored --nocapture
+//! cargo test --release -p zerosyntax-analysis --test corpus -- --ignored --nocapture
 //! ```
 //!
 //! This is a permanent gate (roadmap Phase 2): zero panics, zero `syntax`
@@ -20,7 +20,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use genparser_analysis::{diagnostics, index, Analyzer, WorkspaceIndex};
+use zerosyntax_analysis::{diagnostics, index, Analyzer, WorkspaceIndex};
 
 fn corpus_dir() -> Option<PathBuf> {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

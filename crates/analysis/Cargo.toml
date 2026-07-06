@@ -1,12 +1,12 @@
 [package]
-name = "genparser-analysis"
+name = "zerosyntax-analysis"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-genparser-schema.workspace = true
-genparser-syntax.workspace = true
+zerosyntax-schema.workspace = true
+zerosyntax-syntax.workspace = true
 rowan.workspace = true
 
 [dev-dependencies]

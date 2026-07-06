@@ -1,9 +1,9 @@
 //! Navigation helpers: resolve what schema entity sits under a byte offset, for
 //! go-to-definition and hover.
 
-use genparser_schema::{RefKind, ValueType};
-use genparser_syntax::ast::{Block, Field};
-use genparser_syntax::{Parse, SyntaxKind, SyntaxNode, SyntaxToken};
+use zerosyntax_schema::{RefKind, ValueType};
+use zerosyntax_syntax::ast::{Block, Field};
+use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode, SyntaxToken};
 
 use crate::model::scope_schema;
 use crate::{Analyzer, Span};

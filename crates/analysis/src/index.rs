@@ -7,9 +7,9 @@
 
 use std::collections::HashMap;
 
-use genparser_schema::{RefKind, ValueType};
-use genparser_syntax::ast::{Block, Field, Module};
-use genparser_syntax::{Parse, SyntaxKind, SyntaxNode};
+use zerosyntax_schema::{RefKind, ValueType};
+use zerosyntax_syntax::ast::{Block, Field, Module};
+use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode};
 
 use crate::model::{scope_schema, ScopeSchema};
 use crate::{Analyzer, Span};
@@ -328,7 +328,7 @@ fn collect_field_refs(
         return;
     };
     let tokens = field.value_tokens();
-    let mut push = |kind: RefKind, tok: &genparser_syntax::SyntaxToken| {
+    let mut push = |kind: RefKind, tok: &zerosyntax_syntax::SyntaxToken| {
         let name = tok.text().trim_matches('"');
         if name.is_empty()
             || name.eq_ignore_ascii_case("None")

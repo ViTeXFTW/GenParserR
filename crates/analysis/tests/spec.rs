@@ -35,11 +35,11 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use genparser_analysis::actions;
-use genparser_analysis::completion::complete;
-use genparser_analysis::diagnostics::{diagnose, Severity};
-use genparser_analysis::index::{definitions_in, WorkspaceIndex};
-use genparser_analysis::{Analyzer, Span};
+use zerosyntax_analysis::actions;
+use zerosyntax_analysis::completion::complete;
+use zerosyntax_analysis::diagnostics::{diagnose, Severity};
+use zerosyntax_analysis::index::{definitions_in, WorkspaceIndex};
+use zerosyntax_analysis::{Analyzer, Span};
 
 use serde::Deserialize;
 
@@ -204,7 +204,7 @@ fn parse_severity(s: &str) -> Severity {
 fn check_diag(
     spec: &DiagSpec,
     search: &str,
-    diags: &[genparser_analysis::Diagnostic],
+    diags: &[zerosyntax_analysis::Diagnostic],
 ) -> Result<(), String> {
     let Some(target) = nth_token_offset(search, &spec.on, spec.nth) else {
         return Err(format!(
@@ -243,7 +243,7 @@ fn check_complete(
     spec: &CompleteSpec,
     markers: &HashMap<String, u32>,
     analyzer: &Analyzer,
-    parse: &genparser_syntax::Parse,
+    parse: &zerosyntax_syntax::Parse,
     index: &WorkspaceIndex,
 ) -> Result<(), String> {
     let Some(&offset) = markers.get(&spec.at) else {
@@ -295,9 +295,9 @@ fn check_action(
     spec: &ActionSpec,
     search: &str,
     analyzer: &Analyzer,
-    parse: &genparser_syntax::Parse,
+    parse: &zerosyntax_syntax::Parse,
     src: &str,
-    diags: &[genparser_analysis::Diagnostic],
+    diags: &[zerosyntax_analysis::Diagnostic],
     index: &WorkspaceIndex,
 ) -> Result<(), String> {
     let Some(off) = nth_token_offset(search, &spec.on, spec.nth) else {
@@ -331,7 +331,7 @@ fn check_action(
     }
 }
 
-fn render_diags(diags: &[genparser_analysis::Diagnostic]) -> String {
+fn render_diags(diags: &[zerosyntax_analysis::Diagnostic]) -> String {
     if diags.is_empty() {
         return "(none)".into();
     }

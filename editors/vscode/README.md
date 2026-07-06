@@ -1,6 +1,6 @@
-# Generals Zero Hour INI — VS Code extension
+# ZeroSyntax v2 — VS Code extension
 
-Reference editor client for the `genparser` language server (see the project
+Reference editor client for the ZeroSyntax v2 language server (see the project
 root README for the full architecture).
 Provides diagnostics, completions, hover, go-to-definition, and schema-aware
 semantic highlighting for C&C Generals: Zero Hour `.ini` files.
@@ -21,16 +21,16 @@ npm run compile
 Build the server from the workspace root and make it discoverable in one of
 these ways (checked in order):
 
-1. Set `genparser.server.path` to the absolute path of `genparser-lsp`.
-2. Copy the binary to `editors/vscode/server/genparser-lsp[.exe]` (bundled into
+1. Set `zerosyntax.server.path` to the absolute path of `zerosyntax-lsp`.
+2. Copy the binary to `editors/vscode/server/zerosyntax-lsp[.exe]` (bundled into
    the `.vsix`).
-3. Put `genparser-lsp` on your `PATH`.
+3. Put `zerosyntax-lsp` on your `PATH`.
 
 ```sh
-cargo build --release -p genparser-server
+cargo build --release -p zerosyntax-server
 # option 2:
 mkdir -p editors/vscode/server
-cp target/release/genparser-lsp* editors/vscode/server/
+cp target/release/zerosyntax-lsp* editors/vscode/server/
 ```
 
 ## Run / debug
@@ -41,7 +41,7 @@ Development Host, then open any `.ini` file recognized as **Generals INI**.
 ## Package
 
 ```sh
-npm run package   # produces genparser-vscode-<version>.vsix (needs @vscode/vsce)
+npm run package   # produces zerosyntax-vscode-<version>.vsix (needs @vscode/vsce)
 ```
 
 ## Note on `.ini` association

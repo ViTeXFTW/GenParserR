@@ -1,4 +1,4 @@
-//! `genparser-lsp`: the IDE-agnostic language server for C&C Generals: Zero Hour
+//! `zerosyntax-lsp`: the IDE-agnostic language server for C&C Generals: Zero Hour
 //! INI files. Speaks LSP over stdio.
 
 mod backend;
@@ -21,6 +21,7 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
     let (service, socket) = LspService::build(Backend::new)
+        .custom_method("zerosyntax/readVirtualFile", Backend::read_virtual_file)
         .custom_method("genparser/readVirtualFile", Backend::read_virtual_file)
         .finish();
     Server::new(stdin, stdout, socket).serve(service).await;

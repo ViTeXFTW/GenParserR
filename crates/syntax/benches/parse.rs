@@ -9,9 +9,9 @@
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use genparser_syntax::lexer::tokenize;
-use genparser_syntax::parse;
-use genparser_syntax::parser::FixedOpeners;
+use zerosyntax_syntax::lexer::tokenize;
+use zerosyntax_syntax::parse;
+use zerosyntax_syntax::parser::FixedOpeners;
 
 /// Generate a synthetic document of roughly `target_lines` lines, shaped like
 /// real ZH data: a mix of flat `Weapon` blocks and `Object` blocks with nested
