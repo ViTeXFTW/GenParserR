@@ -94,6 +94,6 @@
     "@vscode/test-electron": "^3.0.0",
     "@vscode/vsce": "^3.9.2",
     "mocha": "^11.7.6",
-    "typescript": "^5.4.0"
+    "typescript": "^6.0.3"
   }
 }
