@@ -3,7 +3,9 @@
 # README, LICENSE, and production node_modules (vscode-languageclient).
 .vscode/**
 src/**
+out-test/**
 tsconfig.json
+tsconfig.test.json
 **/*.map
 **/*.ts
 node_modules/@types/**

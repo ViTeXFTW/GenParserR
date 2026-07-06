@@ -10,6 +10,7 @@
 # VS Code extension
 editors/vscode/node_modules
 editors/vscode/out
+editors/vscode/out-test
 editors/vscode/*.vsix
 editors/vscode/server
 

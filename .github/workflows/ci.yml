@@ -1,8 +1,6 @@
-# Test gate on pushes and pull requests: the full Rust suite (unit, spec,
-# schema round-trip, incremental fuzz) on Linux and Windows, the wire-level
-# e2e script against the real binary, and a compile check of the VS Code
-# extension. The corpus gate stays local-only (it needs the fetched game
-# data); run it before tagging a release — see docs/release.md.
+# Test gate on pushes and pull requests: Rust fmt/clippy/tests, the wire-level
+# e2e script against the real binary, and a VS Code extension-host smoke test.
+# The real game corpus runs in corpus.yml on schedule/manual/release only.
 
 name: CI
 
@@ -60,13 +58,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: editors/vscode/package-lock.json
-      - name: Compile VS Code extension
+      - name: Build language server
+        run: cargo build --locked -p genparser-server
+      - name: VS Code extension smoke
         working-directory: editors/vscode
+        env:
+          GENPARSER_LSP_PATH: ${{ github.workspace }}/target/debug/genparser-lsp
         run: |
           npm ci
-          npm run compile
+          xvfb-run -a npm test

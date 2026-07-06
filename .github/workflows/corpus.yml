@@ -1,0 +1,29 @@
+# Real game-data gate. Kept off normal PRs because it fetches an external corpus
+# and runs the heavier ignored release-mode tests.
+
+name: Corpus
+
+on:
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  corpus:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Fetch corpus
+        run: bash scripts/fetch-corpus.sh
+      - name: Corpus diagnostics
+        run: cargo test --release --locked -p genparser-analysis --test corpus -- --ignored --nocapture
+      - name: Corpus incremental equivalence
+        run: cargo test --release --locked -p genparser-analysis --test incremental corpus_edit_sequences_match_full_parse -- --ignored --nocapture
