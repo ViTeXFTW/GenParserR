@@ -110,7 +110,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path bin | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/$env:BIN_NAME.exe" bin
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: prerelease-bin-${{ matrix.target }}
           path: bin/*
@@ -155,7 +155,7 @@ jobs:
           npm version "${{ steps.version.outputs.version }}" --no-git-tag-version --allow-same-version
           npx --yes @vscode/vsce package --pre-release --target ${{ matrix.vsce-target }} \
             -o "zerosyntax-vscode-${{ matrix.vsce-target }}-${{ steps.version.outputs.version }}-pre.vsix"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: prerelease-vsix-${{ matrix.vsce-target }}
           path: editors/vscode/*.vsix
