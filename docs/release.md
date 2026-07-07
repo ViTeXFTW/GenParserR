@@ -45,8 +45,10 @@ On Windows, use `pwsh scripts/fetch-corpus.ps1`.
 
 Pushes to `dev` run CI. After CI passes on `dev`, `Dev Pre-release` publishes
 Marketplace pre-release builds only when `[workspace.package].version` changed.
-Dependabot-only dependency bumps therefore run CI without publishing a staging
-extension. Use `workflow_dispatch` for a manual pre-release rerun.
+The check compares the final commit against the branch state before the push, so
+batched pushes with a version bump still publish. Dependabot-only dependency
+bumps therefore run CI without publishing a staging extension. Use
+`workflow_dispatch` for a manual pre-release rerun.
 
 ## Live release
 

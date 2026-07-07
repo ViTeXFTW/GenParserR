@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 env:
   BIN_NAME: zerosyntax-lsp
@@ -19,7 +20,7 @@ env:
 
 jobs:
   gate:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     outputs:
       publish: ${{ steps.version.outputs.publish }}
@@ -27,7 +28,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-          fetch-depth: 2
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        if: github.event_name == 'workflow_run'
+        with:
+          name: dev-prerelease-context
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: prerelease-context
       - name: Check version change
         id: version
         run: |
@@ -50,7 +58,12 @@ jobs:
             exit 0
           fi
 
-          previous="$(git show HEAD^:Cargo.toml | read_version)"
+          before="$(cat prerelease-context/before)"
+          if [ "$before" = "0000000000000000000000000000000000000000" ]; then
+            previous=""
+          else
+            previous="$(git show "$before:Cargo.toml" | read_version)"
+          fi
           if [ "$current" = "$previous" ]; then
             echo "publish=false" >> "$GITHUB_OUTPUT"
             echo "Version unchanged ($current); skipping pre-release."
