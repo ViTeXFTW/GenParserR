@@ -33915,8 +33915,33 @@
         {
           "name": "Rider1",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "parseRiderInfo"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "reference",
+                "ref_kind": "object"
+              },
+              {
+                "kind": "enum",
+                "value_set": "model_condition"
+              },
+              {
+                "kind": "enum",
+                "value_set": "weapon_set_conditions"
+              },
+              {
+                "kind": "enum",
+                "value_set": "object_status"
+              },
+              {
+                "kind": "reference",
+                "ref_kind": "command_set"
+              },
+              {
+                "kind": "enum",
+                "value_set": "locomotor_set"
+              }
+            ]
           },
           "parse_fn": "parseRiderInfo",
           "doc": null
@@ -33924,8 +33949,33 @@
         {
           "name": "Rider2",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "parseRiderInfo"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "reference",
+                "ref_kind": "object"
+              },
+              {
+                "kind": "enum",
+                "value_set": "model_condition"
+              },
+              {
+                "kind": "enum",
+                "value_set": "weapon_set_conditions"
+              },
+              {
+                "kind": "enum",
+                "value_set": "object_status"
+              },
+              {
+                "kind": "reference",
+                "ref_kind": "command_set"
+              },
+              {
+                "kind": "enum",
+                "value_set": "locomotor_set"
+              }
+            ]
           },
           "parse_fn": "parseRiderInfo",
           "doc": null
@@ -33933,8 +33983,33 @@
         {
           "name": "Rider3",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "parseRiderInfo"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "reference",
+                "ref_kind": "object"
+              },
+              {
+                "kind": "enum",
+                "value_set": "model_condition"
+              },
+              {
+                "kind": "enum",
+                "value_set": "weapon_set_conditions"
+              },
+              {
+                "kind": "enum",
+                "value_set": "object_status"
+              },
+              {
+                "kind": "reference",
+                "ref_kind": "command_set"
+              },
+              {
+                "kind": "enum",
+                "value_set": "locomotor_set"
+              }
+            ]
           },
           "parse_fn": "parseRiderInfo",
           "doc": null
@@ -33942,8 +34017,33 @@
         {
           "name": "Rider4",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "parseRiderInfo"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "reference",
+                "ref_kind": "object"
+              },
+              {
+                "kind": "enum",
+                "value_set": "model_condition"
+              },
+              {
+                "kind": "enum",
+                "value_set": "weapon_set_conditions"
+              },
+              {
+                "kind": "enum",
+                "value_set": "object_status"
+              },
+              {
+                "kind": "reference",
+                "ref_kind": "command_set"
+              },
+              {
+                "kind": "enum",
+                "value_set": "locomotor_set"
+              }
+            ]
           },
           "parse_fn": "parseRiderInfo",
           "doc": null
@@ -33951,8 +34051,33 @@
         {
           "name": "Rider5",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "parseRiderInfo"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "reference",
+                "ref_kind": "object"
+              },
+              {
+                "kind": "enum",
+                "value_set": "model_condition"
+              },
+              {
+                "kind": "enum",
+                "value_set": "weapon_set_conditions"
+              },
+              {
+                "kind": "enum",
+                "value_set": "object_status"
+              },
+              {
+                "kind": "reference",
+                "ref_kind": "command_set"
+              },
+              {
+                "kind": "enum",
+                "value_set": "locomotor_set"
+              }
+            ]
           },
           "parse_fn": "parseRiderInfo",
           "doc": null
@@ -33960,8 +34085,33 @@
         {
           "name": "Rider6",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "parseRiderInfo"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "reference",
+                "ref_kind": "object"
+              },
+              {
+                "kind": "enum",
+                "value_set": "model_condition"
+              },
+              {
+                "kind": "enum",
+                "value_set": "weapon_set_conditions"
+              },
+              {
+                "kind": "enum",
+                "value_set": "object_status"
+              },
+              {
+                "kind": "reference",
+                "ref_kind": "command_set"
+              },
+              {
+                "kind": "enum",
+                "value_set": "locomotor_set"
+              }
+            ]
           },
           "parse_fn": "parseRiderInfo",
           "doc": null
@@ -33969,8 +34119,33 @@
         {
           "name": "Rider7",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "parseRiderInfo"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "reference",
+                "ref_kind": "object"
+              },
+              {
+                "kind": "enum",
+                "value_set": "model_condition"
+              },
+              {
+                "kind": "enum",
+                "value_set": "weapon_set_conditions"
+              },
+              {
+                "kind": "enum",
+                "value_set": "object_status"
+              },
+              {
+                "kind": "reference",
+                "ref_kind": "command_set"
+              },
+              {
+                "kind": "enum",
+                "value_set": "locomotor_set"
+              }
+            ]
           },
           "parse_fn": "parseRiderInfo",
           "doc": null
@@ -33978,8 +34153,33 @@
         {
           "name": "Rider8",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "parseRiderInfo"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "reference",
+                "ref_kind": "object"
+              },
+              {
+                "kind": "enum",
+                "value_set": "model_condition"
+              },
+              {
+                "kind": "enum",
+                "value_set": "weapon_set_conditions"
+              },
+              {
+                "kind": "enum",
+                "value_set": "object_status"
+              },
+              {
+                "kind": "reference",
+                "ref_kind": "command_set"
+              },
+              {
+                "kind": "enum",
+                "value_set": "locomotor_set"
+              }
+            ]
           },
           "parse_fn": "parseRiderInfo",
           "doc": null
