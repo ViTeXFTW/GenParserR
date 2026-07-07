@@ -43,9 +43,10 @@ On Windows, use `pwsh scripts/fetch-corpus.ps1`.
 
 ## Staging
 
-Pushes to `dev` run CI. After CI passes on `dev`, `Dev Pre-release` builds the
-platform-specific `.vsix` packages and publishes them as Marketplace pre-release
-builds when `VSCE_PAT` is configured.
+Pushes to `dev` run CI. After CI passes on `dev`, `Dev Pre-release` publishes
+Marketplace pre-release builds only when `[workspace.package].version` changed.
+Dependabot-only dependency bumps therefore run CI without publishing a staging
+extension. Use `workflow_dispatch` for a manual pre-release rerun.
 
 ## Live release
 

@@ -1,4 +1,5 @@
-# Publishes Marketplace pre-release builds from the dev branch after CI passes.
+# Publishes Marketplace pre-release builds from the dev branch after CI passes
+# and the workspace version changes.
 
 name: Dev Pre-release
 
@@ -17,8 +18,51 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  gate:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 2
+      - name: Check version change
+        id: version
+        run: |
+          read_version() {
+            awk '
+              /^\[workspace.package\]$/ { in_workspace_package = 1; next }
+              /^\[/ { in_workspace_package = 0 }
+              in_workspace_package && $1 == "version" {
+                gsub(/"/, "", $3)
+                print $3
+                exit
+              }
+            '
+          }
+
+          current="$(read_version < Cargo.toml)"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "Manual pre-release for $current."
+            exit 0
+          fi
+
+          previous="$(git show HEAD^:Cargo.toml | read_version)"
+          if [ "$current" = "$previous" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Version unchanged ($current); skipping pre-release."
+            exit 0
+          fi
+
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+          echo "Version changed $previous -> $current; publishing pre-release."
+
+  build:
+    needs: gate
+    if: needs.gate.outputs.publish == 'true'
     strategy:
       fail-fast: false
       matrix:
