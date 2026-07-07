@@ -6,8 +6,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [dev, prod]
   pull_request:
+    branches: [dev, prod]
   workflow_call:
 
 permissions:
@@ -23,6 +24,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  dev-prerelease-context:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write push context
+        run: |
+          mkdir prerelease-context
+          printf '%s\n' '${{ github.event.before }}' > prerelease-context/before
+          printf '%s\n' '${{ github.sha }}' > prerelease-context/after
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dev-prerelease-context
+          path: prerelease-context/*
+          retention-days: 1
+
   test:
     strategy:
       fail-fast: false
