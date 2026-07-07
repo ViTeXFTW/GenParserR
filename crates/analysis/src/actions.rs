@@ -321,8 +321,7 @@ fn unused_weapon_set_upgrade_fix(
         return;
     }
 
-    let insert_at = find_end_line_start(&object_node, text)
-        .unwrap_or_else(|| u32::from(object_node.text_range().end()));
+    let insert_at = u32::from(module_node.text_range().start());
     let indent = leading_indent(&module_node, text);
     let body_indent = format!("{indent}  ");
     out.push(Fix {
@@ -660,7 +659,7 @@ mod tests {
             &insert.new_text,
         );
         assert!(result.contains(
-            "  WeaponSet\n    Conditions = PLAYER_UPGRADE\n    Weapon = PRIMARY NONE\n  End\n"
+            "  WeaponSet\n    Conditions = PLAYER_UPGRADE\n    Weapon = PRIMARY NONE\n  End\n  Behavior = WeaponSetUpgrade"
         ));
     }
 
