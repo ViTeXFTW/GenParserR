@@ -85,7 +85,7 @@
     "test": "npm run compile && npm run compile:test && node ./out-test/src/test/runTest.js"
   },
   "dependencies": {
-    "vscode-languageclient": "^10.1.0"
+    "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
@@ -94,6 +94,6 @@
     "@vscode/test-electron": "^3.0.0",
     "@vscode/vsce": "^3.9.2",
     "mocha": "^11.7.6",
-    "typescript": "^6.0.3"
+    "typescript": "^5.4.0"
   }
 }
