@@ -36,4 +36,4 @@ dashmap = "6"
 walkdir = "2"
 
 # benches
-criterion = "0.5"
+criterion = "0.8"
