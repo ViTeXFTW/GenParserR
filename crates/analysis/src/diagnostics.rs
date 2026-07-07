@@ -649,34 +649,59 @@ impl<'a> Ctx<'a> {
         const ARMOR_TRIGGERS: [&str; 1] = ["ArmorUpgrade"];
 
         let mut module_names: Vec<String> = Vec::new();
+        let mut upgraded_locomotors: Vec<SyntaxToken> = Vec::new();
         // (set keyword, the PLAYER_UPGRADE condition token) per set sub-block.
         let mut player_upgrade_sets: Vec<(&'static str, SyntaxToken)> = Vec::new();
         let mut is_override_patch = has_direct_field(node, "RemoveModule");
 
-        for child in node.children().filter(|n| n.kind() == SyntaxKind::MODULE) {
-            let module = Module(child.clone());
-            let Some(slot) = module.slot() else { continue };
-            match slot.text() {
-                "AddModule" | "ReplaceModule" => is_override_patch = true,
-                kw @ ("WeaponSet" | "ArmorSet") => {
-                    if let Some(tok) = direct_condition_token(&child, "PLAYER_UPGRADE") {
-                        let kw = if kw == "WeaponSet" {
-                            "WeaponSet"
-                        } else {
-                            "ArmorSet"
-                        };
-                        player_upgrade_sets.push((kw, tok));
+        for child in node.children() {
+            match child.kind() {
+                SyntaxKind::FIELD => {
+                    let field = Field(child);
+                    if field.key().is_some_and(|k| k.text() == "Locomotor") {
+                        if let Some(tok) = field.value_tokens().first() {
+                            if tok.text().eq_ignore_ascii_case("SET_NORMAL_UPGRADED") {
+                                upgraded_locomotors.push(tok.clone());
+                            }
+                        }
                     }
                 }
-                _ => {
-                    if let Some(name) = module.module_name() {
-                        module_names.push(name.text().to_string());
+                SyntaxKind::MODULE => {
+                    let module = Module(child.clone());
+                    let Some(slot) = module.slot() else { continue };
+                    match slot.text() {
+                        "AddModule" | "ReplaceModule" => is_override_patch = true,
+                        kw @ ("WeaponSet" | "ArmorSet") => {
+                            if let Some(tok) = direct_condition_token(&child, "PLAYER_UPGRADE") {
+                                let kw = if kw == "WeaponSet" {
+                                    "WeaponSet"
+                                } else {
+                                    "ArmorSet"
+                                };
+                                player_upgrade_sets.push((kw, tok));
+                            }
+                        }
+                        _ => {
+                            if let Some(name) = module.module_name() {
+                                module_names.push(name.text().to_string());
+                            }
+                        }
                     }
                 }
+                _ => {}
             }
         }
         if is_override_patch {
             return;
+        }
+        if !module_names.iter().any(|m| m == "LocomotorSetUpgrade") {
+            for tok in upgraded_locomotors {
+                self.warning(
+                    &tok,
+                    "unreachable-set",
+                    "this upgraded `Locomotor` requires a `LocomotorSetUpgrade` module on the same object".to_string(),
+                );
+            }
         }
         for (kw, tok) in player_upgrade_sets {
             let triggers: &[&str] = if kw == "WeaponSet" {
@@ -1294,6 +1319,33 @@ mod tests {
         let vet =
             "Object T\n  WeaponSet\n    Conditions = VETERAN\n    Weapon = PRIMARY G\n  End\nEnd\n";
         assert!(!codes(vet).contains(&"unreachable-set"));
+    }
+
+    #[test]
+    fn upgraded_locomotor_without_locomotor_set_upgrade_warns() {
+        let src = "\
+Object T
+  Locomotor = SET_NORMAL TankLocomotor
+  Locomotor = SET_NORMAL_UPGRADED NuclearTankLocomotor
+End
+";
+        let d = diags(src);
+        assert!(d.iter().any(|d| {
+            d.code == "unreachable-set"
+                && d.severity == Severity::Warning
+                && &src[d.span.start as usize..d.span.end as usize] == "SET_NORMAL_UPGRADED"
+        }));
+
+        let alive = "\
+Object T
+  Locomotor = SET_NORMAL TankLocomotor
+  Locomotor = SET_NORMAL_UPGRADED NuclearTankLocomotor
+  Behavior = LocomotorSetUpgrade ModuleTag_01
+    TriggeredBy = Upgrade_X
+  End
+End
+";
+        assert!(!codes(alive).contains(&"unreachable-set"));
     }
 
     #[test]
