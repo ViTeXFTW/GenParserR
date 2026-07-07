@@ -149,7 +149,7 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: editors/vscode/package-lock.json
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: bin-${{ matrix.rust-target }}
           path: editors/vscode/server
@@ -175,12 +175,12 @@ jobs:
     steps:
       # Only dist-* and vsix-* — merging bin-* would collide the
       # identically-named raw binaries from different targets.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: dist-*
           path: dist
           merge-multiple: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: vsix-*
           path: dist
@@ -223,7 +223,7 @@ jobs:
         if: steps.token.outputs.present == 'true'
         working-directory: editors/vscode
         run: npm ci
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: steps.token.outputs.present == 'true'
         with:
           pattern: vsix-*

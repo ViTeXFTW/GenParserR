@@ -29,7 +29,7 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: github.event_name == 'workflow_run'
         with:
           name: dev-prerelease-context
@@ -136,7 +136,7 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: editors/vscode/package-lock.json
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: prerelease-bin-${{ matrix.rust-target }}
           path: editors/vscode/server
@@ -185,7 +185,7 @@ jobs:
         if: steps.token.outputs.present == 'true'
         working-directory: editors/vscode
         run: npm ci
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: steps.token.outputs.present == 'true'
         with:
           pattern: prerelease-vsix-*
