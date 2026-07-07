@@ -109,7 +109,7 @@ jobs:
             | Out-File -Encoding ascii "$staging.zip.sha256"
 
       - name: Upload release archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.target }}
           path: |
@@ -122,7 +122,7 @@ jobs:
       # bin/ staging dir holds exactly the binary — a target-dir glob would
       # also catch .d/.pdb build by-products.
       - name: Upload raw binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bin-${{ matrix.target }}
           path: bin/*
@@ -163,7 +163,7 @@ jobs:
           npm version "${RELEASE_TAG#v}" --no-git-tag-version --allow-same-version
           npx --yes @vscode/vsce package --target ${{ matrix.vsce-target }} \
             -o "zerosyntax-vscode-${{ matrix.vsce-target }}-${RELEASE_TAG#v}.vsix"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: vsix-${{ matrix.vsce-target }}
           path: editors/vscode/*.vsix

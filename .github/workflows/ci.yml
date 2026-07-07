@@ -33,7 +33,7 @@ jobs:
           mkdir prerelease-context
           printf '%s\n' '${{ github.event.before }}' > prerelease-context/before
           printf '%s\n' '${{ github.sha }}' > prerelease-context/after
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dev-prerelease-context
           path: prerelease-context/*
