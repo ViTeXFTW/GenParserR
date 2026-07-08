@@ -14328,7 +14328,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -14336,7 +14336,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -14352,7 +14352,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -14368,7 +14368,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -14384,7 +14384,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -14400,7 +14400,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -14408,7 +14408,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -14416,7 +14416,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -14424,7 +14433,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -14432,7 +14450,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -14440,7 +14467,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -14448,7 +14484,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -14533,7 +14578,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -14541,7 +14586,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -14557,7 +14602,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -14573,7 +14618,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -14589,7 +14634,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -14605,7 +14650,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -14613,7 +14658,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -14621,7 +14666,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -14629,7 +14683,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -14637,7 +14700,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -14645,7 +14717,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -14653,7 +14734,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -14741,7 +14831,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -14749,7 +14839,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -14765,7 +14855,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -14781,7 +14871,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -14797,7 +14887,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -14813,7 +14903,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -14821,7 +14911,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -14829,7 +14919,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -14837,7 +14936,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -14845,7 +14953,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -14853,7 +14970,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -14861,7 +14987,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -40716,7 +40851,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -40724,7 +40859,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -40740,7 +40875,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -40756,7 +40891,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -40772,7 +40907,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -40788,7 +40923,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -40796,7 +40931,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -40804,7 +40939,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -40812,7 +40956,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -40820,7 +40973,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -40828,7 +40990,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -40836,7 +41007,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -40921,7 +41101,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -40929,7 +41109,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -40945,7 +41125,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -40961,7 +41141,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -40977,7 +41157,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -40993,7 +41173,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -41001,7 +41181,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -41009,7 +41189,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -41017,7 +41206,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -41025,7 +41223,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -41033,7 +41240,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -41041,7 +41257,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -41129,7 +41354,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -41137,7 +41362,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -41153,7 +41378,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -41169,7 +41394,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -41185,7 +41410,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -41201,7 +41426,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -41209,7 +41434,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -41217,7 +41442,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -41225,7 +41459,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -41233,7 +41476,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -41241,7 +41493,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -41249,7 +41510,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -41591,7 +41861,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -41599,7 +41869,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -41615,7 +41885,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -41631,7 +41901,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -41647,7 +41917,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -41663,7 +41933,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -41671,7 +41941,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -41679,7 +41949,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -41687,7 +41966,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -41695,7 +41983,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -41703,7 +42000,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -41711,7 +42017,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -41796,7 +42111,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -41804,7 +42119,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -41820,7 +42135,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -41836,7 +42151,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -41852,7 +42167,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -41868,7 +42183,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -41876,7 +42191,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -41884,7 +42199,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -41892,7 +42216,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -41900,7 +42233,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -41908,7 +42250,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -41916,7 +42267,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -42004,7 +42364,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -42012,7 +42372,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -42028,7 +42388,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -42044,7 +42404,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -42060,7 +42420,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -42076,7 +42436,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -42084,7 +42444,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -42092,7 +42452,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -42100,7 +42469,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -42108,7 +42486,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -42116,7 +42503,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -42124,7 +42520,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -42384,7 +42789,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -42392,7 +42797,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -42408,7 +42813,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -42424,7 +42829,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -42440,7 +42845,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -42456,7 +42861,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -42464,7 +42869,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -42472,7 +42877,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -42480,7 +42894,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -42488,7 +42911,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -42496,7 +42928,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -42504,7 +42945,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -42589,7 +43039,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -42597,7 +43047,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -42613,7 +43063,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -42629,7 +43079,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -42645,7 +43095,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -42661,7 +43111,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -42669,7 +43119,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -42677,7 +43127,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -42685,7 +43144,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -42693,7 +43161,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -42701,7 +43178,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -42709,7 +43195,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -42797,7 +43292,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -42805,7 +43300,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -42821,7 +43316,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -42837,7 +43332,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -42853,7 +43348,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -42869,7 +43364,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -42877,7 +43372,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -42885,7 +43380,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -42893,7 +43397,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -42901,7 +43414,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -42909,7 +43431,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -42917,7 +43448,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -43297,7 +43837,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -43305,7 +43845,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -43321,7 +43861,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -43337,7 +43877,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -43353,7 +43893,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -43369,7 +43909,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -43377,7 +43917,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -43385,7 +43925,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -43393,7 +43942,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -43401,7 +43959,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -43409,7 +43976,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -43417,7 +43993,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -43502,7 +44087,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -43510,7 +44095,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -43526,7 +44111,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -43542,7 +44127,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -43558,7 +44143,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -43574,7 +44159,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -43582,7 +44167,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -43590,7 +44175,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -43598,7 +44192,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -43606,7 +44209,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -43614,7 +44226,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -43622,7 +44243,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -43710,7 +44340,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -43718,7 +44348,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -43734,7 +44364,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -43750,7 +44380,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -43766,7 +44396,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -43782,7 +44412,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -43790,7 +44420,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -43798,7 +44428,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -43806,7 +44445,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -43814,7 +44462,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -43822,7 +44479,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -43830,7 +44496,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -44210,7 +44885,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -44218,7 +44893,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -44234,7 +44909,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -44250,7 +44925,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -44266,7 +44941,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -44282,7 +44957,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -44290,7 +44965,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -44298,7 +44973,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -44306,7 +44990,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -44314,7 +45007,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -44322,7 +45024,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -44330,7 +45041,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -44415,7 +45135,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -44423,7 +45143,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -44439,7 +45159,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -44455,7 +45175,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -44471,7 +45191,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -44487,7 +45207,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -44495,7 +45215,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -44503,7 +45223,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -44511,7 +45240,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -44519,7 +45257,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -44527,7 +45274,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -44535,7 +45291,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -44623,7 +45388,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -44631,7 +45396,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -44647,7 +45412,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -44663,7 +45428,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -44679,7 +45444,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -44695,7 +45460,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -44703,7 +45468,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -44711,7 +45476,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -44719,7 +45493,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -44727,7 +45510,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -44735,7 +45527,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -44743,7 +45544,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -45049,7 +45859,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -45057,7 +45867,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -45073,7 +45883,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -45089,7 +45899,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -45105,7 +45915,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -45121,7 +45931,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -45129,7 +45939,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -45137,7 +45947,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -45145,7 +45964,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -45153,7 +45981,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -45161,7 +45998,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -45169,7 +46015,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -45254,7 +46109,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -45262,7 +46117,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -45278,7 +46133,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -45294,7 +46149,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -45310,7 +46165,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -45326,7 +46181,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -45334,7 +46189,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -45342,7 +46197,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -45350,7 +46214,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -45358,7 +46231,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -45366,7 +46248,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -45374,7 +46265,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -45462,7 +46362,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -45470,7 +46370,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -45486,7 +46386,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -45502,7 +46402,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -45518,7 +46418,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -45534,7 +46434,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -45542,7 +46442,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -45550,7 +46450,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -45558,7 +46467,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -45566,7 +46484,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -45574,7 +46501,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -45582,7 +46518,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -45810,7 +46755,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -45818,7 +46763,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -45834,7 +46779,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -45850,7 +46795,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -45866,7 +46811,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -45882,7 +46827,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -45890,7 +46835,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -45898,7 +46843,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -45906,7 +46860,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -45914,7 +46877,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -45922,7 +46894,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -45930,7 +46911,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -46015,7 +47005,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -46023,7 +47013,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -46039,7 +47029,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -46055,7 +47045,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -46071,7 +47061,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -46087,7 +47077,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -46095,7 +47085,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -46103,7 +47093,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -46111,7 +47110,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -46119,7 +47127,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -46127,7 +47144,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -46135,7 +47161,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -46223,7 +47258,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -46231,7 +47266,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -46247,7 +47282,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -46263,7 +47298,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -46279,7 +47314,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -46295,7 +47330,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -46303,7 +47338,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -46311,7 +47346,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -46319,7 +47363,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -46327,7 +47380,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -46335,7 +47397,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -46343,7 +47414,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -46603,7 +47683,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -46611,7 +47691,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -46627,7 +47707,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -46643,7 +47723,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -46659,7 +47739,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -46675,7 +47755,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -46683,7 +47763,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -46691,7 +47771,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -46699,7 +47788,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -46707,7 +47805,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -46715,7 +47822,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -46723,7 +47839,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -46808,7 +47933,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -46816,7 +47941,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -46832,7 +47957,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -46848,7 +47973,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -46864,7 +47989,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -46880,7 +48005,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -46888,7 +48013,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -46896,7 +48021,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -46904,7 +48038,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -46912,7 +48055,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -46920,7 +48072,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -46928,7 +48089,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -47016,7 +48186,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -47024,7 +48194,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -47040,7 +48210,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -47056,7 +48226,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -47072,7 +48242,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -47088,7 +48258,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -47096,7 +48266,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -47104,7 +48274,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -47112,7 +48291,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -47120,7 +48308,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -47128,7 +48325,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -47136,7 +48342,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -47500,7 +48715,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -47508,7 +48723,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -47524,7 +48739,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -47540,7 +48755,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -47556,7 +48771,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -47572,7 +48787,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -47580,7 +48795,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -47588,7 +48803,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -47596,7 +48820,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -47604,7 +48837,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -47612,7 +48854,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -47620,7 +48871,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -47705,7 +48965,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -47713,7 +48973,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -47729,7 +48989,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -47745,7 +49005,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -47761,7 +49021,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -47777,7 +49037,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -47785,7 +49045,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -47793,7 +49053,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -47801,7 +49070,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -47809,7 +49087,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -47817,7 +49104,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -47825,7 +49121,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -47913,7 +49218,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -47921,7 +49226,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -47937,7 +49242,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -47953,7 +49258,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -47969,7 +49274,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -47985,7 +49290,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -47993,7 +49298,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -48001,7 +49306,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -48009,7 +49323,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -48017,7 +49340,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -48025,7 +49357,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -48033,7 +49374,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -48578,7 +49928,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -48586,7 +49936,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -48602,7 +49952,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -48618,7 +49968,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -48634,7 +49984,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -48650,7 +50000,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -48658,7 +50008,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -48666,7 +50016,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -48674,7 +50033,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -48682,7 +50050,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -48690,7 +50067,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -48698,7 +50084,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -48783,7 +50178,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -48791,7 +50186,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -48807,7 +50202,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -48823,7 +50218,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -48839,7 +50234,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -48855,7 +50250,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -48863,7 +50258,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -48871,7 +50266,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -48879,7 +50283,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -48887,7 +50300,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -48895,7 +50317,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -48903,7 +50334,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -48991,7 +50431,7 @@
             {
               "name": "Model",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model"
               },
               "parse_fn": "parseAsciiStringLC",
               "doc": null
@@ -48999,7 +50439,7 @@
             {
               "name": "Turret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -49015,7 +50455,7 @@
             {
               "name": "TurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -49031,7 +50471,7 @@
             {
               "name": "AltTurret",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -49047,7 +50487,7 @@
             {
               "name": "AltTurretPitch",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseBoneNameKey",
               "doc": null
@@ -49063,7 +50503,7 @@
             {
               "name": "ShowSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -49071,7 +50511,7 @@
             {
               "name": "HideSubObject",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
               "parse_fn": "parseShowHideSubObject",
               "doc": null
@@ -49079,7 +50519,16 @@
             {
               "name": "WeaponFireFXBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -49087,7 +50536,16 @@
             {
               "name": "WeaponRecoilBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -49095,7 +50553,16 @@
             {
               "name": "WeaponMuzzleFlash",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -49103,7 +50570,16 @@
             {
               "name": "WeaponLaunchBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null
@@ -49111,7 +50587,16 @@
             {
               "name": "WeaponHideShowBone",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "w3d_model_member"
+                  }
+                ]
               },
               "parse_fn": "parseWeaponBoneName",
               "doc": null

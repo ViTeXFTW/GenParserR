@@ -20,7 +20,10 @@ use zerosyntax_schema::{RefKind, ValueType};
 use zerosyntax_syntax::ast::{Block, Field, Module};
 use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode, SyntaxToken};
 
-use crate::model::{module_fits_slot, scope_schema, ScopeSchema};
+use crate::model::{
+    is_model_asset_type, is_model_member_type, model_member_matches, models_in_scope,
+    module_fits_slot, scope_schema, ScopeSchema,
+};
 use crate::{Analyzer, Span, WorkspaceIndex};
 
 /// Severity of a diagnostic, mapped to LSP severities by the server.
@@ -89,6 +92,8 @@ pub const KNOWN_CODES: &[&str] = &[
     "bad-enum",
     "bad-flag",
     "unresolved-reference",
+    "unknown-model",
+    "unknown-model-member",
     "unknown-suppression",
     "module-wrong-slot",
     "duplicate-module-tag",
@@ -703,7 +708,7 @@ impl<'a> Ctx<'a> {
     fn walk(&mut self, node: &SyntaxNode, scope: &ScopeSchema) {
         for child in node.children() {
             match child.kind() {
-                SyntaxKind::FIELD => self.field(&child, scope),
+                SyntaxKind::FIELD => self.field(&child, scope, node),
                 SyntaxKind::MODULE => self.module(&child, scope),
                 SyntaxKind::BLOCK => {
                     // Blocks nested in blocks are unusual but handled for safety.
@@ -715,13 +720,14 @@ impl<'a> Ctx<'a> {
         }
     }
 
-    fn field(&mut self, node: &SyntaxNode, scope: &ScopeSchema) {
+    fn field(&mut self, node: &SyntaxNode, scope: &ScopeSchema, scope_node: &SyntaxNode) {
         let field = Field(node.clone());
         let Some(key) = field.key() else { return };
         let name = key.text();
 
         if let Some(schema_field) = scope.field(name) {
             self.validate_value(&field, &schema_field.value_type);
+            self.validate_model_asset(&field, schema_field, scope_node);
         } else if scope.has_field_schema()
             && !scope.module_slots().iter().any(|s| s.keyword == name)
         {
@@ -729,6 +735,81 @@ impl<'a> Ctx<'a> {
                 &key,
                 "unknown-field",
                 format!("unknown field `{name}` in {}", scope.label()),
+            );
+        }
+    }
+
+    fn validate_model_asset(
+        &mut self,
+        field: &Field,
+        schema_field: &zerosyntax_schema::Field,
+        scope_node: &SyntaxNode,
+    ) {
+        let Some(index) = self.index else { return };
+        if !index.has_model_assets() {
+            return;
+        }
+        let tokens = field.value_tokens();
+        match &schema_field.value_type {
+            ValueType::TokenList { tokens: specs } => {
+                for (spec, tok) in specs.iter().zip(tokens.iter()) {
+                    self.validate_model_asset_token(spec, tok, scope_node);
+                }
+            }
+            ty => {
+                if let Some(tok) = tokens.first() {
+                    self.validate_model_asset_token(ty, tok, scope_node);
+                }
+            }
+        }
+    }
+
+    fn validate_model_asset_token(
+        &mut self,
+        ty: &ValueType,
+        tok: &SyntaxToken,
+        scope_node: &SyntaxNode,
+    ) {
+        let Some(index) = self.index else { return };
+        let value = unquote(tok.text());
+        if value.is_empty() || value.eq_ignore_ascii_case("None") {
+            return;
+        }
+        if is_model_asset_type(ty) {
+            if !index.is_model_asset(value) {
+                self.warning(
+                    tok,
+                    "unknown-model",
+                    format!("`{value}` is not a known W3D model asset"),
+                );
+            }
+            return;
+        }
+        if !is_model_member_type(ty) {
+            return;
+        }
+        let models = models_in_scope(self.analyzer, scope_node);
+        if models.is_empty() {
+            return;
+        }
+        let mut checked_any_model = false;
+        for model in models {
+            if !index.is_model_asset(&model) {
+                continue;
+            }
+            checked_any_model = true;
+            if index
+                .model_members(&model)
+                .any(|member| model_member_matches(member, value))
+            {
+                return;
+            }
+        }
+        if checked_any_model {
+            self.warning(
+                tok,
+                "unknown-model-member",
+                format!("`{value}` is not a known W3D model bone or subobject"),
             );
         }
     }
@@ -995,6 +1076,8 @@ impl<'a> Ctx<'a> {
             ValueType::AsciiString
             | ValueType::QuotedString
             | ValueType::AsciiStringList
+            | ValueType::W3dModel
+            | ValueType::W3dModelMember
             | ValueType::Color
             | ValueType::Coord2D
             | ValueType::Coord3D
@@ -1586,5 +1669,64 @@ End
             crate::index::definitions_in(&a, &a.parse("Weapon AK47\nEnd\n"), "a.ini"),
         );
         assert!(index.is_defined(RefKind::Weapon, "AK47"));
+    }
+
+    #[test]
+    fn model_assets_validate_models_and_members_when_indexed() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        index.set_file_models(
+            "models/Good.w3d",
+            vec![crate::index::ModelAsset {
+                name: "Good".into(),
+                members: vec!["Tire01".into(), "Cargo01".into(), "Muzzle01".into()],
+            }],
+        );
+        let src = "\
+Object Tank
+  Draw = W3DTruckDraw ModuleTag_01
+    DefaultConditionState
+      Model = MissingModel
+      HideSubObject = MissingBone
+      WeaponFireFXBone = PRIMARY Muzzle
+      WeaponLaunchBone = BAD_SLOT Muzzle
+      WeaponRecoilBone = PRIMARY MissingMuzzle
+    End
+  End
+End
+";
+        let parse = a.parse(src);
+        let diags = diagnose(&a, &parse, Some(&index), Some("test.ini"));
+        assert!(diags.iter().any(|d| d.code == "unknown-model"), "{diags:?}");
+        assert!(
+            !diags.iter().any(|d| d.code == "unknown-model-member"),
+            "unknown model should not cascade into member warnings: {diags:?}"
+        );
+
+        let src = src.replace("MissingModel", "Good");
+        let parse = a.parse(&src);
+        let diags = diagnose(&a, &parse, Some(&index), Some("test.ini"));
+        assert!(
+            diags.iter().any(|d| d.code == "unknown-model-member"),
+            "{diags:?}"
+        );
+        assert!(
+            diags.iter().any(|d| {
+                d.code == "bad-enum"
+                    && &src[d.span.start as usize..d.span.end as usize] == "BAD_SLOT"
+            }),
+            "{diags:?}"
+        );
+        assert!(
+            diags.iter().any(|d| {
+                d.code == "unknown-model-member"
+                    && &src[d.span.start as usize..d.span.end as usize] == "MissingMuzzle"
+            }),
+            "{diags:?}"
+        );
+        assert!(!diags.iter().any(|d| {
+            d.code == "unknown-model-member"
+                && &src[d.span.start as usize..d.span.end as usize] == "Muzzle"
+        }));
     }
 }

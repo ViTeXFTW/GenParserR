@@ -61,7 +61,7 @@
           "items": {
             "type": "string"
           },
-          "markdownDescription": "Directories or `.big` archives containing base game/mod INI files that should be treated as already loaded before `map.ini`/`solo.ini`. Changing this restarts the language server."
+          "markdownDescription": "Directories or `.big` archives containing base game/mod INI files and W3D assets. INI definitions are treated as already loaded before `map.ini`/`solo.ini`; W3D assets power model and bone completions/diagnostics. Changing this restarts the language server."
         },
         "zerosyntax.trace.server": {
           "type": "string",

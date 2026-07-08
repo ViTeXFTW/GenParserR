@@ -18,7 +18,8 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{jsonrpc::Result, Client, LanguageServer};
 use zerosyntax_analysis::diagnostics::DiagnosticsCache;
 use zerosyntax_analysis::index::{
-    definitions_in, module_tags_in, references_in, Definition, ReferenceSite, WorkspaceIndex,
+    definitions_in, module_tags_in, references_in, Definition, ModelAsset, ReferenceSite,
+    WorkspaceIndex,
 };
 use zerosyntax_analysis::nav::{definition_at, hover_at, reference_at, HoverInfo};
 use zerosyntax_analysis::{actions, completion, diagnostics, format, outline, semantic, Analyzer};
@@ -83,6 +84,7 @@ type ScanEntry = (
     Vec<Definition>,
     Vec<ReferenceSite>,
     Vec<(String, String)>,
+    Vec<ModelAsset>,
     Option<Arc<str>>,
 );
 
@@ -210,11 +212,16 @@ fn big_entries(path: &Path) -> std::io::Result<Vec<BigEntry>> {
     Ok(entries)
 }
 
-fn read_big_entry(path: &Path, entry: &BigEntry) -> Option<String> {
+fn read_big_entry_bytes(path: &Path, entry: &BigEntry) -> Option<Vec<u8>> {
     let mut file = std::fs::File::open(path).ok()?;
     file.seek(SeekFrom::Start(entry.offset)).ok()?;
     let mut bytes = vec![0; entry.size];
     file.read_exact(&mut bytes).ok()?;
+    Some(bytes)
+}
+
+fn read_big_entry(path: &Path, entry: &BigEntry) -> Option<String> {
+    let bytes = read_big_entry_bytes(path, entry)?;
     Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
@@ -225,29 +232,155 @@ fn big_uri(path: &Path, entry: &str) -> String {
     uri.to_string()
 }
 
+fn file_stem_str(path: &str) -> String {
+    let file_name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    file_name
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(file_name)
+        .to_string()
+}
+
+fn parse_w3d_models(bytes: &[u8], fallback_name: &str) -> Vec<ModelAsset> {
+    let mut names = Vec::new();
+    let mut members = Vec::new();
+    if !fallback_name.is_empty() {
+        names.push(fallback_name.to_string());
+    }
+    walk_w3d_chunks(bytes, 0, bytes.len(), &mut |kind, payload| match kind {
+        0x0000_001F => {
+            if payload.len() >= 40 {
+                push_name(&mut members, read_fixed_name(&payload[8..24]));
+                push_name(&mut names, read_fixed_name(&payload[24..40]));
+            }
+        }
+        0x0000_0101 => {
+            if payload.len() >= 20 {
+                push_name(&mut names, read_fixed_name(&payload[4..20]));
+            }
+        }
+        0x0000_0102 => {
+            for pivot in payload.chunks_exact(60) {
+                push_name(&mut members, read_fixed_name(&pivot[..16]));
+            }
+        }
+        0x0000_0701 => {
+            if payload.len() >= 40 {
+                push_name(&mut names, read_fixed_name(&payload[8..24]));
+                push_name(&mut names, read_fixed_name(&payload[24..40]));
+            }
+        }
+        0x0000_0704 => {
+            if payload.len() >= 36 {
+                push_name(&mut members, read_fixed_name(&payload[4..36]));
+            }
+        }
+        0x0000_0740 => {
+            if payload.len() >= 40 {
+                push_name(&mut members, read_fixed_name(&payload[8..40]));
+            }
+        }
+        0x0000_0750 => {
+            if payload.len() >= 48 {
+                push_name(&mut members, read_fixed_name(&payload[16..48]));
+            }
+        }
+        _ => {}
+    });
+    dedup_case_insensitive(&mut names);
+    dedup_case_insensitive(&mut members);
+    names
+        .into_iter()
+        .filter(|name| !name.is_empty())
+        .map(|name| ModelAsset {
+            name,
+            members: members.clone(),
+        })
+        .collect()
+}
+
+fn walk_w3d_chunks(bytes: &[u8], mut pos: usize, end: usize, f: &mut impl FnMut(u32, &[u8])) {
+    while pos + 8 <= end && pos + 8 <= bytes.len() {
+        let kind = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap());
+        let size_raw = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap());
+        let has_children = (size_raw & 0x8000_0000) != 0 || is_w3d_container(kind);
+        let size = (size_raw & 0x7fff_ffff) as usize;
+        let payload_start = pos + 8;
+        let Some(payload_end) = payload_start.checked_add(size) else {
+            break;
+        };
+        if payload_end > end || payload_end > bytes.len() {
+            break;
+        }
+        let payload = &bytes[payload_start..payload_end];
+        f(kind, payload);
+        if has_children {
+            walk_w3d_chunks(bytes, payload_start, payload_end, f);
+        }
+        pos = payload_end;
+    }
+}
+
+fn is_w3d_container(kind: u32) -> bool {
+    matches!(
+        kind,
+        0x0000_0000 | 0x0000_0100 | 0x0000_0700 | 0x0000_0702 | 0x0000_0705
+    )
+}
+
+fn read_fixed_name(bytes: &[u8]) -> &str {
+    let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
+    std::str::from_utf8(&bytes[..end]).unwrap_or("").trim()
+}
+
+fn push_name(out: &mut Vec<String>, name: &str) {
+    if name.is_empty() {
+        return;
+    }
+    out.push(name.to_string());
+    if let Some((_, short)) = name.rsplit_once('.') {
+        if !short.is_empty() {
+            out.push(short.to_string());
+        }
+    }
+}
+
+fn dedup_case_insensitive(values: &mut Vec<String>) {
+    let mut seen = std::collections::HashSet::new();
+    values.retain(|value| seen.insert(value.to_ascii_lowercase()));
+}
+
 fn scan_big(analyzer: &Analyzer, path: &Path) -> Vec<ScanEntry> {
     let mut out = Vec::new();
     let Ok(entries) = big_entries(path) else {
         return out;
     };
     for entry in entries {
-        if !entry.name.ends_with(".ini") && !entry.name.ends_with(".INI") {
-            continue;
-        }
-        let Some(text) = read_big_entry(path, &entry) else {
-            continue;
-        };
         let file = big_uri(path, &entry.name);
-        let parse = analyzer.parse(&text);
-        let defs = definitions_in(analyzer, &parse, &file);
-        let refs = references_in(analyzer, &parse);
-        let tags = module_tags_in(analyzer, &parse);
-        out.push((file, defs, refs, tags, Some(Arc::from(text))));
+        if entry.name.ends_with(".ini") || entry.name.ends_with(".INI") {
+            let Some(text) = read_big_entry(path, &entry) else {
+                continue;
+            };
+            let parse = analyzer.parse(&text);
+            let defs = definitions_in(analyzer, &parse, &file);
+            let refs = references_in(analyzer, &parse);
+            let tags = module_tags_in(analyzer, &parse);
+            out.push((file, defs, refs, tags, Vec::new(), Some(Arc::from(text))));
+        } else if entry.name.ends_with(".w3d") || entry.name.ends_with(".W3D") {
+            let Some(bytes) = read_big_entry_bytes(path, &entry) else {
+                continue;
+            };
+            let stem = file_stem_str(&entry.name);
+            let models = parse_w3d_models(&bytes, &stem);
+            if !models.is_empty() {
+                out.push((file, Vec::new(), Vec::new(), Vec::new(), models, None));
+            }
+        }
     }
     out
 }
 
-/// Walk `roots` and index every `.ini` file (definitions + reference sites + module tags).
+/// Walk `roots` and index `.ini` files plus `.w3d` model assets.
 /// CPU/IO heavy — runs via `spawn_blocking` from [`Backend::scan_workspace`].
 fn scan_roots(analyzer: &Analyzer, roots: &[PathBuf]) -> Vec<ScanEntry> {
     let mut out = Vec::new();
@@ -265,34 +398,44 @@ fn scan_roots(analyzer: &Analyzer, roots: &[PathBuf]) -> Vec<ScanEntry> {
             .filter_map(|e| e.ok())
         {
             let path = entry.path();
-            // Real game data mixes extension casing (`*.ini` / `*.INI`,
-            // e.g. the MappedImages files), so compare case-insensitively.
-            if !path
-                .extension()
-                .and_then(|e| e.to_str())
-                .is_some_and(|e| e.eq_ignore_ascii_case("ini") || e.eq_ignore_ascii_case("big"))
-            {
-                continue;
-            }
-            if path
-                .extension()
-                .and_then(|e| e.to_str())
-                .is_some_and(|e| e.eq_ignore_ascii_case("big"))
-            {
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if ext.eq_ignore_ascii_case("big") {
                 out.extend(scan_big(analyzer, path));
-                continue;
+            } else if ext.eq_ignore_ascii_case("ini") {
+                let Some(text) = read_lossy(path) else {
+                    continue;
+                };
+                let Ok(uri) = Url::from_file_path(path) else {
+                    continue;
+                };
+                let parse = analyzer.parse(&text);
+                let defs = definitions_in(analyzer, &parse, uri.as_str());
+                let refs = references_in(analyzer, &parse);
+                let tags = module_tags_in(analyzer, &parse);
+                out.push((uri.to_string(), defs, refs, tags, Vec::new(), None));
+            } else if ext.eq_ignore_ascii_case("w3d") {
+                let Ok(bytes) = std::fs::read(path) else {
+                    continue;
+                };
+                let Ok(uri) = Url::from_file_path(path) else {
+                    continue;
+                };
+                let stem = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or_default();
+                let models = parse_w3d_models(&bytes, stem);
+                if !models.is_empty() {
+                    out.push((
+                        uri.to_string(),
+                        Vec::new(),
+                        Vec::new(),
+                        Vec::new(),
+                        models,
+                        None,
+                    ));
+                }
             }
-            let Some(text) = read_lossy(path) else {
-                continue;
-            };
-            let Ok(uri) = Url::from_file_path(path) else {
-                continue;
-            };
-            let parse = analyzer.parse(&text);
-            let defs = definitions_in(analyzer, &parse, uri.as_str());
-            let refs = references_in(analyzer, &parse);
-            let tags = module_tags_in(analyzer, &parse);
-            out.push((uri.to_string(), defs, refs, tags, None));
         }
     }
     out
@@ -445,8 +588,12 @@ impl Backend {
         })
         .await
         .unwrap_or_default();
+        let base_ini_count = base_scanned
+            .iter()
+            .filter(|(_, _, _, _, models, _)| models.is_empty())
+            .count();
         self.base_indexed_count
-            .store(base_scanned.len(), Ordering::Relaxed);
+            .store(base_ini_count, Ordering::Relaxed);
         self.scan_finished.store(true, Ordering::Relaxed);
         // Don't overwrite index entries for already-open documents with stale
         // disk content; `initialized` calls `refresh` for each open doc right
@@ -459,7 +606,7 @@ impl Backend {
         let Ok(mut idx) = self.index.write() else {
             return;
         };
-        for (uri, defs, refs, tags, text) in base_scanned.into_iter().chain(scanned) {
+        for (uri, defs, refs, tags, models, text) in base_scanned.into_iter().chain(scanned) {
             if let Some(text) = text {
                 self.virtual_files.insert(uri.clone(), text);
             }
@@ -467,6 +614,7 @@ impl Backend {
                 idx.set_file(&uri, defs);
                 idx.set_file_refs(&uri, refs);
                 idx.set_file_tags(&uri, tags);
+                idx.set_file_models(&uri, models);
             }
         }
     }
@@ -1395,9 +1543,50 @@ mod tests {
         assert!(Url::parse(&scanned[0].0).is_ok());
         assert!(scanned[0].1.iter().any(|d| d.name == "BigArchiveObject"));
         assert_eq!(
-            scanned[0].4.as_deref(),
+            scanned[0].5.as_deref(),
             Some("Object BigArchiveObject\nEnd\n")
         );
+    }
+
+    #[test]
+    fn parses_w3d_model_names_and_members() {
+        fn fixed<const N: usize>(name: &str) -> [u8; N] {
+            let mut out = [0; N];
+            let bytes = name.as_bytes();
+            out[..bytes.len().min(N)].copy_from_slice(&bytes[..bytes.len().min(N)]);
+            out
+        }
+        fn chunk(kind: u32, payload: Vec<u8>) -> Vec<u8> {
+            let mut out = Vec::new();
+            out.extend_from_slice(&kind.to_le_bytes());
+            out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+            out.extend_from_slice(&payload);
+            out
+        }
+
+        let mut hlod = Vec::new();
+        hlod.extend_from_slice(&1u32.to_le_bytes());
+        hlod.extend_from_slice(&1u32.to_le_bytes());
+        hlod.extend_from_slice(&fixed::<16>("Good"));
+        hlod.extend_from_slice(&fixed::<16>("Good"));
+
+        let mut pivot = Vec::new();
+        pivot.extend_from_slice(&fixed::<16>("Tire01"));
+        pivot.resize(60, 0);
+
+        let mut sub = Vec::new();
+        sub.extend_from_slice(&0u32.to_le_bytes());
+        sub.extend_from_slice(&fixed::<32>("Good.Cargo01"));
+
+        let mut bytes = Vec::new();
+        bytes.extend(chunk(0x0000_0701, hlod));
+        bytes.extend(chunk(0x0000_0102, pivot));
+        bytes.extend(chunk(0x0000_0704, sub));
+
+        let models = parse_w3d_models(&bytes, "Fallback");
+        let good = models.iter().find(|m| m.name == "Good").unwrap();
+        assert!(good.members.iter().any(|m| m == "Tire01"), "{good:?}");
+        assert!(good.members.iter().any(|m| m == "Cargo01"), "{good:?}");
     }
 
     #[test]
