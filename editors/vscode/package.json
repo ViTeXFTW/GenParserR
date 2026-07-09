@@ -90,10 +90,10 @@
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "^20.0.0",
-    "@types/vscode": "^1.125.0",
+    "@types/vscode": "^1.84.0",
     "@vscode/test-electron": "^3.0.0",
     "@vscode/vsce": "^3.9.2",
-    "mocha": "^11.7.6",
+    "mocha": "^11.3.0",
     "typescript": "^6.0.3"
   }
 }
