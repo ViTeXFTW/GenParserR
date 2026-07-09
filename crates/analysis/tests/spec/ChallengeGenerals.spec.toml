@@ -1,0 +1,30 @@
+no_errors = true
+
+[[diag]]
+severity = "warning"
+code = "unknown-field"
+on = "StartsEnabled"
+absent = true
+
+[[diag]]
+severity = "warning"
+code = "unknown-field"
+on = "BioPortraitSmall"
+absent = true
+
+[[diag]]
+severity = "warning"
+code = "unknown-field"
+on = "PlayerTemplate"
+absent = true
+
+[[diag]]
+severity = "warning"
+code = "unknown-field"
+on = "TauntSound1"
+absent = true
+
+[[complete]]
+at = "$1"
+includes = ["StartsEnabled", "BioNameString", "BioPortraitSmall", "PlayerTemplate", "TauntSound1", "NameSound"]
+excludes = ["GeneralPersona1"]

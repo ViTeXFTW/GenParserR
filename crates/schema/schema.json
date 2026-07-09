@@ -1402,40 +1402,2404 @@
       "fields": [],
       "sub_blocks": [
         {
-          "keyword": "GeneralPersona0"
+          "keyword": "GeneralPersona0",
+          "fields": [
+            {
+              "name": "StartsEnabled",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "BioNameString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioDOBString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBirthplaceString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioStrategyString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioRankString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBranchString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioClassNumberString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioPortraitSmall",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "BioPortraitLarge",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "Campaign",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PlayerTemplate",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "player_template"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieLeftName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieRightName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "DefeatedImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "VictoriousImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "DefeatedString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "VictoriousString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "SelectionSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound1",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound2",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound3",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "WinSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "LossSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PreviewSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "NameSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            }
+          ]
         },
         {
-          "keyword": "GeneralPersona1"
+          "keyword": "GeneralPersona1",
+          "fields": [
+            {
+              "name": "StartsEnabled",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "BioNameString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioDOBString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBirthplaceString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioStrategyString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioRankString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBranchString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioClassNumberString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioPortraitSmall",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "BioPortraitLarge",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "Campaign",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PlayerTemplate",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "player_template"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieLeftName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieRightName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "DefeatedImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "VictoriousImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "DefeatedString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "VictoriousString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "SelectionSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound1",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound2",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound3",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "WinSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "LossSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PreviewSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "NameSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            }
+          ]
         },
         {
-          "keyword": "GeneralPersona2"
+          "keyword": "GeneralPersona2",
+          "fields": [
+            {
+              "name": "StartsEnabled",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "BioNameString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioDOBString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBirthplaceString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioStrategyString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioRankString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBranchString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioClassNumberString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioPortraitSmall",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "BioPortraitLarge",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "Campaign",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PlayerTemplate",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "player_template"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieLeftName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieRightName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "DefeatedImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "VictoriousImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "DefeatedString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "VictoriousString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "SelectionSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound1",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound2",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound3",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "WinSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "LossSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PreviewSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "NameSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            }
+          ]
         },
         {
-          "keyword": "GeneralPersona3"
+          "keyword": "GeneralPersona3",
+          "fields": [
+            {
+              "name": "StartsEnabled",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "BioNameString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioDOBString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBirthplaceString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioStrategyString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioRankString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBranchString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioClassNumberString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioPortraitSmall",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "BioPortraitLarge",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "Campaign",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PlayerTemplate",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "player_template"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieLeftName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieRightName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "DefeatedImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "VictoriousImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "DefeatedString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "VictoriousString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "SelectionSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound1",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound2",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound3",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "WinSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "LossSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PreviewSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "NameSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            }
+          ]
         },
         {
-          "keyword": "GeneralPersona4"
+          "keyword": "GeneralPersona4",
+          "fields": [
+            {
+              "name": "StartsEnabled",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "BioNameString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioDOBString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBirthplaceString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioStrategyString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioRankString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBranchString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioClassNumberString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioPortraitSmall",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "BioPortraitLarge",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "Campaign",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PlayerTemplate",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "player_template"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieLeftName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieRightName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "DefeatedImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "VictoriousImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "DefeatedString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "VictoriousString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "SelectionSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound1",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound2",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound3",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "WinSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "LossSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PreviewSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "NameSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            }
+          ]
         },
         {
-          "keyword": "GeneralPersona5"
+          "keyword": "GeneralPersona5",
+          "fields": [
+            {
+              "name": "StartsEnabled",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "BioNameString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioDOBString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBirthplaceString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioStrategyString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioRankString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBranchString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioClassNumberString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioPortraitSmall",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "BioPortraitLarge",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "Campaign",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PlayerTemplate",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "player_template"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieLeftName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieRightName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "DefeatedImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "VictoriousImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "DefeatedString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "VictoriousString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "SelectionSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound1",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound2",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound3",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "WinSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "LossSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PreviewSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "NameSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            }
+          ]
         },
         {
-          "keyword": "GeneralPersona6"
+          "keyword": "GeneralPersona6",
+          "fields": [
+            {
+              "name": "StartsEnabled",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "BioNameString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioDOBString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBirthplaceString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioStrategyString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioRankString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBranchString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioClassNumberString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioPortraitSmall",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "BioPortraitLarge",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "Campaign",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PlayerTemplate",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "player_template"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieLeftName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieRightName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "DefeatedImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "VictoriousImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "DefeatedString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "VictoriousString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "SelectionSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound1",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound2",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound3",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "WinSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "LossSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PreviewSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "NameSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            }
+          ]
         },
         {
-          "keyword": "GeneralPersona7"
+          "keyword": "GeneralPersona7",
+          "fields": [
+            {
+              "name": "StartsEnabled",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "BioNameString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioDOBString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBirthplaceString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioStrategyString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioRankString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBranchString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioClassNumberString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioPortraitSmall",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "BioPortraitLarge",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "Campaign",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PlayerTemplate",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "player_template"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieLeftName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieRightName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "DefeatedImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "VictoriousImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "DefeatedString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "VictoriousString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "SelectionSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound1",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound2",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound3",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "WinSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "LossSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PreviewSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "NameSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            }
+          ]
         },
         {
-          "keyword": "GeneralPersona8"
+          "keyword": "GeneralPersona8",
+          "fields": [
+            {
+              "name": "StartsEnabled",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "BioNameString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioDOBString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBirthplaceString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioStrategyString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioRankString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBranchString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioClassNumberString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioPortraitSmall",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "BioPortraitLarge",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "Campaign",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PlayerTemplate",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "player_template"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieLeftName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieRightName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "DefeatedImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "VictoriousImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "DefeatedString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "VictoriousString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "SelectionSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound1",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound2",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound3",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "WinSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "LossSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PreviewSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "NameSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            }
+          ]
         },
         {
-          "keyword": "GeneralPersona9"
+          "keyword": "GeneralPersona9",
+          "fields": [
+            {
+              "name": "StartsEnabled",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "BioNameString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioDOBString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBirthplaceString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioStrategyString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioRankString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBranchString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioClassNumberString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioPortraitSmall",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "BioPortraitLarge",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "Campaign",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PlayerTemplate",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "player_template"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieLeftName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieRightName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "DefeatedImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "VictoriousImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "DefeatedString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "VictoriousString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "SelectionSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound1",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound2",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound3",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "WinSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "LossSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PreviewSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "NameSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            }
+          ]
         },
         {
-          "keyword": "GeneralPersona10"
+          "keyword": "GeneralPersona10",
+          "fields": [
+            {
+              "name": "StartsEnabled",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "BioNameString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioDOBString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBirthplaceString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioStrategyString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioRankString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBranchString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioClassNumberString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioPortraitSmall",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "BioPortraitLarge",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "Campaign",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PlayerTemplate",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "player_template"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieLeftName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieRightName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "DefeatedImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "VictoriousImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "DefeatedString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "VictoriousString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "SelectionSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound1",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound2",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound3",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "WinSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "LossSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PreviewSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "NameSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            }
+          ]
         },
         {
-          "keyword": "GeneralPersona11"
+          "keyword": "GeneralPersona11",
+          "fields": [
+            {
+              "name": "StartsEnabled",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool"
+            },
+            {
+              "name": "BioNameString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioDOBString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBirthplaceString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioStrategyString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioRankString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioBranchString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioClassNumberString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "BioPortraitSmall",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "BioPortraitLarge",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "Campaign",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PlayerTemplate",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "player_template"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieLeftName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PortraitMovieRightName",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "DefeatedImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "VictoriousImage",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "mapped_image"
+              },
+              "parse_fn": "INI::parseMappedImage"
+            },
+            {
+              "name": "DefeatedString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "VictoriousString",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "SelectionSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound1",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound2",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "TauntSound3",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "WinSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "LossSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "PreviewSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            },
+            {
+              "name": "NameSound",
+              "value_type": {
+                "kind": "reference",
+                "ref_kind": "audio_event"
+              },
+              "parse_fn": "INI::parseAsciiString"
+            }
+          ]
         }
       ]
     },
@@ -1449,8 +3813,8 @@
         {
           "name": "Command",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "CommandButton::parseCommand"
+            "kind": "enum",
+            "value_set": "command_button_command"
           },
           "parse_fn": "CommandButton::parseCommand",
           "doc": null
@@ -1458,8 +3822,8 @@
         {
           "name": "Options",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
+            "kind": "bit_flags",
+            "value_set": "command_button_options"
           },
           "parse_fn": "INI::parseBitString32",
           "doc": null
@@ -1577,8 +3941,8 @@
         {
           "name": "ButtonBorderType",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseLookupList"
+            "kind": "enum",
+            "value_set": "command_button_border_type"
           },
           "parse_fn": "INI::parseLookupList",
           "doc": null
@@ -7462,11 +9826,11 @@
         {
           "name": "Surfaces",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
+            "kind": "bit_flags",
+            "value_set": "locomotor_surface"
           },
           "parse_fn": "INI::parseBitString32",
-          "doc": "Surface-type flags (set not yet enumerated)."
+          "doc": "Surface-type flags."
         },
         {
           "name": "Speed",
@@ -13080,7 +15444,8 @@
         {
           "name": "ButtonImage",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "reference",
+            "ref_kind": "mapped_image"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -37083,7 +39448,8 @@
         {
           "name": "StealthForbiddenConditions",
           "value_type": {
-            "kind": "unknown",
+            "kind": "enum",
+            "value_set": "stealth_level",
             "parse_fn": "INI::parseBitString32"
           },
           "parse_fn": "INI::parseBitString32",
@@ -52044,6 +54410,321 @@
   ],
   "value_sets": [
     {
+      "id": "stealth_level",
+      "members": [
+        {
+          "name": "ATTACKING",
+          "value": 1
+        },
+        {
+          "name": "MOVING",
+          "value": 2
+        },
+        {
+          "name": "USING_ABILITY",
+          "value": 3
+        },
+        {
+          "name": "FIRING_PRIMARY",
+          "value": 4
+        },
+        {
+          "name": "FIRING_SECONDARY",
+          "value": 5
+        },
+        {
+          "name": "FIRING_TERTIARY",
+          "value": 7
+        },
+        {
+          "name": "NO_BLACK_MARKET",
+          "value": 8
+        },
+        {
+          "name": "TAKING_DAMAGE",
+          "value": 9
+        },
+        {
+          "name": "RIDERS_ATTACKING",
+          "value": 10
+        }
+      ]
+    },
+    {
+      "id": "command_button_command",
+      "members": [
+        {
+          "name": "NONE",
+          "value": 0
+        },
+        {
+          "name": "DOZER_CONSTRUCT",
+          "value": 1
+        },
+        {
+          "name": "DOZER_CONSTRUCT_CANCEL",
+          "value": 2
+        },
+        {
+          "name": "UNIT_BUILD",
+          "value": 3
+        },
+        {
+          "name": "CANCEL_UNIT_BUILD",
+          "value": 4
+        },
+        {
+          "name": "PLAYER_UPGRADE",
+          "value": 5
+        },
+        {
+          "name": "OBJECT_UPGRADE",
+          "value": 6
+        },
+        {
+          "name": "CANCEL_UPGRADE",
+          "value": 7
+        },
+        {
+          "name": "ATTACK_MOVE",
+          "value": 8
+        },
+        {
+          "name": "GUARD",
+          "value": 9
+        },
+        {
+          "name": "GUARD_WITHOUT_PURSUIT",
+          "value": 10
+        },
+        {
+          "name": "GUARD_FLYING_UNITS_ONLY",
+          "value": 11
+        },
+        {
+          "name": "STOP",
+          "value": 12
+        },
+        {
+          "name": "WAYPOINTS",
+          "value": 13
+        },
+        {
+          "name": "EXIT_CONTAINER",
+          "value": 14
+        },
+        {
+          "name": "EVACUATE",
+          "value": 15
+        },
+        {
+          "name": "EXECUTE_RAILED_TRANSPORT",
+          "value": 16
+        },
+        {
+          "name": "BEACON_DELETE",
+          "value": 17
+        },
+        {
+          "name": "SET_RALLY_POINT",
+          "value": 18
+        },
+        {
+          "name": "SELL",
+          "value": 19
+        },
+        {
+          "name": "FIRE_WEAPON",
+          "value": 20
+        },
+        {
+          "name": "SPECIAL_POWER",
+          "value": 21
+        },
+        {
+          "name": "PURCHASE_SCIENCE",
+          "value": 22
+        },
+        {
+          "name": "HACK_INTERNET",
+          "value": 23
+        },
+        {
+          "name": "TOGGLE_OVERCHARGE",
+          "value": 24
+        },
+        {
+          "name": "COMBATDROP",
+          "value": 25
+        },
+        {
+          "name": "SWITCH_WEAPON",
+          "value": 26
+        },
+        {
+          "name": "HIJACK_VEHICLE",
+          "value": 27
+        },
+        {
+          "name": "CONVERT_TO_CARBOMB",
+          "value": 28
+        },
+        {
+          "name": "SABOTAGE_BUILDING",
+          "value": 29
+        },
+        {
+          "name": "PLACE_BEACON",
+          "value": 30
+        },
+        {
+          "name": "SPECIAL_POWER_FROM_SHORTCUT",
+          "value": 31
+        },
+        {
+          "name": "SPECIAL_POWER_CONSTRUCT",
+          "value": 32
+        },
+        {
+          "name": "SPECIAL_POWER_CONSTRUCT_FROM_SHORTCUT",
+          "value": 33
+        },
+        {
+          "name": "SELECT_ALL_UNITS_OF_TYPE",
+          "value": 34
+        }
+      ],
+      "doc": "TheGuiCommandNames (ControlBar.h)"
+    },
+    {
+      "id": "command_button_options",
+      "members": [
+        {
+          "name": "NEED_TARGET_ENEMY_OBJECT",
+          "value": 0
+        },
+        {
+          "name": "NEED_TARGET_NEUTRAL_OBJECT",
+          "value": 1
+        },
+        {
+          "name": "NEED_TARGET_ALLY_OBJECT",
+          "value": 2
+        },
+        {
+          "name": "unused-reserved",
+          "value": 3
+        },
+        {
+          "name": "ALLOW_SHRUBBERY_TARGET",
+          "value": 4
+        },
+        {
+          "name": "NEED_TARGET_POS",
+          "value": 5
+        },
+        {
+          "name": "NEED_UPGRADE",
+          "value": 6
+        },
+        {
+          "name": "NEED_SPECIAL_POWER_SCIENCE",
+          "value": 7
+        },
+        {
+          "name": "OK_FOR_MULTI_SELECT",
+          "value": 8
+        },
+        {
+          "name": "CONTEXTMODE_COMMAND",
+          "value": 9
+        },
+        {
+          "name": "CHECK_LIKE",
+          "value": 10
+        },
+        {
+          "name": "ALLOW_MINE_TARGET",
+          "value": 11
+        },
+        {
+          "name": "ATTACK_OBJECTS_POSITION",
+          "value": 12
+        },
+        {
+          "name": "OPTION_ONE",
+          "value": 13
+        },
+        {
+          "name": "OPTION_TWO",
+          "value": 14
+        },
+        {
+          "name": "OPTION_THREE",
+          "value": 15
+        },
+        {
+          "name": "NOT_QUEUEABLE",
+          "value": 16
+        },
+        {
+          "name": "SINGLE_USE_COMMAND",
+          "value": 17
+        },
+        {
+          "name": "---DO-NOT-USE---",
+          "value": 18
+        },
+        {
+          "name": "SCRIPT_ONLY",
+          "value": 19
+        },
+        {
+          "name": "IGNORES_UNDERPOWERED",
+          "value": 20
+        },
+        {
+          "name": "USES_MINE_CLEARING_WEAPONSET",
+          "value": 21
+        },
+        {
+          "name": "CAN_USE_WAYPOINTS",
+          "value": 22
+        },
+        {
+          "name": "MUST_BE_STOPPED",
+          "value": 23
+        }
+      ],
+      "doc": "TheCommandOptionNames (ControlBar.h)"
+    },
+    {
+      "id": "command_button_border_type",
+      "members": [
+        {
+          "name": "NONE",
+          "value": 0
+        },
+        {
+          "name": "BUILD",
+          "value": 1
+        },
+        {
+          "name": "UPGRADE",
+          "value": 2
+        },
+        {
+          "name": "ACTION",
+          "value": 3
+        },
+        {
+          "name": "SYSTEM",
+          "value": 4
+        }
+      ],
+      "doc": "CommandButtonMappedBorderTypeNames (ControlBar.h)"
+    },
+    {
       "id": "ai_side",
       "members": [
         {
@@ -54202,6 +56883,32 @@
         }
       ],
       "doc": "TheRadiusCursorNames (InGameUI.h)"
+    },
+    {
+      "id": "locomotor_surface",
+      "members": [
+        {
+          "name": "GROUND",
+          "value": 0
+        },
+        {
+          "name": "WATER",
+          "value": 1
+        },
+        {
+          "name": "CLIFF",
+          "value": 2
+        },
+        {
+          "name": "AIR",
+          "value": 3
+        },
+        {
+          "name": "RUBBLE",
+          "value": 4
+        }
+      ],
+      "doc": "TheLocomotorSurfaceTypeNames (LocomotorSet.h)"
     },
     {
       "id": "locomotor_appearance",
