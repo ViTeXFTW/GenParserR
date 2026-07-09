@@ -178,11 +178,15 @@ impl<'a> Sem<'a> {
             .key()
             .and_then(|k| scope.field(k.text()))
             .map(|f| f.value_type.clone());
-        for (i, tok) in field.value_tokens().iter().enumerate() {
+        let value_tokens = field.value_tokens();
+        let active_ty = ty.as_ref().and_then(|ty| {
+            ty.variant_for_first_token(value_tokens.first().map(|t| t.text().trim_matches('"')))
+        });
+        for (i, tok) in value_tokens.iter().enumerate() {
             // Token lists classify each position by its own element type.
-            let elem = match &ty {
+            let elem = match active_ty {
                 Some(ValueType::TokenList { tokens }) => tokens.get(i),
-                other => other.as_ref(),
+                other => other,
             };
             self.set(tok, value_token_kind(tok, elem));
         }
@@ -210,6 +214,11 @@ fn value_token_kind(tok: &SyntaxToken, ty: Option<&ValueType>) -> SemKind {
         Some(ValueType::Bool) | Some(ValueType::Enum { .. }) | Some(ValueType::BitFlags { .. }) => {
             SemKind::EnumMember
         }
+        Some(ValueType::OneOf { variants }) => variants
+            .first()
+            .map(|variant| value_token_kind(tok, Some(variant)))
+            .unwrap_or(SemKind::StringLit),
+        Some(ValueType::Prefixed { value_type, .. }) => value_token_kind(tok, Some(value_type)),
         Some(ValueType::Int)
         | Some(ValueType::UInt)
         | Some(ValueType::Real)

@@ -57,10 +57,21 @@ pub fn complete(
             scope_node,
             key,
             value_index,
-        } => field_value_completions(analyzer, &scope_node, &key, value_index, index, file),
+            current_token,
+            first_token,
+        } => field_value_completions(
+            analyzer,
+            &scope_node,
+            &key,
+            value_index,
+            current_token.as_deref(),
+            first_token.as_deref(),
+            index,
+            file,
+        ),
         PosContext::ModuleName { slot_accepts } => module_name_completions(analyzer, &slot_accepts),
         PosContext::SubBlockArg { argument_type } => {
-            completions_for_type(analyzer, &argument_type, 0, index)
+            completions_for_type(analyzer, &argument_type, 0, None, None, index)
         }
     }
 }
@@ -76,6 +87,8 @@ enum PosContext {
         scope_node: SyntaxNode,
         key: String,
         value_index: usize,
+        current_token: Option<String>,
+        first_token: Option<String>,
     },
     /// Completing a module type name after a slot `=`. Carries the slot's
     /// accepted interfaces so completions can be filtered to valid modules only.
@@ -105,15 +118,27 @@ fn classify_position(analyzer: &Analyzer, root: &SyntaxNode, offset: u32) -> Pos
                 .key()
                 .map(|k| k.text().to_string())
                 .unwrap_or_default();
-            let value_index = field
-                .value_tokens()
+            let value_tokens = field.value_tokens();
+            let value_index = value_tokens
                 .iter()
-                .filter(|t| u32::from(t.text_range().end()) <= offset)
+                .filter(|t| u32::from(t.text_range().end()) < offset)
                 .count();
+            let current_token = value_tokens
+                .iter()
+                .find(|t| {
+                    let range = t.text_range();
+                    u32::from(range.start()) <= offset && offset <= u32::from(range.end())
+                })
+                .map(|t| t.text().trim_matches('"').to_string());
+            let first_token = value_tokens
+                .first()
+                .map(|t| t.text().trim_matches('"').to_string());
             return PosContext::FieldValue {
                 scope_node: scope_node.unwrap_or_else(|| root.clone()),
                 key,
                 value_index,
+                current_token,
+                first_token,
             };
         }
         return match scope_node {
@@ -202,7 +227,7 @@ fn field_key_completions(analyzer: &Analyzer, scope_node: &SyntaxNode) -> Vec<Co
             label: f.name.clone(),
             kind: CompletionKind::Field,
             detail: Some(type_label(&f.value_type)),
-            insert: None,
+            insert: value_snippet(&f.value_type).map(|value| format!("{} = {value}", f.name)),
         })
         .collect();
     for slot in scope.module_slots() {
@@ -269,6 +294,8 @@ fn field_value_completions(
     scope_node: &SyntaxNode,
     key: &str,
     value_index: usize,
+    current_token: Option<&str>,
+    first_token: Option<&str>,
     index: Option<&WorkspaceIndex>,
     file: Option<&str>,
 ) -> Vec<Completion> {
@@ -304,7 +331,14 @@ fn field_value_completions(
             {
                 asset_completions
             } else {
-                completions_for_type(analyzer, &f.value_type, value_index, index)
+                completions_for_type(
+                    analyzer,
+                    &f.value_type,
+                    value_index,
+                    current_token,
+                    first_token,
+                    index,
+                )
             }
         } else {
             Vec::new()
@@ -383,6 +417,30 @@ fn token_value_type(ty: &ValueType, value_index: usize) -> &ValueType {
 /// `n` is the tab-stop index (1-based).
 fn type_snippet_placeholder(ty: &ValueType, n: usize) -> String {
     match ty {
+        ValueType::Prefixed { prefix, value_type } => {
+            if prefix.eq_ignore_ascii_case("Bone")
+                && matches!(
+                    value_type.as_ref(),
+                    ValueType::AsciiString | ValueType::QuotedString
+                )
+            {
+                format!("{prefix}:${{{n}:NONE}}")
+            } else if prefix.eq_ignore_ascii_case("RandomBone")
+                && matches!(value_type.as_ref(), ValueType::Bool)
+            {
+                format!("{prefix}:${{{n}:No}}")
+            } else if prefix.eq_ignore_ascii_case("Loc")
+                && matches!(value_type.as_ref(), ValueType::AsciiString)
+            {
+                format!("{prefix}:X:${{{n}:0}}")
+            } else {
+                format!("{prefix}:{}", type_snippet_placeholder(value_type, n))
+            }
+        }
+        ValueType::OneOf { variants } => variants
+            .first()
+            .map(|variant| type_snippet_placeholder(variant, n))
+            .unwrap_or_else(|| format!("${{{n}:?}}")),
         ValueType::Bool => format!("${{{n}:Yes}}"),
         ValueType::Int | ValueType::UInt => format!("${{{n}:0}}"),
         ValueType::Real
@@ -405,36 +463,100 @@ fn type_snippet_placeholder(ty: &ValueType, n: usize) -> String {
     }
 }
 
+fn value_snippet(ty: &ValueType) -> Option<String> {
+    match ty {
+        ValueType::TokenList { tokens } if tokens.len() > 1 => {
+            let mut snippet = tokens
+                .iter()
+                .enumerate()
+                .map(|(i, t)| type_snippet_placeholder(t, i + 1))
+                .collect::<Vec<_>>()
+                .join(" ");
+            snippet.push_str("$0");
+            Some(snippet)
+        }
+        ValueType::OneOf { variants } => variants.first().and_then(value_snippet),
+        _ => None,
+    }
+}
+
 fn completions_for_type(
     analyzer: &Analyzer,
     ty: &ValueType,
     value_index: usize,
+    current_token: Option<&str>,
+    first_token: Option<&str>,
     index: Option<&WorkspaceIndex>,
 ) -> Vec<Completion> {
     match ty {
+        ValueType::OneOf { variants } => {
+            if current_token.is_some() || value_index > 0 {
+                return ty
+                    .variant_for_first_token(first_token.or(current_token))
+                    .map(|variant| {
+                        completions_for_type(
+                            analyzer,
+                            variant,
+                            value_index,
+                            current_token,
+                            first_token,
+                            index,
+                        )
+                    })
+                    .unwrap_or_default();
+            }
+            variants
+                .iter()
+                .flat_map(|variant| {
+                    completions_for_type(analyzer, variant, 0, None, first_token, index)
+                })
+                .collect()
+        }
+        ValueType::Prefixed { prefix, value_type } => {
+            let prefix_already_typed = current_token
+                .and_then(|t| t.split_once(':').map(|(actual, _)| actual))
+                .is_some_and(|actual| actual.eq_ignore_ascii_case(prefix));
+            completions_for_type(
+                analyzer,
+                value_type,
+                value_index,
+                current_token,
+                first_token,
+                index,
+            )
+            .into_iter()
+            .map(|mut c| {
+                if !prefix_already_typed {
+                    c.insert = Some(format!(
+                        "{prefix}:{}",
+                        c.insert.unwrap_or_else(|| c.label.clone())
+                    ));
+                }
+                c
+            })
+            .collect()
+        }
         // Token lists: at position 0 offer a full-sequence snippet plus per-token completions.
         ValueType::TokenList { tokens } => {
             let mut out = tokens
                 .get(value_index)
-                .map(|elem| completions_for_type(analyzer, elem, 0, index))
+                .map(|elem| {
+                    completions_for_type(analyzer, elem, 0, current_token, first_token, index)
+                })
                 .unwrap_or_default();
             // At the first token, also inject a full-sequence snippet.
-            if value_index == 0 && tokens.len() > 1 {
-                let snippet: String = tokens
-                    .iter()
-                    .enumerate()
-                    .map(|(i, t)| type_snippet_placeholder(t, i + 1))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                out.insert(
-                    0,
-                    Completion {
-                        label: "<full sequence>".into(),
-                        kind: CompletionKind::Value,
-                        detail: Some(format!("{} tokens", tokens.len())),
-                        insert: Some(snippet),
-                    },
-                );
+            if value_index == 0 {
+                if let Some(snippet) = value_snippet(ty) {
+                    out.insert(
+                        0,
+                        Completion {
+                            label: "<full sequence>".into(),
+                            kind: CompletionKind::Value,
+                            detail: Some(format!("{} tokens", tokens.len())),
+                            insert: Some(snippet),
+                        },
+                    );
+                }
             }
             out
         }
@@ -617,6 +739,14 @@ fn type_label(ty: &ValueType) -> String {
         ValueType::Reference { ref_kind } => format!("ref {ref_kind:?}"),
         ValueType::W3dModel => "w3d model".into(),
         ValueType::W3dModelMember => "w3d model member".into(),
+        ValueType::Prefixed { prefix, value_type } => {
+            format!("{prefix}:{}", type_label(value_type))
+        }
+        ValueType::OneOf { variants } => variants
+            .iter()
+            .map(type_label)
+            .collect::<Vec<_>>()
+            .join(" | "),
         other => format!("{other:?}")
             .split(['{', ' '])
             .next()
@@ -635,6 +765,27 @@ mod tests {
             .into_iter()
             .map(|c| c.label)
             .collect()
+    }
+
+    fn item(src: &str, offset: u32, label: &str) -> Completion {
+        let a = Analyzer::embedded();
+        complete(&a, &a.parse(src), offset, None, None)
+            .into_iter()
+            .find(|c| c.label == label)
+            .unwrap_or_else(|| panic!("missing completion `{label}`"))
+    }
+
+    fn item_with_defs(src: &str, offset: u32, defs: &str, label: &str) -> Completion {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        index.set_file(
+            "defs.ini",
+            crate::index::definitions_in(&a, &a.parse(defs), "defs.ini"),
+        );
+        complete(&a, &a.parse(src), offset, Some(&index), None)
+            .into_iter()
+            .find(|c| c.label == label)
+            .unwrap_or_else(|| panic!("missing completion `{label}`"))
     }
 
     #[test]
@@ -797,5 +948,58 @@ End
             1
         );
         assert!(!out.contains(&"PRIMARY".to_string()), "{out:?}");
+    }
+
+    #[test]
+    fn transition_damage_particle_field_inserts_full_snippet() {
+        let src = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    \n  End\nEnd\n";
+        let offset = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    ".len() as u32;
+        let got = item(src, offset, "DamagedParticleSystem1");
+        assert_eq!(
+            got.insert.as_deref(),
+            Some(
+                "DamagedParticleSystem1 = Bone:${1:NONE} RandomBone:${2:No} PSys:${3:ParticleSystem}$0"
+            )
+        );
+    }
+
+    #[test]
+    fn transition_damage_fx_and_ocl_fields_insert_full_snippets() {
+        let src = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    \n  End\nEnd\n";
+        let offset = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    ".len() as u32;
+        assert_eq!(
+            item(src, offset, "DamagedFXList1").insert.as_deref(),
+            Some("DamagedFXList1 = Bone:${1:NONE} RandomBone:${2:No} FXList:${3:FxList}$0")
+        );
+        assert_eq!(
+            item(src, offset, "DamagedOCL10").insert.as_deref(),
+            Some("DamagedOCL10 = Bone:${1:NONE} RandomBone:${2:No} OCL:${3:ObjectCreationList}$0")
+        );
+    }
+
+    #[test]
+    fn prefixed_particle_reference_suggests_while_typing() {
+        let src = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    DamagedParticleSystem1 = Bone:NONE RandomBone:No PSys:Str\n  End\nEnd\n";
+        let offset = src.find("PSys:Str").unwrap() + "PSys:Str".len();
+        let got = item_with_defs(
+            src,
+            offset as u32,
+            "ParticleSystem StructureTransitionMediumSmoke\nEnd\n",
+            "StructureTransitionMediumSmoke",
+        );
+        assert_eq!(got.insert, None);
+    }
+
+    #[test]
+    fn loc_variant_reference_suggests_while_typing() {
+        let src = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    DamagedFXList1 = Loc:X:0.0 Y:0.0 Z:0.0 FXList:FX_\n  End\nEnd\n";
+        let offset = src.find("FXList:FX_").unwrap() + "FXList:FX_".len();
+        let got = item_with_defs(
+            src,
+            offset as u32,
+            "FXList FX_TankDamageTransition\nEnd\n",
+            "FX_TankDamageTransition",
+        );
+        assert_eq!(got.insert, None);
     }
 }

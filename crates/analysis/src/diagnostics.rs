@@ -91,6 +91,7 @@ pub const KNOWN_CODES: &[&str] = &[
     "bad-number",
     "bad-enum",
     "bad-flag",
+    "bad-prefixed",
     "unresolved-reference",
     "unknown-model",
     "unknown-model-member",
@@ -981,6 +982,13 @@ impl<'a> Ctx<'a> {
             return;
         }
         match ty {
+            ValueType::OneOf { .. } => {
+                if let Some(variant) =
+                    ty.variant_for_first_token(tokens.first().map(|t| unquote(t.text())))
+                {
+                    self.validate_value(field, variant);
+                }
+            }
             ValueType::BitFlags { value_set } => {
                 for tok in &tokens {
                     let raw = tok.text().trim_start_matches(['+', '-']);
@@ -1087,6 +1095,9 @@ impl<'a> Ctx<'a> {
             ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } => {
                 self.check_reference(*ref_kind, tok)
             }
+            ValueType::Prefixed { prefix, value_type } => {
+                self.check_prefixed_token(tok, prefix, value_type)
+            }
             // No single-token validation for these.
             ValueType::AsciiString
             | ValueType::QuotedString
@@ -1097,7 +1108,107 @@ impl<'a> Ctx<'a> {
             | ValueType::Coord2D
             | ValueType::Coord3D
             | ValueType::TokenList { .. }
+            | ValueType::OneOf { .. }
             | ValueType::Unknown { .. } => {}
+        }
+    }
+
+    fn check_prefixed_token(&mut self, tok: &SyntaxToken, prefix: &str, ty: &ValueType) {
+        let text = unquote(tok.text());
+        let Some((actual, value)) = text.split_once(':') else {
+            self.error(
+                tok,
+                "bad-prefixed",
+                format!("expected `{prefix}:...`, found `{text}`"),
+            );
+            return;
+        };
+        if !actual.eq_ignore_ascii_case(prefix) {
+            self.error(
+                tok,
+                "bad-prefixed",
+                format!("expected `{prefix}:...`, found `{text}`"),
+            );
+            return;
+        }
+        if prefix.eq_ignore_ascii_case("Loc") {
+            let Some((axis, n)) = value.split_once(':') else {
+                self.error(
+                    tok,
+                    "bad-prefixed",
+                    format!("expected `Loc:X:<n>`, found `{text}`"),
+                );
+                return;
+            };
+            if !axis.eq_ignore_ascii_case("X") {
+                self.error(
+                    tok,
+                    "bad-prefixed",
+                    format!("expected `Loc:X:<n>`, found `{text}`"),
+                );
+                return;
+            }
+            if n.parse::<f64>().is_err() {
+                self.error(
+                    tok,
+                    "bad-number",
+                    format!("expected a number for `Loc:X:`, found `{n}`"),
+                );
+            }
+            return;
+        }
+        match ty {
+            ValueType::Bool => {
+                let v = value.to_ascii_lowercase();
+                if v != "yes" && v != "no" {
+                    self.error(
+                        tok,
+                        "bad-bool",
+                        format!("expected `Yes` or `No`, found `{value}`"),
+                    );
+                }
+            }
+            ValueType::Int => self.check_prefixed_number(tok, prefix, value, NumKind::Int),
+            ValueType::UInt => self.check_prefixed_number(tok, prefix, value, NumKind::UInt),
+            ValueType::Real
+            | ValueType::PositiveReal
+            | ValueType::AngleReal
+            | ValueType::Velocity
+            | ValueType::Acceleration
+            | ValueType::Duration => self.check_prefixed_number(tok, prefix, value, NumKind::Real),
+            ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } => {
+                self.check_reference_name(*ref_kind, tok, value)
+            }
+            ValueType::Enum { value_set } => self.check_enum_member_name(value_set, tok, value),
+            ValueType::BitFlags { value_set } => {
+                let raw = value.trim_start_matches(['+', '-']);
+                if !raw.eq_ignore_ascii_case("NONE") && !raw.eq_ignore_ascii_case("ALL") {
+                    self.check_bitflag_member_name(value_set, tok, raw);
+                }
+            }
+            ValueType::AsciiString | ValueType::AsciiStringList | ValueType::QuotedString => {}
+            _ => {}
+        }
+    }
+
+    fn check_prefixed_number(
+        &mut self,
+        tok: &SyntaxToken,
+        prefix: &str,
+        value: &str,
+        kind: NumKind,
+    ) {
+        let ok = match kind {
+            NumKind::Int => value.parse::<i64>().is_ok(),
+            NumKind::UInt => value.parse::<u64>().is_ok(),
+            NumKind::Real => value.parse::<f64>().is_ok(),
+        };
+        if !ok {
+            self.error(
+                tok,
+                "bad-number",
+                format!("expected a number for `{prefix}:`, found `{value}`"),
+            );
         }
     }
 
@@ -1217,13 +1328,16 @@ impl<'a> Ctx<'a> {
     }
 
     fn check_enum_member(&mut self, value_set: &str, tok: &SyntaxToken) {
+        self.check_enum_member_name(value_set, tok, tok.text());
+    }
+
+    fn check_enum_member_name(&mut self, value_set: &str, tok: &SyntaxToken, v: &str) {
         let Some(set) = self.analyzer.value_set(value_set) else {
             return;
         };
         if set.members.is_empty() {
             return; // value set we couldn't populate; don't flag
         }
-        let v = tok.text();
         if !set.members.iter().any(|m| m.name.eq_ignore_ascii_case(v)) {
             self.error(
                 tok,
@@ -1234,6 +1348,10 @@ impl<'a> Ctx<'a> {
     }
 
     fn check_bitflag_member(&mut self, value_set: &str, tok: &SyntaxToken, raw: &str) {
+        self.check_bitflag_member_name(value_set, tok, raw);
+    }
+
+    fn check_bitflag_member_name(&mut self, value_set: &str, tok: &SyntaxToken, raw: &str) {
         let Some(set) = self.analyzer.value_set(value_set) else {
             return;
         };
@@ -1250,8 +1368,11 @@ impl<'a> Ctx<'a> {
     }
 
     fn check_reference(&mut self, kind: RefKind, tok: &SyntaxToken) {
+        self.check_reference_name(kind, tok, unquote(tok.text()));
+    }
+
+    fn check_reference_name(&mut self, kind: RefKind, tok: &SyntaxToken, name: &str) {
         let Some(index) = self.index else { return };
-        let name = unquote(tok.text());
         // `None` is the universal null reference; `NoSound` is the audio one;
         // builtins (e.g. `Upgrade_Veterancy_*`) exist in no file by design.
         if name.is_empty()
@@ -1462,6 +1583,54 @@ End
         let c = codes(src);
         assert!(c.contains(&"bad-number"), "{c:?}");
         assert!(c.contains(&"unknown-field"), "{c:?}");
+    }
+
+    #[test]
+    fn transition_damage_particle_tokens_are_validated() {
+        let ok = "\
+Object Tank
+  Behavior = TransitionDamageFX ModuleTag_01
+    DamagedParticleSystem1 = Bone:NONE RandomBone:No PSys:StructureTransitionMediumSmoke
+  End
+End
+";
+        let ok_codes = codes(ok);
+        assert!(!ok_codes.contains(&"bad-prefixed"), "{ok_codes:?}");
+        assert!(!ok_codes.contains(&"bad-bool"), "{ok_codes:?}");
+
+        let bad = "\
+Object Tank
+  Behavior = TransitionDamageFX ModuleTag_01
+    DamagedParticleSystem1 = Bone:NONE RandomBone:Maybe ParticleSystem:StructureTransitionMediumSmoke
+  End
+End
+";
+        let bad_codes = codes(bad);
+        assert!(bad_codes.contains(&"bad-bool"), "{bad_codes:?}");
+        assert!(bad_codes.contains(&"bad-prefixed"), "{bad_codes:?}");
+    }
+
+    #[test]
+    fn transition_damage_loc_tokens_are_validated() {
+        let ok = "\
+Object Tank
+  Behavior = TransitionDamageFX ModuleTag_01
+    DamagedFXList1 = Loc:X:0.0 Y:0.0 Z:0.0 FXList:FX_TankDamageTransition
+  End
+End
+";
+        let ok_codes = codes(ok);
+        assert!(!ok_codes.contains(&"bad-prefixed"), "{ok_codes:?}");
+        assert!(!ok_codes.contains(&"bad-number"), "{ok_codes:?}");
+
+        let bad = "\
+Object Tank
+  Behavior = TransitionDamageFX ModuleTag_01
+    DamagedFXList1 = Loc:X:0.0 Y:nope Z:0.0 FXList:FX_TankDamageTransition
+  End
+End
+";
+        assert!(codes(bad).contains(&"bad-number"));
     }
 
     #[test]

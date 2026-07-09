@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use zerosyntax_schema::{RefKind, ValueType};
 use zerosyntax_syntax::ast::{Block, Field, Module};
-use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode};
+use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode, SyntaxToken};
 
 use crate::model::{scope_schema, ScopeSchema};
 use crate::{Analyzer, Span};
@@ -436,8 +436,7 @@ fn collect_field_refs(
         return;
     };
     let tokens = field.value_tokens();
-    let mut push = |kind: RefKind, tok: &zerosyntax_syntax::SyntaxToken| {
-        let name = tok.text().trim_matches('"');
+    let mut push = |kind: RefKind, name: &str, span: Span| {
         if name.is_empty()
             || name.eq_ignore_ascii_case("None")
             || (kind == RefKind::AudioEvent && name.eq_ignore_ascii_case("NoSound"))
@@ -448,26 +447,77 @@ fn collect_field_refs(
         out.push(ReferenceSite {
             name: name.to_string(),
             kind,
-            span: tok.text_range().into(),
+            span,
         });
     };
-    match &schema_field.value_type {
+    collect_refs_from_type(&schema_field.value_type, &tokens, &mut push);
+}
+
+fn collect_refs_from_type(
+    ty: &ValueType,
+    tokens: &[SyntaxToken],
+    push: &mut impl FnMut(RefKind, &str, Span),
+) {
+    match ty {
+        ValueType::OneOf { .. } => {
+            if let Some(variant) =
+                ty.variant_for_first_token(tokens.first().map(|t| t.text().trim_matches('"')))
+            {
+                collect_refs_from_type(variant, tokens, push);
+            }
+        }
         ValueType::Reference { ref_kind } => {
             if let Some(tok) = tokens.first() {
-                push(*ref_kind, tok);
+                push(
+                    *ref_kind,
+                    tok.text().trim_matches('"'),
+                    tok.text_range().into(),
+                );
             }
         }
         ValueType::ReferenceList { ref_kind } => {
-            for tok in &tokens {
-                push(*ref_kind, tok);
+            for tok in tokens {
+                push(
+                    *ref_kind,
+                    tok.text().trim_matches('"'),
+                    tok.text_range().into(),
+                );
             }
         }
         ValueType::TokenList { tokens: specs } => {
             for (spec, tok) in specs.iter().zip(tokens.iter()) {
-                if let ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } =
-                    spec
-                {
-                    push(*ref_kind, tok);
+                match spec {
+                    ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } => {
+                        push(
+                            *ref_kind,
+                            tok.text().trim_matches('"'),
+                            tok.text_range().into(),
+                        );
+                    }
+                    ValueType::Prefixed { prefix, value_type } => {
+                        if let ValueType::Reference { ref_kind }
+                        | ValueType::ReferenceList { ref_kind } = value_type.as_ref()
+                        {
+                            let text = tok.text().trim_matches('"');
+                            let Some((actual, name)) = text.split_once(':') else {
+                                continue;
+                            };
+                            if !actual.eq_ignore_ascii_case(prefix) {
+                                continue;
+                            }
+                            let start =
+                                u32::from(tok.text_range().start()) + actual.len() as u32 + 1;
+                            push(
+                                *ref_kind,
+                                name,
+                                Span {
+                                    start,
+                                    end: start + name.len() as u32,
+                                },
+                            );
+                        }
+                    }
+                    _ => {}
                 }
             }
         }

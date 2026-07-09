@@ -219,9 +219,43 @@ pub enum ValueType {
     /// `Weapon = <slot> <weapon name>`). Each listed token is required;
     /// tokens beyond the list are ignored (lenient).
     TokenList { tokens: Vec<ValueType> },
+    /// A single token with a literal prefix and colon before the typed value
+    /// (e.g. `PSys:<ParticleSystem>` or `RandomBone:<Yes|No>`).
+    Prefixed {
+        prefix: String,
+        value_type: Box<ValueType>,
+    },
+    /// One of several value shapes accepted by the same parser.
+    OneOf { variants: Vec<ValueType> },
     /// Anything we could not map precisely; treated leniently (token soup).
     /// Carries the originating parse-fn so it can be refined later.
     Unknown { parse_fn: String },
+}
+
+impl ValueType {
+    pub fn first_prefix(&self) -> Option<&str> {
+        match self {
+            ValueType::Prefixed { prefix, .. } => Some(prefix),
+            ValueType::TokenList { tokens } => tokens.first().and_then(ValueType::first_prefix),
+            _ => None,
+        }
+    }
+
+    pub fn variant_for_first_token(&self, first_token: Option<&str>) -> Option<&ValueType> {
+        let ValueType::OneOf { variants } = self else {
+            return Some(self);
+        };
+        let actual = first_token.and_then(|t| t.split_once(':').map(|(prefix, _)| prefix));
+        actual
+            .and_then(|actual| {
+                variants.iter().find(|variant| {
+                    variant
+                        .first_prefix()
+                        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(actual))
+                })
+            })
+            .or_else(|| variants.first())
+    }
 }
 
 /// The kind of named definition a reference points at (or a block defines).
