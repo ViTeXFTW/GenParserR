@@ -33511,7 +33511,8 @@
         {
           "name": "OuterNodesLightFlareParticleSystem",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "reference",
+            "ref_kind": "particle_system"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -33519,7 +33520,8 @@
         {
           "name": "OuterNodesMediumFlareParticleSystem",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "reference",
+            "ref_kind": "particle_system"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -33527,7 +33529,8 @@
         {
           "name": "OuterNodesIntenseFlareParticleSystem",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "reference",
+            "ref_kind": "particle_system"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -33543,7 +33546,8 @@
         {
           "name": "ConnectorMediumLaserName",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "reference",
+            "ref_kind": "object"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -33551,7 +33555,8 @@
         {
           "name": "ConnectorIntenseLaserName",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "reference",
+            "ref_kind": "object"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -33559,7 +33564,8 @@
         {
           "name": "ConnectorMediumFlare",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "reference",
+            "ref_kind": "particle_system"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -33567,7 +33573,8 @@
         {
           "name": "ConnectorIntenseFlare",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "reference",
+            "ref_kind": "particle_system"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -33583,7 +33590,8 @@
         {
           "name": "LaserBaseLightFlareParticleSystemName",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "reference",
+            "ref_kind": "particle_system"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -33591,7 +33599,8 @@
         {
           "name": "LaserBaseMediumFlareParticleSystemName",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "reference",
+            "ref_kind": "particle_system"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -33599,7 +33608,8 @@
         {
           "name": "LaserBaseIntenseFlareParticleSystemName",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "reference",
+            "ref_kind": "particle_system"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -33607,7 +33617,8 @@
         {
           "name": "ParticleBeamLaserName",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "reference",
+            "ref_kind": "object"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -33715,7 +33726,8 @@
         {
           "name": "PoweringUpSoundLoop",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "reference",
+            "ref_kind": "audio_event"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -33723,7 +33735,8 @@
         {
           "name": "UnpackToIdleSoundLoop",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "reference",
+            "ref_kind": "audio_event"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -33731,7 +33744,8 @@
         {
           "name": "FiringToPackSoundLoop",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "reference",
+            "ref_kind": "audio_event"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -33739,7 +33753,8 @@
         {
           "name": "GroundAnnihilationSoundLoop",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "reference",
+            "ref_kind": "audio_event"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -33747,7 +33762,8 @@
         {
           "name": "DamagePulseRemnantObjectName",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "reference",
+            "ref_kind": "object"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
