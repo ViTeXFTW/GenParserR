@@ -1,6 +1,7 @@
 //! `zerosyntax-lsp`: the IDE-agnostic language server for C&C Generals: Zero Hour
 //! INI files. Speaks LSP over stdio.
 
+mod asset_index;
 mod backend;
 mod convert;
 
