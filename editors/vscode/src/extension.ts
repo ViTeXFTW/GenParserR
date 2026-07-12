@@ -11,7 +11,7 @@ import {
 let client: LanguageClient | undefined;
 let baseIniRootsHintShown = false;
 
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
   const serverPath = resolveServerPath(context);
   if (!serverPath) {
     vscode.window.showErrorMessage(
@@ -57,7 +57,7 @@ export function activate(context: vscode.ExtensionContext) {
     )
   );
 
-  client.start();
+  await client.start();
   context.subscriptions.push({
     dispose: () => {
       void client?.stop();

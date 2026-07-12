@@ -101,6 +101,9 @@ def main() -> int:
     caps = init["result"]["capabilities"]
     assert "completionProvider" in caps, "missing completionProvider"
     assert "semanticTokensProvider" in caps, "missing semanticTokensProvider"
+    commands = caps.get("executeCommandProvider", {}).get("commands", [])
+    assert "zerosyntax.clearIndexCache" in commands, "missing generic clear-cache command"
+    assert "zerosyntax.rebuildIndexCache" in commands, "missing generic rebuild-cache command"
     sync = caps.get("textDocumentSync")
     assert sync == 2, f"expected INCREMENTAL sync (2), got {sync!r}"
     # We offered no positionEncodings, so the server must stay on the baseline.
@@ -410,6 +413,39 @@ def main() -> int:
     new_texts = [e["newText"] for e in fix["edit"]["changes"][ca_uri]]
     assert new_texts == ["TREADS"], new_texts
     print("OK: code actions offer did-you-mean + missing End quickfixes")
+
+    # The cache command is a standard workspace/executeCommand request, so
+    # generic LSP editors can invoke the same command as the VS Code wrapper.
+    send({"jsonrpc": "2.0", "id": 25, "method": "workspace/executeCommand",
+          "params": {"command": "zerosyntax.clearIndexCache", "arguments": []}})
+    clear = wait_for(lambda m: m.get("id") == 25 and "result" in m,
+                     "clear index cache")
+    assert clear and "message" in clear["result"], clear
+    print("OK: generic workspace command clears the current index cache")
+
+    # Rebuilding must rescan new files, refresh the live index, and recreate
+    # the persistent cache without restarting the process.
+    (workspace / "Rebuilt.INI").write_text("MappedImage RebuiltImage\nEnd\n")
+    send({"jsonrpc": "2.0", "id": 26, "method": "workspace/executeCommand",
+          "params": {"command": "zerosyntax.rebuildIndexCache", "arguments": []}})
+    rebuilt = wait_for(lambda m: m.get("id") == 26 and "result" in m,
+                       "rebuild index cache")
+    assert rebuilt and rebuilt["result"].get("rebuilt") is True, rebuilt
+    send({"jsonrpc": "2.0", "id": 27, "method": "textDocument/completion",
+          "params": {"textDocument": {"uri": scan_uri},
+                     "position": {"line": 1, "character": 16}}})
+    rebuilt_comp = wait_for(lambda m: m.get("id") == 27 and "result" in m,
+                            "rebuilt completion")
+    rebuilt_items = rebuilt_comp["result"]
+    if isinstance(rebuilt_items, dict):
+        rebuilt_items = rebuilt_items.get("items", [])
+    assert "RebuiltImage" in [i["label"] for i in rebuilt_items], rebuilt_items[:10]
+    send({"jsonrpc": "2.0", "id": 28, "method": "workspace/executeCommand",
+          "params": {"command": "zerosyntax.clearIndexCache", "arguments": []}})
+    recreated = wait_for(lambda m: m.get("id") == 28 and "result" in m,
+                         "clear rebuilt index cache")
+    assert recreated and recreated["result"].get("cleared") is True, recreated
+    print("OK: rebuild command refreshes the live index and recreates the cache")
 
     # 9) shutdown
     send({"jsonrpc": "2.0", "id": 99, "method": "shutdown", "params": None})

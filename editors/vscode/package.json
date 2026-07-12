@@ -18,9 +18,21 @@
   ],
   "main": "./out/extension.js",
   "activationEvents": [
-    "onLanguage:generals-ini"
+    "onLanguage:generals-ini",
+    "onCommand:zerosyntax.clearIndexCache",
+    "onCommand:zerosyntax.rebuildIndexCache"
   ],
   "contributes": {
+    "commands": [
+      {
+        "command": "zerosyntax.clearIndexCache",
+        "title": "ZeroSyntax: Clear Index Cache"
+      },
+      {
+        "command": "zerosyntax.rebuildIndexCache",
+        "title": "ZeroSyntax: Rebuild Index Cache"
+      }
+    ],
     "languages": [
       {
         "id": "generals-ini",

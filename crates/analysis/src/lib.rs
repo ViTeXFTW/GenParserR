@@ -8,6 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use serde::{Deserialize, Serialize};
 use zerosyntax_schema::{BlockType, ModuleType, RefKind, Schema, ValueSet};
 use zerosyntax_syntax::{parse, Edit, OpenerOracle, Parse, Strategy};
 
@@ -25,7 +26,7 @@ pub use diagnostics::{Diagnostic, Severity};
 pub use index::WorkspaceIndex;
 
 /// A half-open byte range `[start, end)` into the source text.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Span {
     pub start: u32,
     pub end: u32,

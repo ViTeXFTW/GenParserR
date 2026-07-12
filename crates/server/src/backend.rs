@@ -6,14 +6,17 @@
 //! `didChange` deltas are applied to the rope and the document is re-parsed
 //! once per change batch; read-only requests reuse the cached parse.
 
+use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use dashmap::DashMap;
 use ropey::Rope;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{jsonrpc::Result, Client, LanguageServer};
 use zerosyntax_analysis::diagnostics::DiagnosticsCache;
@@ -59,6 +62,8 @@ pub struct Backend {
     base_roots: Mutex<Vec<PathBuf>>,
     /// Number of base INI files indexed from configured base roots.
     base_indexed_count: AtomicUsize,
+    /// Number of top-level files restored from the persistent cache last scan.
+    last_scan_cache_hits: AtomicUsize,
     /// Whether the initial workspace/base scan has completed at least once.
     scan_finished: AtomicBool,
     /// One-shot guard for the map/solo.ini configuration hint.
@@ -91,6 +96,93 @@ type ScanEntry = (
     Option<Arc<str>>,
 );
 
+const INDEX_CACHE_VERSION: u32 = 1;
+const MAX_SCAN_WORKERS: usize = 4;
+const CLEAR_INDEX_CACHE_COMMAND: &str = "zerosyntax.clearIndexCache";
+const REBUILD_INDEX_CACHE_COMMAND: &str = "zerosyntax.rebuildIndexCache";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct CachedScanEntry {
+    file: String,
+    definitions: Vec<Definition>,
+    references: Vec<ReferenceSite>,
+    tags: Vec<(String, String)>,
+    models: Vec<ModelAsset>,
+    text: Option<String>,
+}
+
+impl CachedScanEntry {
+    fn from_scan(entry: &ScanEntry) -> Self {
+        Self {
+            file: entry.0.clone(),
+            definitions: entry.1.clone(),
+            references: entry.2.clone(),
+            tags: entry.3.clone(),
+            models: entry.4.clone(),
+            text: entry.5.as_deref().map(str::to_string),
+        }
+    }
+
+    fn into_scan(self) -> ScanEntry {
+        (
+            self.file,
+            self.definitions,
+            self.references,
+            self.tags,
+            self.models,
+            self.text.map(Arc::from),
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct FileFingerprint {
+    len: u64,
+    modified_secs: u64,
+    modified_nanos: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CachedFile {
+    fingerprint: FileFingerprint,
+    entries: Vec<CachedScanEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct IndexCache {
+    version: u32,
+    schema_hash: u64,
+    files: HashMap<String, CachedFile>,
+}
+
+impl IndexCache {
+    fn empty(schema_hash: u64) -> Self {
+        Self {
+            version: INDEX_CACHE_VERSION,
+            schema_hash,
+            files: HashMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ScanPath {
+    path: PathBuf,
+    key: String,
+    is_base: bool,
+    fingerprint: FileFingerprint,
+}
+
+#[derive(Debug, Default)]
+struct ScanStats {
+    discovery: Duration,
+    cache_load: Duration,
+    parse: Duration,
+    cache_write: Duration,
+    hits: usize,
+    misses: usize,
+}
+
 #[derive(Deserialize)]
 pub struct VirtualFileParams {
     uri: String,
@@ -108,6 +200,102 @@ fn read_lossy(path: &Path) -> Option<String> {
     std::fs::read(path)
         .ok()
         .map(|b| String::from_utf8_lossy(&b).into_owned())
+}
+
+fn schema_hash() -> u64 {
+    let mut hasher = DefaultHasher::new();
+    zerosyntax_schema::EMBEDDED_SCHEMA_JSON.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn path_key(path: &Path) -> String {
+    let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let key = path.to_string_lossy().replace('\\', "/");
+    if cfg!(windows) {
+        key.to_ascii_lowercase()
+    } else {
+        key
+    }
+}
+
+fn file_fingerprint(path: &Path) -> Option<FileFingerprint> {
+    let metadata = std::fs::metadata(path).ok()?;
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .unwrap_or_default();
+    Some(FileFingerprint {
+        len: metadata.len(),
+        modified_secs: modified.as_secs(),
+        modified_nanos: modified.subsec_nanos(),
+    })
+}
+
+fn cache_dir() -> PathBuf {
+    #[cfg(windows)]
+    if let Some(path) = std::env::var_os("LOCALAPPDATA") {
+        return PathBuf::from(path).join("zerosyntax");
+    }
+    #[cfg(not(windows))]
+    {
+        if let Some(path) = std::env::var_os("XDG_CACHE_HOME") {
+            return PathBuf::from(path).join("zerosyntax");
+        }
+        if let Some(path) = std::env::var_os("HOME") {
+            return PathBuf::from(path).join(".cache/zerosyntax");
+        }
+    }
+    std::env::temp_dir().join("zerosyntax")
+}
+
+fn index_cache_path(workspace_roots: &[PathBuf], base_roots: &[PathBuf]) -> PathBuf {
+    let mut roots: Vec<_> = workspace_roots
+        .iter()
+        .map(|root| format!("workspace:{}", path_key(root)))
+        .chain(
+            base_roots
+                .iter()
+                .map(|root| format!("base:{}", path_key(root))),
+        )
+        .collect();
+    roots.sort_unstable();
+    let mut hasher = DefaultHasher::new();
+    roots.hash(&mut hasher);
+    cache_dir().join(format!(
+        "index-v{INDEX_CACHE_VERSION}-{:016x}.json",
+        hasher.finish()
+    ))
+}
+
+fn load_index_cache(path: &Path, expected_schema_hash: u64) -> IndexCache {
+    let Some(bytes) = std::fs::read(path).ok() else {
+        return IndexCache::empty(expected_schema_hash);
+    };
+    let Ok(cache) = serde_json::from_slice::<IndexCache>(&bytes) else {
+        return IndexCache::empty(expected_schema_hash);
+    };
+    if cache.version != INDEX_CACHE_VERSION || cache.schema_hash != expected_schema_hash {
+        return IndexCache::empty(expected_schema_hash);
+    }
+    cache
+}
+
+fn write_index_cache(path: &Path, cache: &IndexCache) -> std::io::Result<()> {
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(parent)?;
+    let bytes = serde_json::to_vec(cache).map_err(std::io::Error::other)?;
+    std::fs::write(path, bytes)
+}
+
+fn remove_index_cache(path: &Path) -> std::io::Result<bool> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
 }
 
 /// Normalise a client-supplied URI to the form [`Url::from_file_path`] produces.
@@ -193,38 +381,36 @@ fn read_c_string<R: Read>(reader: &mut R) -> std::io::Result<String> {
     Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
-fn big_entries(path: &Path) -> std::io::Result<Vec<BigEntry>> {
-    let mut file = std::fs::File::open(path)?;
+fn big_entries(file: &mut std::fs::File) -> std::io::Result<Vec<BigEntry>> {
     let mut magic = [0u8; 4];
     file.read_exact(&mut magic)?;
     if &magic != b"BIGF" {
         return Ok(Vec::new());
     }
 
-    let _archive_size = read_u32_be(&mut file)?;
-    let count = read_u32_be(&mut file)?;
+    let _archive_size = read_u32_be(&mut *file)?;
+    let count = read_u32_be(&mut *file)?;
     file.seek(SeekFrom::Start(0x10))?;
 
     let mut entries = Vec::with_capacity(count as usize);
     for _ in 0..count {
-        let offset = read_u32_be(&mut file)? as u64;
-        let size = read_u32_be(&mut file)? as usize;
-        let name = read_c_string(&mut file)?.replace('\\', "/");
+        let offset = read_u32_be(&mut *file)? as u64;
+        let size = read_u32_be(&mut *file)? as usize;
+        let name = read_c_string(&mut *file)?.replace('\\', "/");
         entries.push(BigEntry { name, offset, size });
     }
     Ok(entries)
 }
 
-fn read_big_entry_bytes(path: &Path, entry: &BigEntry) -> Option<Vec<u8>> {
-    let mut file = std::fs::File::open(path).ok()?;
+fn read_big_entry_bytes(file: &mut std::fs::File, entry: &BigEntry) -> Option<Vec<u8>> {
     file.seek(SeekFrom::Start(entry.offset)).ok()?;
     let mut bytes = vec![0; entry.size];
     file.read_exact(&mut bytes).ok()?;
     Some(bytes)
 }
 
-fn read_big_entry(path: &Path, entry: &BigEntry) -> Option<String> {
-    let bytes = read_big_entry_bytes(path, entry)?;
+fn read_big_entry(file: &mut std::fs::File, entry: &BigEntry) -> Option<String> {
+    let bytes = read_big_entry_bytes(file, entry)?;
     Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
@@ -251,38 +437,28 @@ fn parse_w3d_models(bytes: &[u8], fallback_name: &str) -> Vec<ModelAsset> {
         names.push(fallback_name.to_string());
     }
     walk_w3d_chunks(bytes, 0, bytes.len(), 0, &mut |kind, payload| match kind {
-        0x0000_001F => {
-            if payload.len() >= 40 {
-                push_name(&mut members, read_fixed_name(&payload[8..24]));
-                push_name(&mut names, read_fixed_name(&payload[24..40]));
-            }
+        0x0000_001F if payload.len() >= 40 => {
+            push_name(&mut members, read_fixed_name(&payload[8..24]));
+            push_name(&mut names, read_fixed_name(&payload[24..40]));
         }
         // HIERARCHY_HEADER, EMITTER_HEADER, AGGREGATE_HEADER: Version + Name[16].
-        0x0000_0101 | 0x0000_0501 | 0x0000_0601 => {
-            if payload.len() >= 20 {
-                push_name(&mut names, read_fixed_name(&payload[4..20]));
-            }
+        0x0000_0101 | 0x0000_0501 | 0x0000_0601 if payload.len() >= 20 => {
+            push_name(&mut names, read_fixed_name(&payload[4..20]));
         }
         0x0000_0102 => {
             for pivot in payload.chunks_exact(60) {
                 push_name(&mut members, read_fixed_name(&pivot[..16]));
             }
         }
-        0x0000_0701 => {
-            if payload.len() >= 40 {
-                push_name(&mut names, read_fixed_name(&payload[8..24]));
-                push_name(&mut names, read_fixed_name(&payload[24..40]));
-            }
+        0x0000_0701 if payload.len() >= 40 => {
+            push_name(&mut names, read_fixed_name(&payload[8..24]));
+            push_name(&mut names, read_fixed_name(&payload[24..40]));
         }
-        0x0000_0704 => {
-            if payload.len() >= 36 {
-                push_name(&mut members, read_fixed_name(&payload[4..36]));
-            }
+        0x0000_0704 if payload.len() >= 36 => {
+            push_name(&mut members, read_fixed_name(&payload[4..36]));
         }
-        0x0000_0740 => {
-            if payload.len() >= 40 {
-                push_name(&mut members, read_fixed_name(&payload[8..40]));
-            }
+        0x0000_0740 if payload.len() >= 40 => {
+            push_name(&mut members, read_fixed_name(&payload[8..40]));
         }
         0x0000_0750 if payload.len() >= 48 => {
             push_name(&mut members, read_fixed_name(&payload[16..48]))
@@ -376,28 +552,31 @@ fn dedup_case_insensitive(values: &mut Vec<String>) {
 
 fn scan_big(analyzer: &Analyzer, path: &Path) -> Vec<ScanEntry> {
     let mut out = Vec::new();
-    let Ok(entries) = big_entries(path) else {
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return out;
+    };
+    let Ok(entries) = big_entries(&mut file) else {
         return out;
     };
     for entry in entries {
-        let file = big_uri(path, &entry.name);
+        let uri = big_uri(path, &entry.name);
         if entry.name.ends_with(".ini") || entry.name.ends_with(".INI") {
-            let Some(text) = read_big_entry(path, &entry) else {
+            let Some(text) = read_big_entry(&mut file, &entry) else {
                 continue;
             };
             let parse = analyzer.parse(&text);
-            let defs = definitions_in(analyzer, &parse, &file);
+            let defs = definitions_in(analyzer, &parse, &uri);
             let refs = references_in(analyzer, &parse);
             let tags = module_tags_in(analyzer, &parse);
-            out.push((file, defs, refs, tags, Vec::new(), Some(Arc::from(text))));
+            out.push((uri, defs, refs, tags, Vec::new(), Some(Arc::from(text))));
         } else if entry.name.ends_with(".w3d") || entry.name.ends_with(".W3D") {
-            let Some(bytes) = read_big_entry_bytes(path, &entry) else {
+            let Some(bytes) = read_big_entry_bytes(&mut file, &entry) else {
                 continue;
             };
             let stem = file_stem_str(&entry.name);
             let models = parse_w3d_models(&bytes, &stem);
             if !models.is_empty() {
-                out.push((file, Vec::new(), Vec::new(), Vec::new(), models, None));
+                out.push((uri, Vec::new(), Vec::new(), Vec::new(), models, None));
             }
         }
     }
@@ -405,7 +584,7 @@ fn scan_big(analyzer: &Analyzer, path: &Path) -> Vec<ScanEntry> {
 }
 
 /// Walk `roots` and index `.ini` files plus `.w3d` model assets in one call.
-/// Production code goes through `collect_scan_paths` + `scan_files` so the
+/// Production code goes through `collect_scan_plan` + `scan_with_cache` so the
 /// scan can report progress; this convenience wrapper serves the tests.
 #[cfg(test)]
 fn scan_roots(analyzer: &Analyzer, roots: &[PathBuf]) -> Vec<ScanEntry> {
@@ -442,9 +621,73 @@ fn collect_scan_paths(roots: &[PathBuf]) -> Vec<PathBuf> {
     out
 }
 
+fn collect_scan_plan(workspace_roots: &[PathBuf], base_roots: &[PathBuf]) -> Vec<ScanPath> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    // Base paths come first to preserve the existing base-then-workspace apply
+    // order. A path present in both groups belongs to the base group.
+    for (roots, is_base) in [(base_roots, true), (workspace_roots, false)] {
+        for path in collect_scan_paths(roots) {
+            let key = path_key(&path);
+            let Some(fingerprint) = file_fingerprint(&path) else {
+                continue;
+            };
+            if seen.insert(key.clone()) {
+                out.push(ScanPath {
+                    path,
+                    key,
+                    is_base,
+                    fingerprint,
+                });
+            }
+        }
+    }
+    out
+}
+
+fn scan_path(analyzer: &Analyzer, path: &Path) -> Vec<ScanEntry> {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    if ext.eq_ignore_ascii_case("big") {
+        return scan_big(analyzer, path);
+    }
+    if ext.eq_ignore_ascii_case("ini") {
+        if let (Some(text), Ok(uri)) = (read_lossy(path), Url::from_file_path(path)) {
+            let parse = analyzer.parse(&text);
+            return vec![(
+                uri.to_string(),
+                definitions_in(analyzer, &parse, uri.as_str()),
+                references_in(analyzer, &parse),
+                module_tags_in(analyzer, &parse),
+                Vec::new(),
+                None,
+            )];
+        }
+    } else if ext.eq_ignore_ascii_case("w3d") {
+        if let (Ok(bytes), Ok(uri)) = (std::fs::read(path), Url::from_file_path(path)) {
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default();
+            let models = parse_w3d_models(&bytes, stem);
+            if !models.is_empty() {
+                return vec![(
+                    uri.to_string(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    models,
+                    None,
+                )];
+            }
+        }
+    }
+    Vec::new()
+}
+
 /// Phase 2 of the scan: parse/index each collected file, invoking
 /// `progress(done, total)` after each one (a `.big` archive counts as one
 /// unit of work regardless of how many entries it holds).
+#[cfg(test)]
 fn scan_files(
     analyzer: &Analyzer,
     paths: &[PathBuf],
@@ -452,39 +695,110 @@ fn scan_files(
 ) -> Vec<ScanEntry> {
     let mut out = Vec::new();
     for (i, path) in paths.iter().enumerate() {
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        if ext.eq_ignore_ascii_case("big") {
-            out.extend(scan_big(analyzer, path));
-        } else if ext.eq_ignore_ascii_case("ini") {
-            if let (Some(text), Ok(uri)) = (read_lossy(path), Url::from_file_path(path)) {
-                let parse = analyzer.parse(&text);
-                let defs = definitions_in(analyzer, &parse, uri.as_str());
-                let refs = references_in(analyzer, &parse);
-                let tags = module_tags_in(analyzer, &parse);
-                out.push((uri.to_string(), defs, refs, tags, Vec::new(), None));
-            }
-        } else if ext.eq_ignore_ascii_case("w3d") {
-            if let (Ok(bytes), Ok(uri)) = (std::fs::read(path), Url::from_file_path(path)) {
-                let stem = path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or_default();
-                let models = parse_w3d_models(&bytes, stem);
-                if !models.is_empty() {
-                    out.push((
-                        uri.to_string(),
-                        Vec::new(),
-                        Vec::new(),
-                        Vec::new(),
-                        models,
-                        None,
-                    ));
-                }
-            }
-        }
+        out.extend(scan_path(analyzer, path));
         progress(i + 1, paths.len());
     }
     out
+}
+
+fn scan_with_cache(
+    analyzer: &Analyzer,
+    paths: &[ScanPath],
+    cache_path: &Path,
+    workers: usize,
+    progress: &mut impl FnMut(usize, usize),
+) -> (Vec<(bool, ScanEntry)>, ScanStats) {
+    let expected_schema_hash = schema_hash();
+    let load_started = Instant::now();
+    let mut old_cache = load_index_cache(cache_path, expected_schema_hash);
+    let cache_load = load_started.elapsed();
+    let old_file_count = old_cache.files.len();
+    let mut results: Vec<Option<Vec<ScanEntry>>> = (0..paths.len()).map(|_| None).collect();
+    let mut misses = Vec::new();
+    let mut hits = 0;
+    let mut done = 0;
+
+    for (i, path) in paths.iter().enumerate() {
+        match old_cache.files.remove(&path.key) {
+            Some(cached) if cached.fingerprint == path.fingerprint => {
+                results[i] = Some(
+                    cached
+                        .entries
+                        .into_iter()
+                        .map(CachedScanEntry::into_scan)
+                        .collect(),
+                );
+                hits += 1;
+                done += 1;
+                progress(done, paths.len());
+            }
+            _ => misses.push(i),
+        }
+    }
+
+    let parse_started = Instant::now();
+    if !misses.is_empty() {
+        let worker_count = workers.max(1).min(misses.len());
+        let next = AtomicUsize::new(0);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            for _ in 0..worker_count {
+                let tx = tx.clone();
+                let misses = &misses;
+                let next = &next;
+                scope.spawn(move || loop {
+                    let work = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(&index) = misses.get(work) else {
+                        break;
+                    };
+                    let entries = scan_path(analyzer, &paths[index].path);
+                    if tx.send((index, entries)).is_err() {
+                        break;
+                    }
+                });
+            }
+            drop(tx);
+            for (index, entries) in rx {
+                results[index] = Some(entries);
+                done += 1;
+                progress(done, paths.len());
+            }
+        });
+    }
+    let parse = parse_started.elapsed();
+
+    let mut cache = IndexCache::empty(expected_schema_hash);
+    let mut scanned = Vec::new();
+    for (path, entries) in paths.iter().zip(results) {
+        let entries = entries.unwrap_or_default();
+        cache.files.insert(
+            path.key.clone(),
+            CachedFile {
+                fingerprint: path.fingerprint.clone(),
+                entries: entries.iter().map(CachedScanEntry::from_scan).collect(),
+            },
+        );
+        scanned.extend(entries.into_iter().map(|entry| (path.is_base, entry)));
+    }
+
+    let write_started = Instant::now();
+    if !misses.is_empty() || old_file_count != paths.len() {
+        if let Err(error) = write_index_cache(cache_path, &cache) {
+            tracing::warn!(%error, path = %cache_path.display(), "could not write asset index cache");
+        }
+    }
+    let cache_write = write_started.elapsed();
+    (
+        scanned,
+        ScanStats {
+            cache_load,
+            parse,
+            cache_write,
+            hits,
+            misses: misses.len(),
+            ..ScanStats::default()
+        },
+    )
 }
 
 impl Backend {
@@ -500,6 +814,7 @@ impl Backend {
             format_enabled: OnceLock::new(),
             base_roots: Mutex::new(Vec::new()),
             base_indexed_count: AtomicUsize::new(0),
+            last_scan_cache_hits: AtomicUsize::new(0),
             scan_finished: AtomicBool::new(false),
             base_roots_hint_shown: AtomicBool::new(false),
             client_base_ini_hint: OnceLock::new(),
@@ -520,6 +835,20 @@ impl Backend {
     fn next_semantic_id(&self) -> u64 {
         self.semantic_result_id
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn current_index_cache_path(&self) -> PathBuf {
+        let roots = self
+            .roots
+            .lock()
+            .map(|roots| roots.clone())
+            .unwrap_or_default();
+        let base_roots = self
+            .base_roots
+            .lock()
+            .map(|roots| roots.clone())
+            .unwrap_or_default();
+        index_cache_path(&roots, &base_roots)
     }
 
     /// Update the cross-file index from the document's cached parse, run
@@ -635,59 +964,65 @@ impl Backend {
         // each update as a progress report while waiting for the results.
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(usize, usize)>();
         let handle = tokio::task::spawn_blocking(move || {
-            let workspace_paths = collect_scan_paths(&roots);
-            let base_paths = collect_scan_paths(&base_roots);
-            let total = workspace_paths.len() + base_paths.len();
-            let mut done = 0;
+            let discovery_started = Instant::now();
+            let paths = collect_scan_plan(&roots, &base_roots);
+            let discovery = discovery_started.elapsed();
+            let cache_path = index_cache_path(&roots, &base_roots);
+            let workers = std::thread::available_parallelism()
+                .map(usize::from)
+                .unwrap_or(1)
+                .min(MAX_SCAN_WORKERS);
             let mut last_percent = u32::MAX;
             // Throttle to whole-percent changes (plus the final count) so a
             // 10k-file scan sends ~100 notifications, not 10k.
-            let mut progress = |_done_in_batch: usize, _batch_total: usize| {
-                done += 1;
+            let mut progress = |done: usize, total: usize| {
                 let percent = (done * 100 / total.max(1)) as u32;
                 if percent != last_percent || done == total {
                     last_percent = percent;
                     let _ = tx.send((done, total));
                 }
             };
-            let scanned = scan_files(&analyzer, &workspace_paths, &mut progress);
-            let base_scanned = scan_files(&analyzer, &base_paths, &mut progress);
-            (scanned, base_scanned)
+            let (scanned, mut stats) =
+                scan_with_cache(&analyzer, &paths, &cache_path, workers, &mut progress);
+            stats.discovery = discovery;
+            (scanned, stats)
         });
         while let Some((done, total)) = rx.recv().await {
-            self.report_scan_progress(&progress_token, done, total).await;
+            self.report_scan_progress(&progress_token, done, total)
+                .await;
         }
-        let (scanned, base_scanned) = handle.await.unwrap_or_default();
-        let base_ini_count = base_scanned
+        let (scanned, stats) = handle.await.unwrap_or_default();
+        let base_ini_count = scanned
             .iter()
-            .filter(|(_, _, _, _, models, _)| models.is_empty())
+            .filter(|(is_base, (_, _, _, _, models, _))| *is_base && models.is_empty())
             .count();
         self.base_indexed_count
             .store(base_ini_count, Ordering::Relaxed);
+        self.last_scan_cache_hits
+            .store(stats.hits, Ordering::Relaxed);
         self.scan_finished.store(true, Ordering::Relaxed);
-        let ini_total = base_ini_count
-            + scanned
-                .iter()
-                .filter(|(_, _, _, _, models, _)| models.is_empty())
-                .count();
-        let model_total: usize = base_scanned
+        let ini_total = scanned
             .iter()
-            .chain(scanned.iter())
-            .map(|(_, _, _, _, models, _)| models.len())
+            .filter(|(_, (_, _, _, _, models, _))| models.is_empty())
+            .count();
+        let model_total: usize = scanned
+            .iter()
+            .map(|(_, (_, _, _, _, models, _))| models.len())
             .sum();
         // Don't overwrite index entries for already-open documents with stale
         // disk content; `initialized` calls `refresh` for each open doc right
         // after this returns, so they will populate the index from live text.
-        let open: std::collections::HashSet<String> = self
+        let open: HashSet<String> = self
             .docs
             .iter()
             .map(|e| e.key().as_str().to_string())
             .collect();
+        let apply_started = Instant::now();
         {
             let Ok(mut idx) = self.index.write() else {
                 return;
             };
-            for (uri, defs, refs, tags, models, text) in base_scanned.into_iter().chain(scanned) {
+            for (_, (uri, defs, refs, tags, models, text)) in scanned {
                 if let Some(text) = text {
                     self.virtual_files.insert(uri.clone(), text);
                 }
@@ -699,6 +1034,22 @@ impl Backend {
                 }
             }
         }
+        let apply = apply_started.elapsed();
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!(
+                    "asset index scan complete (discovery {} ms, cache load {} ms, parse {} ms, cache write {} ms, apply {} ms, {} hits, {} misses)",
+                    stats.discovery.as_millis(),
+                    stats.cache_load.as_millis(),
+                    stats.parse.as_millis(),
+                    stats.cache_write.as_millis(),
+                    apply.as_millis(),
+                    stats.hits,
+                    stats.misses,
+                ),
+            )
+            .await;
         self.end_scan_progress(progress_token, ini_total, model_total)
             .await;
     }
@@ -734,7 +1085,12 @@ impl Backend {
     }
 
     /// Forward one `done/total` update to the client's progress UI.
-    async fn report_scan_progress(&self, token: &Option<NumberOrString>, done: usize, total: usize) {
+    async fn report_scan_progress(
+        &self,
+        token: &Option<NumberOrString>,
+        done: usize,
+        total: usize,
+    ) {
         let Some(token) = token else { return };
         self.client
             .send_notification::<notification::Progress>(ProgressParams {
@@ -954,6 +1310,13 @@ impl LanguageServer for Backend {
                         ..Default::default()
                     },
                 )),
+                execute_command_provider: Some(ExecuteCommandOptions {
+                    commands: vec![
+                        CLEAR_INDEX_CACHE_COMMAND.into(),
+                        REBUILD_INDEX_CACHE_COMMAND.into(),
+                    ],
+                    work_done_progress_options: Default::default(),
+                }),
                 ..Default::default()
             },
         })
@@ -976,11 +1339,12 @@ impl LanguageServer for Backend {
                 .unwrap_or_default();
             (self.base_indexed_count.load(Ordering::Relaxed), models)
         };
+        let cache_hits = self.last_scan_cache_hits.load(Ordering::Relaxed);
         self.client
             .log_message(
                 MessageType::INFO,
                 format!(
-                    "zerosyntax language server ready ({ini} base INI files, {models} W3D models indexed)"
+                    "zerosyntax language server ready ({ini} base INI files, {models} W3D models indexed, {cache_hits} files from cache)"
                 ),
             )
             .await;
@@ -988,6 +1352,60 @@ impl LanguageServer for Backend {
 
     async fn shutdown(&self) -> Result<()> {
         Ok(())
+    }
+
+    async fn execute_command(
+        &self,
+        params: ExecuteCommandParams,
+    ) -> Result<Option<serde_json::Value>> {
+        if params.command != CLEAR_INDEX_CACHE_COMMAND
+            && params.command != REBUILD_INDEX_CACHE_COMMAND
+        {
+            return Ok(None);
+        }
+        let path = self.current_index_cache_path();
+        let cleared = match remove_index_cache(&path) {
+            Ok(cleared) => cleared,
+            Err(error) => {
+                tracing::warn!(%error, path = %path.display(), "could not clear asset index cache");
+                return Err(tower_lsp::jsonrpc::Error::internal_error());
+            }
+        };
+
+        if params.command == REBUILD_INDEX_CACHE_COMMAND {
+            self.scan_finished.store(false, Ordering::Relaxed);
+            self.base_indexed_count.store(0, Ordering::Relaxed);
+            self.last_scan_cache_hits.store(0, Ordering::Relaxed);
+            self.virtual_files.clear();
+            if let Ok(mut index) = self.index.write() {
+                *index = WorkspaceIndex::new();
+            }
+            for mut doc in self.docs.iter_mut() {
+                doc.diag_cache = DiagnosticsCache::new();
+            }
+            self.scan_workspace().await;
+            let open: Vec<Url> = self.docs.iter().map(|doc| doc.key().clone()).collect();
+            for uri in open {
+                self.refresh(&uri).await;
+            }
+            let message = "ZeroSyntax index cache rebuilt.";
+            self.client.show_message(MessageType::INFO, message).await;
+            return Ok(Some(serde_json::json!({
+                "rebuilt": true,
+                "message": message
+            })));
+        }
+
+        let message = if cleared {
+            "ZeroSyntax index cache cleared. Restart the language server to rebuild it."
+        } else {
+            "ZeroSyntax index cache is already clear."
+        };
+        self.client.show_message(MessageType::INFO, message).await;
+        Ok(Some(serde_json::json!({
+            "cleared": cleared,
+            "message": message
+        })))
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
@@ -1673,6 +2091,62 @@ fn origin_copy_fixes(
 mod tests {
     use super::*;
 
+    fn test_dir(label: &str) -> PathBuf {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "zerosyntax-{label}-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn w3d_with_member(member: &str) -> Vec<u8> {
+        let mut pivot = vec![0; 60];
+        let name = member.as_bytes();
+        pivot[..name.len().min(16)].copy_from_slice(&name[..name.len().min(16)]);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0x0000_0102u32.to_le_bytes());
+        bytes.extend_from_slice(&(pivot.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&pivot);
+        bytes
+    }
+
+    fn write_big(path: &Path, entries: &[(&str, Vec<u8>)]) {
+        let directory_len: usize = entries.iter().map(|(name, _)| 8 + name.len() + 1).sum();
+        let mut offset = 0x10 + directory_len;
+        let archive_size = offset + entries.iter().map(|(_, bytes)| bytes.len()).sum::<usize>();
+        let mut out = Vec::with_capacity(archive_size);
+        out.extend_from_slice(b"BIGF");
+        out.extend_from_slice(&(archive_size as u32).to_be_bytes());
+        out.extend_from_slice(&(entries.len() as u32).to_be_bytes());
+        out.extend_from_slice(&0u32.to_be_bytes());
+        for (name, bytes) in entries {
+            out.extend_from_slice(&(offset as u32).to_be_bytes());
+            out.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
+            out.extend_from_slice(name.as_bytes());
+            out.push(0);
+            offset += bytes.len();
+        }
+        for (_, bytes) in entries {
+            out.extend_from_slice(bytes);
+        }
+        std::fs::write(path, out).unwrap();
+    }
+
+    fn cached_scan(
+        analyzer: &Analyzer,
+        workspace_roots: &[PathBuf],
+        base_roots: &[PathBuf],
+        cache: &Path,
+        workers: usize,
+    ) -> (Vec<(bool, ScanEntry)>, ScanStats) {
+        let paths = collect_scan_plan(workspace_roots, base_roots);
+        scan_with_cache(analyzer, &paths, cache, workers, &mut |_, _| {})
+    }
+
     #[test]
     fn canonical_uri_pass_through_non_file() {
         let u = Url::parse("untitled:///buffer").unwrap();
@@ -1684,6 +2158,166 @@ mod tests {
         assert!(is_map_layer_file("file:///C:/Maps/Foo/map.ini"));
         assert!(is_map_layer_file("C:\\Maps\\Foo\\solo.ini"));
         assert!(!is_map_layer_file("C:/Data/INI/Object.ini"));
+    }
+
+    #[test]
+    fn removes_only_the_requested_index_cache() {
+        let dir = test_dir("clear-cache");
+        let current = dir.join("current.json");
+        let other = dir.join("other.json");
+        std::fs::write(&current, b"cache").unwrap();
+        std::fs::write(&other, b"cache").unwrap();
+
+        assert!(remove_index_cache(&current).unwrap());
+        assert!(!current.exists());
+        assert!(other.exists());
+        assert!(!remove_index_cache(&current).unwrap());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn cache_reuses_complete_scan_and_invalidates_changed_loose_file() {
+        let dir = test_dir("cache-loose");
+        let cache = dir.join("cache.json");
+        std::fs::write(dir.join("Object.ini"), "Object CachedTank\nEnd\n").unwrap();
+        let model = dir.join("Tank.w3d");
+        std::fs::write(&model, w3d_with_member("Muzzle01")).unwrap();
+        let analyzer = Analyzer::embedded();
+        let roots = std::slice::from_ref(&dir);
+
+        let (cold, cold_stats) = cached_scan(&analyzer, &[], roots, &cache, 1);
+        assert_eq!((cold_stats.hits, cold_stats.misses), (0, 2));
+        let (warm, warm_stats) = cached_scan(&analyzer, &[], roots, &cache, 4);
+        assert_eq!((warm_stats.hits, warm_stats.misses), (2, 0));
+        assert_eq!(cold, warm);
+
+        let mut changed = w3d_with_member("Muzzle02");
+        changed.push(0); // size change guarantees invalidation on coarse-mtime filesystems
+        std::fs::write(&model, changed).unwrap();
+        let (_, changed_stats) = cached_scan(&analyzer, &[], roots, &cache, 4);
+        assert_eq!((changed_stats.hits, changed_stats.misses), (1, 1));
+
+        let mut incompatible = load_index_cache(&cache, schema_hash());
+        incompatible.schema_hash ^= 1;
+        write_index_cache(&cache, &incompatible).unwrap();
+        let (_, schema_stats) = cached_scan(&analyzer, &[], roots, &cache, 1);
+        assert_eq!((schema_stats.hits, schema_stats.misses), (0, 2));
+
+        std::fs::write(&cache, b"not json").unwrap();
+        let (_, corrupt_stats) = cached_scan(&analyzer, &[], roots, &cache, 1);
+        assert_eq!((corrupt_stats.hits, corrupt_stats.misses), (0, 2));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn cache_invalidates_changed_big_archive_as_one_file() {
+        let dir = test_dir("cache-big");
+        let archive = dir.join("Models.big");
+        let cache = dir.join("cache.json");
+        write_big(
+            &archive,
+            &[
+                ("Data/INI/Object.ini", b"Object BigTank\nEnd\n".to_vec()),
+                ("Art/Tank.w3d", w3d_with_member("Muzzle01")),
+            ],
+        );
+        let analyzer = Analyzer::embedded();
+        let roots = std::slice::from_ref(&archive);
+
+        let (cold, cold_stats) = cached_scan(&analyzer, &[], roots, &cache, 1);
+        assert_eq!((cold_stats.hits, cold_stats.misses), (0, 1));
+        assert_eq!(cold.len(), 2);
+        let (warm, warm_stats) = cached_scan(&analyzer, &[], roots, &cache, 4);
+        assert_eq!((warm_stats.hits, warm_stats.misses), (1, 0));
+        assert_eq!(cold, warm);
+
+        write_big(
+            &archive,
+            &[
+                (
+                    "Data/INI/Object.ini",
+                    b"Object ChangedBigTank\nEnd\n".to_vec(),
+                ),
+                ("Art/Tank.w3d", w3d_with_member("Muzzle02")),
+            ],
+        );
+        let (_, changed_stats) = cached_scan(&analyzer, &[], roots, &cache, 4);
+        assert_eq!((changed_stats.hits, changed_stats.misses), (0, 1));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn parallel_scan_preserves_order_and_overlapping_roots_are_deduped() {
+        let dir = test_dir("parallel");
+        for i in 0..32 {
+            std::fs::write(
+                dir.join(format!("Model{i:02}.w3d")),
+                w3d_with_member(&format!("Bone{i:02}")),
+            )
+            .unwrap();
+        }
+        let roots = std::slice::from_ref(&dir);
+        let plan = collect_scan_plan(roots, roots);
+        assert_eq!(plan.len(), 32);
+        assert!(plan.iter().all(|path| path.is_base));
+
+        let analyzer = Analyzer::embedded();
+        let (serial, _) = cached_scan(&analyzer, &[], roots, &dir.join("serial.json"), 1);
+        let (parallel, _) = cached_scan(&analyzer, &[], roots, &dir.join("parallel.json"), 4);
+        assert_eq!(serial, parallel);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    #[ignore = "3,000-file synthetic timing harness; run with --ignored --nocapture"]
+    fn synthetic_3000_asset_cold_and_warm_timings() {
+        let dir = test_dir("benchmark");
+        for i in 0..3000 {
+            std::fs::write(
+                dir.join(format!("Model{i:04}.w3d")),
+                w3d_with_member(&format!("Bone{:02}", i % 100)),
+            )
+            .unwrap();
+        }
+        let analyzer = Analyzer::embedded();
+        let mut serial_times = Vec::new();
+        let mut parallel_times = Vec::new();
+        let mut expected = None;
+        let roots = std::slice::from_ref(&dir);
+        for run in 0..3 {
+            let started = Instant::now();
+            let (out, _) = cached_scan(
+                &analyzer,
+                &[],
+                roots,
+                &dir.join(format!("serial-{run}.json")),
+                1,
+            );
+            serial_times.push(started.elapsed());
+            expected.get_or_insert(out);
+
+            let started = Instant::now();
+            let (out, _) = cached_scan(
+                &analyzer,
+                &[],
+                roots,
+                &dir.join(format!("parallel-{run}.json")),
+                4,
+            );
+            parallel_times.push(started.elapsed());
+            assert_eq!(expected.as_ref(), Some(&out));
+        }
+        serial_times.sort_unstable();
+        parallel_times.sort_unstable();
+        let warm_started = Instant::now();
+        let (_, warm_stats) = cached_scan(&analyzer, &[], roots, &dir.join("parallel-2.json"), 4);
+        let warm = warm_started.elapsed();
+        assert_eq!((warm_stats.hits, warm_stats.misses), (3000, 0));
+        eprintln!(
+            "3,000 W3Ds: serial median {:?}, parallel median {:?}, warm {:?}",
+            serial_times[1], parallel_times[1], warm
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -1736,7 +2370,7 @@ mod tests {
         std::fs::write(dir.join("Good.w3d"), bytes).unwrap();
 
         let analyzer = Analyzer::embedded();
-        let scanned = scan_roots(&analyzer, &[dir.clone()]);
+        let scanned = scan_roots(&analyzer, std::slice::from_ref(&dir));
         let _ = std::fs::remove_dir_all(&dir);
 
         let mut idx = WorkspaceIndex::new();

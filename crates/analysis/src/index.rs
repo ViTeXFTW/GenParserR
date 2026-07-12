@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
 use zerosyntax_schema::{RefKind, ValueType};
 use zerosyntax_syntax::ast::{Block, Field, Module};
 use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode};
@@ -15,7 +16,7 @@ use crate::model::{scope_schema, ScopeSchema};
 use crate::{Analyzer, Span};
 
 /// Model data discovered from a W3D asset.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelAsset {
     pub name: String,
     pub members: Vec<String>,
@@ -29,7 +30,7 @@ pub struct Location {
 }
 
 /// A named definition discovered in a document.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Definition {
     pub name: String,
     pub kind: RefKind,
@@ -37,7 +38,7 @@ pub struct Definition {
 }
 
 /// A place where a definition is *referenced* (a Reference-typed field value).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReferenceSite {
     pub name: String,
     pub kind: RefKind,

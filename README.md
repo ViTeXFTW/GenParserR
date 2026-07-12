@@ -52,6 +52,11 @@ For map/solo.ini diagnostics and W3D model/bone completions, set
 INI definitions are treated as already loaded before the map file; W3D assets
 are indexed for model and bone checks.
 
+The server advertises the standard LSP workspace commands
+`zerosyntax.clearIndexCache` and `zerosyntax.rebuildIndexCache`. Any editor can
+invoke them through `workspace/executeCommand`; rebuilding refreshes the live
+index and cache without restarting the language server.
+
 ### Standalone language server
 
 Release assets also include the standalone `zerosyntax-lsp` binary. Any editor
