@@ -4,6 +4,7 @@
 mod asset_index;
 mod backend;
 mod convert;
+mod document;
 
 use backend::Backend;
 use tower_lsp::{LspService, Server};

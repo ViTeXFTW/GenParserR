@@ -1,55 +1,30 @@
 //! The tower-lsp language server backend.
 //!
-//! Holds open documents as [`DocumentState`]s — a `ropey` rope plus the cached
-//! parse for that text — alongside a shared [`Analyzer`] (the embedded schema)
-//! and a workspace symbol [`WorkspaceIndex`]. Document sync is INCREMENTAL:
-//! `didChange` deltas are applied to the rope and the document is re-parsed
-//! once per change batch; read-only requests reuse the cached parse.
+//! Adapts LSP requests to the shared analysis engine, document store, and asset
+//! index.
 
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Instant;
 
-use dashmap::DashMap;
 use ropey::Rope;
 use serde::Deserialize;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{jsonrpc::Result, Client, LanguageServer};
-use zerosyntax_analysis::diagnostics::DiagnosticsCache;
 use zerosyntax_analysis::index::{definitions_in, module_tags_in, references_in, WorkspaceIndex};
 use zerosyntax_analysis::nav::{definition_at, hover_at, reference_at, HoverInfo};
 use zerosyntax_analysis::{actions, completion, diagnostics, format, outline, semantic, Analyzer};
-use zerosyntax_syntax::{Edit, Parse};
+use zerosyntax_syntax::Parse;
 
 use crate::asset_index;
 use crate::convert::{self, PositionEnc};
-
-/// An open document: its text (as both a rope for position math and a string
-/// for the parser) and the parse of that exact text. `did_open`/`did_change`
-/// are the only places a new parse is produced for an open document;
-/// `did_change` reparses incrementally by splicing at block boundaries.
-struct DocumentState {
-    rope: Rope,
-    /// The same text as `rope`; the source the cached `parse` was built from.
-    text: Arc<str>,
-    parse: Arc<Parse>,
-    version: i32,
-    /// Per-block diagnostics, reused across edits for unchanged blocks.
-    diag_cache: DiagnosticsCache,
-    /// The last `semanticTokens/full` response (result id + encoded data),
-    /// kept so `full/delta` can answer with a splice instead of the world.
-    last_semantic: Option<(u64, Vec<SemanticToken>)>,
-}
+use crate::document::DocumentStore;
 
 pub struct Backend {
     client: Client,
     analyzer: Arc<Analyzer>,
-    /// Open documents, keyed by URI.
-    docs: DashMap<Url, DocumentState>,
-    /// Read-only documents synthesized from configured `.big` archives.
-    virtual_files: DashMap<String, Arc<str>>,
+    documents: DocumentStore,
     index: RwLock<WorkspaceIndex>,
     /// Workspace roots, captured at `initialize` and scanned in `initialized`.
     roots: Mutex<Vec<PathBuf>>,
@@ -120,8 +95,7 @@ impl Backend {
         Backend {
             client,
             analyzer: Arc::new(Analyzer::embedded()),
-            docs: DashMap::new(),
-            virtual_files: DashMap::new(),
+            documents: DocumentStore::new(),
             index: RwLock::new(WorkspaceIndex::new()),
             roots: Mutex::new(Vec::new()),
             encoding: OnceLock::new(),
@@ -157,23 +131,17 @@ impl Backend {
     async fn refresh(&self, uri: &Url) {
         // Take the cache out so diagnostics run without holding the doc entry
         // (avoids lock-order entanglement with the index RwLock).
-        let Some((rope, parse, version, mut cache)) = self.docs.get_mut(uri).map(|mut d| {
-            (
-                d.rope.clone(),
-                d.parse.clone(),
-                d.version,
-                std::mem::take(&mut d.diag_cache),
-            )
-        }) else {
+        let Some(mut diagnostic) = self.documents.checkout_diagnostics(uri) else {
             return;
         };
+        let document = &diagnostic.document;
 
         // `set_file` bumps the index generation only when definition *names*
         // changed, so ordinary keystrokes keep diagnostics caches warm.
         // Reference sites never bump it.
-        let defs = definitions_in(&self.analyzer, &parse, uri.as_str());
-        let refs = references_in(&self.analyzer, &parse);
-        let tags = module_tags_in(&self.analyzer, &parse);
+        let defs = definitions_in(&self.analyzer, &document.parse, uri.as_str());
+        let refs = references_in(&self.analyzer, &document.parse);
+        let tags = module_tags_in(&self.analyzer, &document.parse);
         let str_keys = asset_index::load_sibling_str_keys(uri);
         if let Ok(mut idx) = self.index.write() {
             idx.set_file(uri.as_str(), defs);
@@ -187,30 +155,27 @@ impl Backend {
             let idx = self.index.read().ok();
             let diags = diagnostics::diagnose_with_cache(
                 &self.analyzer,
-                &parse,
+                &document.parse,
                 idx.as_deref(),
                 Some(uri.as_str()),
-                &mut cache,
+                &mut diagnostic.cache,
             );
             diags
                 .iter()
-                .map(|d| convert::to_lsp_diagnostic(&rope, d, enc))
+                .map(|d| convert::to_lsp_diagnostic(&document.rope, d, enc))
                 .collect()
         };
 
         // Hand the warmed cache back unless a newer change superseded us (the
         // newer change runs its own refresh against its own parse).
+        if !self
+            .documents
+            .restore_diagnostics(uri, document.version, diagnostic.cache)
         {
-            let Some(mut entry) = self.docs.get_mut(uri) else {
-                return;
-            };
-            if entry.version != version {
-                return;
-            }
-            entry.diag_cache = cache;
+            return;
         }
         self.client
-            .publish_diagnostics(uri.clone(), lsp_diags, Some(version))
+            .publish_diagnostics(uri.clone(), lsp_diags, Some(document.version))
             .await;
         self.maybe_warn_missing_base_roots(uri).await;
     }
@@ -300,20 +265,24 @@ impl Backend {
         // Don't overwrite index entries for already-open documents with stale
         // disk content; `initialized` calls `refresh` for each open doc right
         // after this returns, so they will populate the index from live text.
-        let open: HashSet<String> = self
-            .docs
-            .iter()
-            .map(|e| e.key().as_str().to_string())
-            .collect();
+        let open = self.documents.open_uri_strings();
         let apply_started = Instant::now();
+        let virtual_files: Vec<_> = result
+            .entries
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .text
+                    .as_ref()
+                    .map(|text| (entry.file.clone(), Arc::clone(text)))
+            })
+            .collect();
+        self.documents.replace_virtual_files(virtual_files);
         {
             let Ok(mut idx) = self.index.write() else {
                 return;
             };
             for entry in result.entries {
-                if let Some(text) = entry.text {
-                    self.virtual_files.insert(entry.file.clone(), text);
-                }
                 if !open.contains(&entry.file) {
                     idx.set_file(&entry.file, entry.definitions);
                     idx.set_file_refs(&entry.file, entry.references);
@@ -415,34 +384,19 @@ impl Backend {
 
     /// The cached state for an open document (rope + parse), if any.
     fn doc(&self, uri: &Url) -> Option<(Rope, Arc<Parse>)> {
-        self.docs
-            .get(uri)
-            .map(|d| (d.rope.clone(), d.parse.clone()))
+        self.documents
+            .snapshot(uri)
+            .map(|document| (document.rope, document.parse))
     }
 
     /// Resolve a URI's text to a rope, preferring open documents and falling
     /// back to disk (for go-to-definition into unopened files).
     fn rope_for(&self, uri: &Url) -> Option<Rope> {
-        if let Some(doc) = self.docs.get(uri) {
-            return Some(doc.rope.clone());
-        }
-        if uri.scheme() == "big" {
-            return self
-                .virtual_files
-                .get(uri.as_str())
-                .map(|text| Rope::from_str(&text));
-        }
-        let path = uri.to_file_path().ok()?;
-        std::fs::read(path)
-            .ok()
-            .map(|bytes| Rope::from_str(&String::from_utf8_lossy(&bytes)))
+        self.documents.rope_for(uri)
     }
 
     pub async fn read_virtual_file(&self, params: VirtualFileParams) -> Result<Option<String>> {
-        Ok(self
-            .virtual_files
-            .get(&params.uri)
-            .map(|text| text.to_string()))
+        Ok(self.documents.read_virtual_file(&params.uri))
     }
 
     /// The (kind, name, span) under the cursor — a reference-typed value token
@@ -617,8 +571,7 @@ impl LanguageServer for Backend {
         // Re-publish diagnostics for any already-open docs now that the index
         // is populated (so cross-file references resolve). The cached parse is
         // still valid — only the index changed.
-        let open: Vec<Url> = self.docs.iter().map(|e| e.key().clone()).collect();
-        for uri in open {
+        for uri in self.documents.open_uris() {
             self.refresh(&uri).await;
         }
         let (ini, models) = {
@@ -675,16 +628,13 @@ impl LanguageServer for Backend {
             self.scan_finished.store(false, Ordering::Relaxed);
             self.base_indexed_count.store(0, Ordering::Relaxed);
             self.last_scan_cache_hits.store(0, Ordering::Relaxed);
-            self.virtual_files.clear();
+            self.documents.clear_virtual_files();
             if let Ok(mut index) = self.index.write() {
                 *index = WorkspaceIndex::new();
             }
-            for mut doc in self.docs.iter_mut() {
-                doc.diag_cache = DiagnosticsCache::new();
-            }
+            self.documents.clear_diagnostic_caches();
             self.scan_workspace().await;
-            let open: Vec<Url> = self.docs.iter().map(|doc| doc.key().clone()).collect();
-            for uri in open {
+            for uri in self.documents.open_uris() {
                 self.refresh(&uri).await;
             }
             let message = "ZeroSyntax index cache rebuilt.";
@@ -709,20 +659,12 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = canonical_uri(params.text_document.uri);
-        let text: Arc<str> = params.text_document.text.into();
-        let rope = Rope::from_str(&text);
-        let parse = Arc::new(self.analyzer.parse(&text));
         let version = params.text_document.version;
-        self.docs.insert(
+        self.documents.open(
+            &self.analyzer,
             uri.clone(),
-            DocumentState {
-                rope,
-                text,
-                parse,
-                version,
-                diag_cache: DiagnosticsCache::new(),
-                last_semantic: None,
-            },
+            params.text_document.text,
+            version,
         );
         self.refresh(&uri).await;
     }
@@ -731,69 +673,12 @@ impl LanguageServer for Backend {
         let uri = canonical_uri(params.text_document.uri);
         let version = params.text_document.version;
         let enc = self.enc();
+        if self
+            .documents
+            .change(&self.analyzer, &uri, params.content_changes, version, enc)
+            .is_none()
         {
-            let Some(mut entry) = self.docs.get_mut(&uri) else {
-                return;
-            };
-            let entry = entry.value_mut();
-            // Bulk batches (e.g. format-on-save applying coalesced reindent
-            // edits) take a different path: incremental reparse needs the full
-            // old/new text per edit, so running it per change is
-            // O(changes × file). Apply every delta to the rope first, then
-            // rebuild the text and parse once — one full parse beats a pile
-            // of incremental ones. Triggers on many changes or on a
-            // multi-change batch with a large total payload (a few coalesced
-            // format edits can each carry kilobytes).
-            const BULK_CHANGE_THRESHOLD: usize = 8;
-            const BULK_TEXT_BYTES: usize = 32 * 1024;
-            let bulk = params.content_changes.len() > BULK_CHANGE_THRESHOLD
-                || (params.content_changes.len() > 1
-                    && params
-                        .content_changes
-                        .iter()
-                        .map(|c| c.text.len())
-                        .sum::<usize>()
-                        > BULK_TEXT_BYTES);
-            if bulk && params.content_changes.iter().all(|c| c.range.is_some()) {
-                for change in params.content_changes {
-                    convert::apply_change(&mut entry.rope, change.range, &change.text, enc);
-                }
-                entry.text = entry.rope.to_string().into();
-                entry.parse = Arc::new(self.analyzer.parse(&entry.text));
-                entry.version = version;
-            } else {
-                // Each change applies to the text produced by the previous
-                // one. The parse is kept in lockstep via incremental reparse,
-                // so the cost per keystroke is the edited block, not the
-                // whole file.
-                for change in params.content_changes {
-                    match change.range {
-                        Some(range) => {
-                            let start = convert::position_to_offset(&entry.rope, range.start, enc);
-                            let old_end = convert::position_to_offset(&entry.rope, range.end, enc);
-                            convert::apply_change(&mut entry.rope, Some(range), &change.text, enc);
-                            let new_text: Arc<str> = entry.rope.to_string().into();
-                            let edit = Edit {
-                                start: start as usize,
-                                old_end: old_end as usize,
-                                new_len: change.text.len(),
-                            };
-                            let (parse, _strategy) =
-                                self.analyzer
-                                    .reparse(&entry.parse, &entry.text, &new_text, edit);
-                            entry.parse = Arc::new(parse);
-                            entry.text = new_text;
-                        }
-                        None => {
-                            // Full-document replacement.
-                            entry.rope = Rope::from_str(&change.text);
-                            entry.text = change.text.into();
-                            entry.parse = Arc::new(self.analyzer.parse(&entry.text));
-                        }
-                    }
-                }
-                entry.version = version;
-            }
+            return;
         }
         self.refresh(&uri).await;
     }
@@ -801,7 +686,8 @@ impl LanguageServer for Backend {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         // Keep the file's symbols in the index (it still exists on disk); just
         // drop the in-memory buffer.
-        self.docs.remove(&canonical_uri(params.text_document.uri));
+        self.documents
+            .close(&canonical_uri(params.text_document.uri));
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -837,9 +723,8 @@ impl LanguageServer for Backend {
         let tokens = semantic::semantic_tokens(&self.analyzer, &parse);
         let data = convert::to_lsp_semantic_tokens(&rope, &tokens, self.enc());
         let id = self.next_semantic_id();
-        if let Some(mut doc) = self.docs.get_mut(&uri) {
-            doc.last_semantic = Some((id, data.clone()));
-        }
+        self.documents
+            .replace_semantic_history(&uri, (id, data.clone()));
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
             result_id: Some(id.to_string()),
             data,
@@ -858,9 +743,8 @@ impl LanguageServer for Backend {
         let data = convert::to_lsp_semantic_tokens(&rope, &tokens, self.enc());
         let id = self.next_semantic_id();
         let previous = self
-            .docs
-            .get_mut(&uri)
-            .and_then(|mut doc| doc.last_semantic.replace((id, data.clone())));
+            .documents
+            .replace_semantic_history(&uri, (id, data.clone()));
         // Only splice against the exact result the client says it holds;
         // anything else (stale id, no history) falls back to a full response.
         match previous {
@@ -888,11 +772,7 @@ impl LanguageServer for Backend {
         let uri = canonical_uri(params.text_document.uri);
         // `text` is kept in lockstep with `rope` by did_open/did_change, so no
         // rope-to-string rebuild is needed here.
-        let Some((rope, text, parse)) = self
-            .docs
-            .get(&uri)
-            .map(|d| (d.rope.clone(), d.text.clone(), d.parse.clone()))
-        else {
+        let Some(document) = self.documents.snapshot(&uri) else {
             return Ok(None);
         };
         let indent = if params.options.insert_spaces {
@@ -901,10 +781,10 @@ impl LanguageServer for Backend {
             "\t".to_string()
         };
         let enc = self.enc();
-        let edits = format::format_edits(&parse, &text, &indent)
+        let edits = format::format_edits(&document.parse, &document.text, &indent)
             .into_iter()
             .map(|e| TextEdit {
-                range: convert::span_to_range(&rope, e.span, enc),
+                range: convert::span_to_range(&document.rope, e.span, enc),
                 new_text: e.new_text,
             })
             .collect();
@@ -916,36 +796,29 @@ impl LanguageServer for Backend {
 
         // Take the diagnostics cache out without holding the DashMap entry
         // across the index lock (avoids lock-order deadlock with the index RwLock).
-        let Some((rope, parse, text, version, mut cache)) = self.docs.get_mut(&uri).map(|mut d| {
-            (
-                d.rope.clone(),
-                d.parse.clone(),
-                Arc::clone(&d.text),
-                d.version,
-                std::mem::take(&mut d.diag_cache),
-            )
-        }) else {
+        let Some(mut diagnostic) = self.documents.checkout_diagnostics(&uri) else {
             return Ok(None);
         };
+        let document = &diagnostic.document;
 
         let enc = self.enc();
-        let start = convert::position_to_offset(&rope, params.range.start, enc);
-        let end = convert::position_to_offset(&rope, params.range.end, enc);
+        let start = convert::position_to_offset(&document.rope, params.range.start, enc);
+        let end = convert::position_to_offset(&document.rope, params.range.end, enc);
 
         let range_span = zerosyntax_analysis::Span::new(start, end);
         let fixes = {
             let idx = self.index.read().ok();
             let diags = diagnostics::diagnose_with_cache(
                 &self.analyzer,
-                &parse,
+                &document.parse,
                 idx.as_deref(),
                 Some(uri.as_str()),
-                &mut cache,
+                &mut diagnostic.cache,
             );
             let mut f = actions::fixes(
                 &self.analyzer,
-                &parse,
-                &text,
+                &document.parse,
+                &document.text,
                 range_span,
                 &diags,
                 idx.as_deref(),
@@ -954,29 +827,26 @@ impl LanguageServer for Backend {
             if let Some(idx) = idx.as_deref() {
                 f.extend(origin_copy_fixes(
                     &self.analyzer,
-                    &parse,
-                    &text,
+                    &document.parse,
+                    &document.text,
                     range_span,
                     &diags,
                     idx,
-                    |base_uri| self.rope_for(base_uri).map(|rope| rope.to_string()),
+                    |base_uri| self.documents.source_text(base_uri.as_str()),
                 ));
             }
             f
         };
 
         // Hand the warmed cache back unless a newer change superseded us.
-        if let Some(mut entry) = self.docs.get_mut(&uri) {
-            if entry.version == version {
-                entry.diag_cache = cache;
-            }
-        }
+        self.documents
+            .restore_diagnostics(&uri, document.version, diagnostic.cache);
 
         let response: CodeActionResponse = fixes
             .into_iter()
             .map(|f| {
                 let edit = TextEdit {
-                    range: convert::span_to_range(&rope, f.span, enc),
+                    range: convert::span_to_range(&document.rope, f.span, enc),
                     new_text: f.new_text,
                 };
                 CodeActionOrCommand::CodeAction(CodeAction {
