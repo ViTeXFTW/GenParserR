@@ -307,7 +307,7 @@ fn check_action(
         ));
     };
     let range = Span::new(off, off + spec.on.len() as u32);
-    let fixes = actions::fixes(analyzer, parse, src, range, diags, Some(index));
+    let fixes = actions::fixes(analyzer, parse, src, range, diags, Some(index), |_| None);
     let titles: Vec<&str> = fixes.iter().map(|f| f.title.as_str()).collect();
 
     let missing: Vec<&String> = spec

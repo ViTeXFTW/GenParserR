@@ -815,27 +815,15 @@ impl LanguageServer for Backend {
                 Some(uri.as_str()),
                 &mut diagnostic.cache,
             );
-            let mut f = actions::fixes(
+            actions::fixes(
                 &self.analyzer,
                 &document.parse,
                 &document.text,
                 range_span,
                 &diags,
                 idx.as_deref(),
-            );
-            // Origin-copy fix: requires file I/O, so computed here in the server.
-            if let Some(idx) = idx.as_deref() {
-                f.extend(origin_copy_fixes(
-                    &self.analyzer,
-                    &document.parse,
-                    &document.text,
-                    range_span,
-                    &diags,
-                    idx,
-                    |base_uri| self.documents.source_text(base_uri.as_str()),
-                ));
-            }
-            f
+                |source_uri| self.documents.source_text(source_uri),
+            )
         };
 
         // Hand the warmed cache back unless a newer change superseded us.
@@ -1147,113 +1135,6 @@ impl LanguageServer for Backend {
             range: Some(convert::span_to_range(&rope, span, enc)),
         }))
     }
-}
-
-/// Build "Insert reference copy of <name>" fixes for any `overrides` diagnostic
-/// intersecting `range`. Reads the base definition file via `read_file` and
-/// extracts the full Object block text to insert at the end of the current file.
-fn origin_copy_fixes(
-    analyzer: &Analyzer,
-    parse: &zerosyntax_syntax::Parse,
-    text: &str,
-    range: zerosyntax_analysis::Span,
-    diags: &[zerosyntax_analysis::diagnostics::Diagnostic],
-    index: &WorkspaceIndex,
-    read_file: impl Fn(&Url) -> Option<String>,
-) -> Vec<actions::Fix> {
-    use zerosyntax_analysis::index::Location;
-    use zerosyntax_syntax::ast::Block;
-    use zerosyntax_syntax::SyntaxKind;
-
-    let mut out = Vec::new();
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    for d in diags {
-        if d.code != "overrides" {
-            continue;
-        }
-        if d.span.end < range.start || d.span.start > range.end {
-            continue;
-        }
-        // Find the top-level BLOCK whose name token's span contains the diagnostic.
-        let block_node = parse
-            .syntax()
-            .children()
-            .filter(|n| n.kind() == SyntaxKind::BLOCK)
-            .find(|n| {
-                let nr = n.text_range();
-                u32::from(nr.start()) <= d.span.start && d.span.end <= u32::from(nr.end())
-            });
-        let Some(block_node) = block_node else {
-            continue;
-        };
-        let block = Block(block_node.clone());
-        let Some(kw) = block.keyword() else { continue };
-        let Some(schema_block) = analyzer.block(kw.text()) else {
-            continue;
-        };
-        let Some(kind) = schema_block.defines else {
-            continue;
-        };
-        let Some(name_tok) = block.name() else {
-            continue;
-        };
-        let name = name_tok.text().to_string();
-        if !seen.insert(name.to_ascii_lowercase()) {
-            continue;
-        }
-        // Find a base-game (non-override-layer) definition location.
-        let base_loc: Option<&Location> = index.locations(kind, &name).iter().find(|l| {
-            !l.file.rsplit(['/', '\\']).next().is_some_and(|f| {
-                f.eq_ignore_ascii_case("map.ini") || f.eq_ignore_ascii_case("solo.ini")
-            })
-        });
-        let Some(base_loc) = base_loc else { continue };
-        let base_url = match Url::parse(&base_loc.file) {
-            Ok(u) => u,
-            Err(_) => continue,
-        };
-        let Some(base_text) = read_file(&base_url) else {
-            continue;
-        };
-        // Re-parse the base file and extract the block at the name token.
-        let base_parse = analyzer.parse(&base_text);
-        let base_block_text: Option<String> = base_parse
-            .syntax()
-            .children()
-            .filter(|n| n.kind() == SyntaxKind::BLOCK)
-            .find(|n| {
-                Block(n.clone())
-                    .name()
-                    .map(|t| t.text().eq_ignore_ascii_case(&name))
-                    .unwrap_or(false)
-            })
-            .map(|n| {
-                let r = n.text_range();
-                base_text[usize::from(r.start())..usize::from(r.end())].to_string()
-            });
-        let Some(block_text) = base_block_text else {
-            continue;
-        };
-        let base_short = base_url
-            .path_segments()
-            .and_then(|mut s| s.next_back())
-            .unwrap_or("base");
-        let lead = if text.is_empty() || text.ends_with('\n') {
-            ""
-        } else {
-            "\n"
-        };
-        let at = text.len() as u32;
-        out.push(actions::Fix {
-            title: format!("Insert reference copy of `{name}` from {base_short}"),
-            span: zerosyntax_analysis::Span::new(at, at),
-            new_text: format!(
-                "{lead}\n; === Reference copy of {name} from {base_short} ===\n; Remove the fields and modules you don't need.\n{block_text}\n"
-            ),
-        });
-    }
-    out
 }
 
 #[cfg(test)]

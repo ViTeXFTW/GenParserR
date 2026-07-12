@@ -4,7 +4,7 @@
 //! unreachable sets, scaffold stub definitions, suppress diagnostics in-file).
 
 use zerosyntax_schema::{RefKind, ValueType};
-use zerosyntax_syntax::ast::{Field, Module};
+use zerosyntax_syntax::ast::{Block, Field, Module};
 use zerosyntax_syntax::{Parse, SyntaxErrorKind, SyntaxKind, SyntaxNode, SyntaxToken};
 
 use crate::diagnostics::{pragma_rest, pragma_words, Diagnostic, Severity};
@@ -22,7 +22,8 @@ pub struct Fix {
 /// All fixes applicable within `range` (the editor's selection/cursor line).
 /// `diags` should be the suppression-filtered diagnostics for the document
 /// (from `diagnose_with_cache`); `index` is the workspace index for cross-file
-/// checks (e.g. stub creation).
+/// checks (e.g. stub creation). `load_source` resolves indexed file URIs when
+/// a fix needs source from another file.
 pub fn fixes(
     analyzer: &Analyzer,
     parse: &Parse,
@@ -30,11 +31,127 @@ pub fn fixes(
     range: Span,
     diags: &[Diagnostic],
     index: Option<&WorkspaceIndex>,
+    load_source: impl Fn(&str) -> Option<String>,
 ) -> Vec<Fix> {
     let mut out = Vec::new();
     insert_missing_ends(parse, text, range, &mut out);
     suggest_members(analyzer, parse, range, &mut out);
     diagnostic_fixes(analyzer, parse, text, range, diags, index, &mut out);
+    if let Some(index) = index {
+        out.extend(origin_copy_fixes(
+            analyzer,
+            parse,
+            text,
+            range,
+            diags,
+            index,
+            load_source,
+        ));
+    }
+    out
+}
+
+/// Offer to append the complete base definition for a map-layer override.
+fn origin_copy_fixes(
+    analyzer: &Analyzer,
+    parse: &Parse,
+    text: &str,
+    range: Span,
+    diags: &[Diagnostic],
+    index: &WorkspaceIndex,
+    load_source: impl Fn(&str) -> Option<String>,
+) -> Vec<Fix> {
+    use std::collections::HashSet;
+
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for diagnostic in diags {
+        if diagnostic.code != "overrides"
+            || diagnostic.span.end < range.start
+            || diagnostic.span.start > range.end
+        {
+            continue;
+        }
+        let block_node = parse
+            .syntax()
+            .children()
+            .filter(|node| node.kind() == SyntaxKind::BLOCK)
+            .find(|node| {
+                let node_range = node.text_range();
+                u32::from(node_range.start()) <= diagnostic.span.start
+                    && diagnostic.span.end <= u32::from(node_range.end())
+            });
+        let Some(block_node) = block_node else {
+            continue;
+        };
+        let block = Block(block_node);
+        let Some(keyword) = block.keyword() else {
+            continue;
+        };
+        let Some(kind) = analyzer
+            .block(keyword.text())
+            .and_then(|schema_block| schema_block.defines)
+        else {
+            continue;
+        };
+        let Some(name) = block.name().map(|token| token.text().to_string()) else {
+            continue;
+        };
+        if !seen.insert(name.to_ascii_lowercase()) {
+            continue;
+        }
+
+        let base_location = index.locations(kind, &name).iter().find(|location| {
+            !location
+                .file
+                .rsplit(['/', '\\'])
+                .next()
+                .is_some_and(|file| {
+                    file.eq_ignore_ascii_case("map.ini") || file.eq_ignore_ascii_case("solo.ini")
+                })
+        });
+        let Some(base_location) = base_location else {
+            continue;
+        };
+        let Some(base_text) = load_source(&base_location.file) else {
+            continue;
+        };
+        let base_parse = analyzer.parse(&base_text);
+        let base_block = base_parse
+            .syntax()
+            .children()
+            .filter(|node| node.kind() == SyntaxKind::BLOCK)
+            .find(|node| {
+                Block(node.clone())
+                    .name()
+                    .is_some_and(|token| token.text().eq_ignore_ascii_case(&name))
+            });
+        let Some(base_block) = base_block else {
+            continue;
+        };
+        let block_range = base_block.text_range();
+        let block_text =
+            &base_text[usize::from(block_range.start())..usize::from(block_range.end())];
+        let base_short = base_location
+            .file
+            .rsplit(['/', '\\'])
+            .next()
+            .filter(|name| !name.is_empty())
+            .unwrap_or("base");
+        let lead = if text.is_empty() || text.ends_with('\n') {
+            ""
+        } else {
+            "\n"
+        };
+        let at = text.len() as u32;
+        out.push(Fix {
+            title: format!("Insert reference copy of `{name}` from {base_short}"),
+            span: Span::new(at, at),
+            new_text: format!(
+                "{lead}\n; === Reference copy of {name} from {base_short} ===\n; Remove the fields and modules you don't need.\n{block_text}\n"
+            ),
+        });
+    }
     out
 }
 
@@ -483,6 +600,7 @@ mod tests {
             Span::new(0, src.len() as u32),
             &diags,
             Some(&idx),
+            |_| None,
         )
     }
 
@@ -491,7 +609,15 @@ mod tests {
         let a = Analyzer::embedded();
         let src = "Object Tank\n  MaxHealth = 1\n";
         let parse = a.parse(src);
-        let fx = fixes(&a, &parse, src, Span::new(0, src.len() as u32), &[], None);
+        let fx = fixes(
+            &a,
+            &parse,
+            src,
+            Span::new(0, src.len() as u32),
+            &[],
+            None,
+            |_| None,
+        );
         assert_eq!(fx.len(), 1, "{fx:?}");
         assert!(fx[0].title.contains("`End`") && fx[0].title.contains("Object"));
         assert_eq!(fx[0].new_text, "End\n");
@@ -504,7 +630,15 @@ mod tests {
         // `Appearance` is enum locomotor_appearance; TREDS ≈ TREADS.
         let src = "Locomotor L\n  Appearance = TREDS\nEnd\n";
         let parse = a.parse(src);
-        let fx = fixes(&a, &parse, src, Span::new(0, src.len() as u32), &[], None);
+        let fx = fixes(
+            &a,
+            &parse,
+            src,
+            Span::new(0, src.len() as u32),
+            &[],
+            None,
+            |_| None,
+        );
         assert!(fx.iter().any(|f| f.new_text == "TREADS"), "{fx:?}");
 
         // Bitflag with prefix op: the `+` is preserved in the replacement.
@@ -517,6 +651,7 @@ mod tests {
             Span::new(0, src2.len() as u32),
             &[],
             None,
+            |_| None,
         );
         assert!(fx2.iter().any(|f| f.new_text == "+EXPLODED"), "{fx2:?}");
     }
@@ -526,7 +661,16 @@ mod tests {
         let a = Analyzer::embedded();
         let src = "Locomotor L\n  Appearance = TREADS\nEnd\n";
         let parse = a.parse(src);
-        assert!(fixes(&a, &parse, src, Span::new(0, src.len() as u32), &[], None).is_empty());
+        assert!(fixes(
+            &a,
+            &parse,
+            src,
+            Span::new(0, src.len() as u32),
+            &[],
+            None,
+            |_| None,
+        )
+        .is_empty());
     }
 
     // ── unreachable-set fixes ────────────────────────────────────────────────
@@ -870,6 +1014,55 @@ mod tests {
     }
 
     #[test]
+    fn reference_copy_uses_source_loader_and_requires_source() {
+        let analyzer = Analyzer::embedded();
+        let base_uri = "file:///game/Data/INI/Object.ini";
+        let map_uri = "file:///game/Maps/Test/map.ini";
+        let base = "Object Tank\n  MaxHealth = 500\nEnd\n";
+        let source = "Object Tank\n  MaxHealth = 750\nEnd\n";
+        let parse = analyzer.parse(source);
+        let mut index = WorkspaceIndex::new();
+        index.set_file(
+            base_uri,
+            definitions_in(&analyzer, &analyzer.parse(base), base_uri),
+        );
+        index.set_file(map_uri, definitions_in(&analyzer, &parse, map_uri));
+        let diags = diagnose(&analyzer, &parse, Some(&index), Some(map_uri));
+        assert!(diags
+            .iter()
+            .any(|diagnostic| diagnostic.code == "overrides"));
+
+        let loaded = fixes(
+            &analyzer,
+            &parse,
+            source,
+            Span::new(0, source.len() as u32),
+            &diags,
+            Some(&index),
+            |uri| (uri == base_uri).then(|| base.to_string()),
+        );
+        let reference = loaded
+            .iter()
+            .find(|fix| fix.title.contains("Insert reference copy"))
+            .expect("reference-copy fix should be supplied by the source loader");
+        assert!(reference.title.contains("Object.ini"));
+        assert!(reference.new_text.contains("MaxHealth = 500"));
+
+        let unavailable = fixes(
+            &analyzer,
+            &parse,
+            source,
+            Span::new(0, source.len() as u32),
+            &diags,
+            Some(&index),
+            |_| None,
+        );
+        assert!(!unavailable
+            .iter()
+            .any(|fix| fix.title.contains("Insert reference copy")));
+    }
+
+    #[test]
     fn fixes_ignore_diags_outside_range() {
         // The diagnostic is at EOF; the range covers only the first byte.
         // No diagnostic fix should be generated.
@@ -880,7 +1073,9 @@ mod tests {
         idx.set_file("test.ini", definitions_in(&a, &parse, "test.ini"));
         let diags = diagnose(&a, &parse, Some(&idx), Some("test.ini"));
         // Range = first byte only (nowhere near the unresolved-reference token).
-        let fx = fixes(&a, &parse, src, Span::new(0, 1), &diags, Some(&idx));
+        let fx = fixes(&a, &parse, src, Span::new(0, 1), &diags, Some(&idx), |_| {
+            None
+        });
         assert!(
             !fx.iter()
                 .any(|f| f.title.contains("Suppress") || f.title.contains("Create stub")),
