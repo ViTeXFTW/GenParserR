@@ -80,8 +80,11 @@ pub struct WorkspaceIndex {
     /// String table keys from companion `.str` files, keyed by the INI file URI.
     /// Powers DisplayName completions when a map.str is present.
     ini_str_keys: HashMap<String, Vec<String>>,
-    /// W3D model assets, keyed case-insensitively by model name.
-    model_assets: HashMap<String, ModelAsset>,
+    /// W3D model assets, keyed case-insensitively by model name. Each entry
+    /// keeps the per-file contributions, so re-indexing or removing one asset
+    /// file (e.g. a patch archive overriding a base-game model) never drops
+    /// another file's model of the same name.
+    model_assets: HashMap<String, Vec<(String, ModelAsset)>>,
     /// Reverse map for removing/replacing models contributed by one asset file.
     file_models: HashMap<String, Vec<ModelAsset>>,
 }
@@ -203,14 +206,10 @@ impl WorkspaceIndex {
         let mut stored = Vec::with_capacity(models.len());
         for mut model in models {
             dedup_case_insensitive(&mut model.members);
-            let lower = model.name.to_ascii_lowercase();
             self.model_assets
-                .entry(lower.clone())
-                .and_modify(|existing| {
-                    existing.members.extend(model.members.clone());
-                    dedup_case_insensitive(&mut existing.members);
-                })
-                .or_insert_with(|| model.clone());
+                .entry(model.name.to_ascii_lowercase())
+                .or_default()
+                .push((file.to_string(), model.clone()));
             stored.push(model);
         }
         if !stored.is_empty() {
@@ -221,7 +220,13 @@ impl WorkspaceIndex {
     fn remove_model_entries(&mut self, file: &str) {
         if let Some(models) = self.file_models.remove(file) {
             for model in models {
-                self.model_assets.remove(&model.name.to_ascii_lowercase());
+                let lower = model.name.to_ascii_lowercase();
+                if let Some(contribs) = self.model_assets.get_mut(&lower) {
+                    contribs.retain(|(f, _)| f != file);
+                    if contribs.is_empty() {
+                        self.model_assets.remove(&lower);
+                    }
+                }
             }
         }
     }
@@ -291,15 +296,21 @@ impl WorkspaceIndex {
 
     /// Known W3D model names, in display casing.
     pub fn model_names(&self) -> impl Iterator<Item = &str> {
-        self.model_assets.values().map(|m| m.name.as_str())
+        self.model_assets
+            .values()
+            .filter_map(|contribs| contribs.first())
+            .map(|(_, m)| m.name.as_str())
     }
 
-    /// User-addressable members (pivots/subobjects/meshes) for `model`.
+    /// User-addressable members (pivots/subobjects/meshes) for `model`,
+    /// across every file that contributes the model. May repeat a member
+    /// when several files define the same model; callers dedup or use `any`.
     pub fn model_members<'a>(&'a self, model: &str) -> impl Iterator<Item = &'a str> {
         self.model_assets
             .get(&model.to_ascii_lowercase())
             .into_iter()
-            .flat_map(|m| m.members.iter().map(|b| b.as_str()))
+            .flatten()
+            .flat_map(|(_, m)| m.members.iter().map(|b| b.as_str()))
     }
 
     /// Is `name` defined for `kind` anywhere in the workspace?
@@ -645,5 +656,43 @@ mod tests {
             }],
         );
         assert_ne!(idx.generation(), g1);
+    }
+
+    #[test]
+    fn removing_one_file_keeps_other_files_models_of_same_name() {
+        // Base game and a patch archive both ship a model called "Tank"
+        // (patches overriding base models is the normal case).
+        let mut idx = WorkspaceIndex::new();
+        idx.set_file_models(
+            "base.w3d",
+            vec![ModelAsset {
+                name: "Tank".into(),
+                members: vec!["Tire01".into()],
+            }],
+        );
+        idx.set_file_models(
+            "patch.w3d",
+            vec![ModelAsset {
+                name: "TANK".into(),
+                members: vec!["Cargo01".into()],
+            }],
+        );
+        let members: Vec<_> = idx.model_members("tank").collect();
+        assert!(members.contains(&"Tire01") && members.contains(&"Cargo01"));
+
+        idx.remove_file("patch.w3d");
+        assert!(idx.is_model_asset("Tank"));
+        let members: Vec<_> = idx.model_members("Tank").collect();
+        assert_eq!(members, vec!["Tire01"]);
+
+        // Re-indexing the remaining file (a rescan) must not lose it either.
+        idx.set_file_models(
+            "base.w3d",
+            vec![ModelAsset {
+                name: "Tank".into(),
+                members: vec!["Tire01".into()],
+            }],
+        );
+        assert!(idx.is_model_asset("Tank"));
     }
 }

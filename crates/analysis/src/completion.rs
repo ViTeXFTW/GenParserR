@@ -721,6 +721,38 @@ End
     }
 
     #[test]
+    fn model_completions_inside_named_condition_state() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        index.set_file_models(
+            "models/Good.w3d",
+            vec![crate::index::ModelAsset {
+                name: "Good".into(),
+                members: vec!["Turret01".into()],
+            }],
+        );
+        let src = "\
+Object Tank
+  Draw = W3DTankDraw ModuleTag_01
+    DefaultConditionState
+      Model = Good
+    End
+    ConditionState = DAMAGED
+      Model = 
+    End
+  End
+End
+";
+        let offset = src.find("ConditionState = DAMAGED\n      Model = ").unwrap()
+            + "ConditionState = DAMAGED\n      Model = ".len();
+        let out: Vec<_> = complete(&a, &a.parse(src), offset as u32, Some(&index), None)
+            .into_iter()
+            .map(|c| c.label)
+            .collect();
+        assert!(out.contains(&"Good".to_string()), "{out:?}");
+    }
+
+    #[test]
     fn weapon_bone_completions_use_token_positions() {
         let a = Analyzer::embedded();
         let mut index = WorkspaceIndex::new();

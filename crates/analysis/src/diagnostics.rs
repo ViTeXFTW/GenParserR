@@ -1729,4 +1729,48 @@ End
                 && &src[d.span.start as usize..d.span.end as usize] == "Muzzle"
         }));
     }
+
+    #[test]
+    fn condition_state_inherits_model_from_sibling_default_state() {
+        // Real game data: a ConditionState that sets no Model inherits the
+        // DefaultConditionState's model, so its bones validate against it.
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        index.set_file_models(
+            "models/Good.w3d",
+            vec![crate::index::ModelAsset {
+                name: "Good".into(),
+                members: vec!["Turret01".into()],
+            }],
+        );
+        let src = "\
+Object Tank
+  Draw = W3DTankDraw ModuleTag_01
+    DefaultConditionState
+      Model = Good
+    End
+    ConditionState = DAMAGED
+      HideSubObject = Turret01
+      ShowSubObject = MissingBone
+    End
+  End
+End
+";
+        let parse = a.parse(src);
+        let diags = diagnose(&a, &parse, Some(&index), Some("test.ini"));
+        assert!(
+            !diags.iter().any(|d| {
+                d.code == "unknown-model-member"
+                    && &src[d.span.start as usize..d.span.end as usize] == "Turret01"
+            }),
+            "{diags:?}"
+        );
+        assert!(
+            diags.iter().any(|d| {
+                d.code == "unknown-model-member"
+                    && &src[d.span.start as usize..d.span.end as usize] == "MissingBone"
+            }),
+            "{diags:?}"
+        );
+    }
 }

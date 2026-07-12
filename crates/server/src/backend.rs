@@ -75,6 +75,9 @@ pub struct Backend {
     /// Whether the client supports snippet insertText (tab-stops, placeholders).
     /// Captured at `initialize` from the client's completion-item capabilities.
     snippet_support: OnceLock<bool>,
+    /// Whether the client supports `window/workDoneProgress` (the scan
+    /// spinner). Captured at `initialize`.
+    progress_support: OnceLock<bool>,
     /// Monotonic id source for semantic-token results (delta bookkeeping).
     semantic_result_id: std::sync::atomic::AtomicU64,
 }
@@ -247,14 +250,15 @@ fn parse_w3d_models(bytes: &[u8], fallback_name: &str) -> Vec<ModelAsset> {
     if !fallback_name.is_empty() {
         names.push(fallback_name.to_string());
     }
-    walk_w3d_chunks(bytes, 0, bytes.len(), &mut |kind, payload| match kind {
+    walk_w3d_chunks(bytes, 0, bytes.len(), 0, &mut |kind, payload| match kind {
         0x0000_001F => {
             if payload.len() >= 40 {
                 push_name(&mut members, read_fixed_name(&payload[8..24]));
                 push_name(&mut names, read_fixed_name(&payload[24..40]));
             }
         }
-        0x0000_0101 => {
+        // HIERARCHY_HEADER, EMITTER_HEADER, AGGREGATE_HEADER: Version + Name[16].
+        0x0000_0101 | 0x0000_0501 | 0x0000_0601 => {
             if payload.len() >= 20 {
                 push_name(&mut names, read_fixed_name(&payload[4..20]));
             }
@@ -280,10 +284,8 @@ fn parse_w3d_models(bytes: &[u8], fallback_name: &str) -> Vec<ModelAsset> {
                 push_name(&mut members, read_fixed_name(&payload[8..40]));
             }
         }
-        0x0000_0750 => {
-            if payload.len() >= 48 {
-                push_name(&mut members, read_fixed_name(&payload[16..48]));
-            }
+        0x0000_0750 if payload.len() >= 48 => {
+            push_name(&mut members, read_fixed_name(&payload[16..48]))
         }
         _ => {}
     });
@@ -299,7 +301,20 @@ fn parse_w3d_models(bytes: &[u8], fallback_name: &str) -> Vec<ModelAsset> {
         .collect()
 }
 
-fn walk_w3d_chunks(bytes: &[u8], mut pos: usize, end: usize, f: &mut impl FnMut(u32, &[u8])) {
+/// Real W3D files nest at most a handful of levels; the cap only guards
+/// against corrupt or hostile files driving unbounded recursion.
+const MAX_W3D_CHUNK_DEPTH: usize = 16;
+
+fn walk_w3d_chunks(
+    bytes: &[u8],
+    mut pos: usize,
+    end: usize,
+    depth: usize,
+    f: &mut impl FnMut(u32, &[u8]),
+) {
+    if depth > MAX_W3D_CHUNK_DEPTH {
+        return;
+    }
     while pos + 8 <= end && pos + 8 <= bytes.len() {
         let kind = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap());
         let size_raw = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap());
@@ -315,16 +330,25 @@ fn walk_w3d_chunks(bytes: &[u8], mut pos: usize, end: usize, f: &mut impl FnMut(
         let payload = &bytes[payload_start..payload_end];
         f(kind, payload);
         if has_children {
-            walk_w3d_chunks(bytes, payload_start, payload_end, f);
+            walk_w3d_chunks(bytes, payload_start, payload_end, depth + 1, f);
         }
         pos = payload_end;
     }
 }
 
 fn is_w3d_container(kind: u32) -> bool {
+    // MESH, HIERARCHY, EMITTER, AGGREGATE, HLOD, HLOD_LOD_ARRAY,
+    // HLOD_AGGREGATE_ARRAY (w3d_file.h; the MSB size flag is the primary
+    // signal, these are fallbacks for files that omit it).
     matches!(
         kind,
-        0x0000_0000 | 0x0000_0100 | 0x0000_0700 | 0x0000_0702 | 0x0000_0705
+        0x0000_0000
+            | 0x0000_0100
+            | 0x0000_0500
+            | 0x0000_0600
+            | 0x0000_0700
+            | 0x0000_0702
+            | 0x0000_0705
     )
 }
 
@@ -380,9 +404,17 @@ fn scan_big(analyzer: &Analyzer, path: &Path) -> Vec<ScanEntry> {
     out
 }
 
-/// Walk `roots` and index `.ini` files plus `.w3d` model assets.
-/// CPU/IO heavy — runs via `spawn_blocking` from [`Backend::scan_workspace`].
+/// Walk `roots` and index `.ini` files plus `.w3d` model assets in one call.
+/// Production code goes through `collect_scan_paths` + `scan_files` so the
+/// scan can report progress; this convenience wrapper serves the tests.
+#[cfg(test)]
 fn scan_roots(analyzer: &Analyzer, roots: &[PathBuf]) -> Vec<ScanEntry> {
+    scan_files(analyzer, &collect_scan_paths(roots), &mut |_, _| {})
+}
+
+/// Phase 1 of the scan: a cheap walk collecting every indexable file
+/// (`.ini` / `.big` / `.w3d`), so phase 2 can report `done/total` progress.
+fn collect_scan_paths(roots: &[PathBuf]) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for root in roots {
         if root
@@ -390,7 +422,7 @@ fn scan_roots(analyzer: &Analyzer, roots: &[PathBuf]) -> Vec<ScanEntry> {
             .and_then(|e| e.to_str())
             .is_some_and(|e| e.eq_ignore_ascii_case("big"))
         {
-            out.extend(scan_big(analyzer, root));
+            out.push(root.clone());
             continue;
         }
         for entry in walkdir::WalkDir::new(root)
@@ -399,27 +431,40 @@ fn scan_roots(analyzer: &Analyzer, roots: &[PathBuf]) -> Vec<ScanEntry> {
         {
             let path = entry.path();
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if ext.eq_ignore_ascii_case("big") {
-                out.extend(scan_big(analyzer, path));
-            } else if ext.eq_ignore_ascii_case("ini") {
-                let Some(text) = read_lossy(path) else {
-                    continue;
-                };
-                let Ok(uri) = Url::from_file_path(path) else {
-                    continue;
-                };
+            if ext.eq_ignore_ascii_case("big")
+                || ext.eq_ignore_ascii_case("ini")
+                || ext.eq_ignore_ascii_case("w3d")
+            {
+                out.push(path.to_path_buf());
+            }
+        }
+    }
+    out
+}
+
+/// Phase 2 of the scan: parse/index each collected file, invoking
+/// `progress(done, total)` after each one (a `.big` archive counts as one
+/// unit of work regardless of how many entries it holds).
+fn scan_files(
+    analyzer: &Analyzer,
+    paths: &[PathBuf],
+    progress: &mut impl FnMut(usize, usize),
+) -> Vec<ScanEntry> {
+    let mut out = Vec::new();
+    for (i, path) in paths.iter().enumerate() {
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if ext.eq_ignore_ascii_case("big") {
+            out.extend(scan_big(analyzer, path));
+        } else if ext.eq_ignore_ascii_case("ini") {
+            if let (Some(text), Ok(uri)) = (read_lossy(path), Url::from_file_path(path)) {
                 let parse = analyzer.parse(&text);
                 let defs = definitions_in(analyzer, &parse, uri.as_str());
                 let refs = references_in(analyzer, &parse);
                 let tags = module_tags_in(analyzer, &parse);
                 out.push((uri.to_string(), defs, refs, tags, Vec::new(), None));
-            } else if ext.eq_ignore_ascii_case("w3d") {
-                let Ok(bytes) = std::fs::read(path) else {
-                    continue;
-                };
-                let Ok(uri) = Url::from_file_path(path) else {
-                    continue;
-                };
+            }
+        } else if ext.eq_ignore_ascii_case("w3d") {
+            if let (Ok(bytes), Ok(uri)) = (std::fs::read(path), Url::from_file_path(path)) {
                 let stem = path
                     .file_stem()
                     .and_then(|s| s.to_str())
@@ -437,6 +482,7 @@ fn scan_roots(analyzer: &Analyzer, roots: &[PathBuf]) -> Vec<ScanEntry> {
                 }
             }
         }
+        progress(i + 1, paths.len());
     }
     out
 }
@@ -458,6 +504,7 @@ impl Backend {
             base_roots_hint_shown: AtomicBool::new(false),
             client_base_ini_hint: OnceLock::new(),
             snippet_support: OnceLock::new(),
+            progress_support: OnceLock::new(),
             semantic_result_id: std::sync::atomic::AtomicU64::new(1),
         }
     }
@@ -571,8 +618,12 @@ impl Backend {
     /// Best-effort scan of the workspace roots for `.ini` files to seed the
     /// index, so references resolve before a file is opened. The walk +
     /// parse runs on a blocking thread (full-mod folders take seconds); the
-    /// results are applied under the index lock afterwards.
+    /// results are applied under the index lock afterwards. Reported to the
+    /// client as `$/progress` (a status-bar spinner with a `done/total`
+    /// counter in VS Code) so users can tell "still indexing" apart from
+    /// "nothing was found".
     async fn scan_workspace(&self) {
+        let progress_token = self.begin_scan_progress().await;
         let roots = self.roots.lock().map(|r| r.clone()).unwrap_or_default();
         let base_roots = self
             .base_roots
@@ -580,14 +631,33 @@ impl Backend {
             .map(|r| r.clone())
             .unwrap_or_default();
         let analyzer = self.analyzer.clone();
-        let (scanned, base_scanned) = tokio::task::spawn_blocking(move || {
-            (
-                scan_roots(&analyzer, &roots),
-                scan_roots(&analyzer, &base_roots),
-            )
-        })
-        .await
-        .unwrap_or_default();
+        // The blocking scan streams (done, total) over a channel; forward
+        // each update as a progress report while waiting for the results.
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(usize, usize)>();
+        let handle = tokio::task::spawn_blocking(move || {
+            let workspace_paths = collect_scan_paths(&roots);
+            let base_paths = collect_scan_paths(&base_roots);
+            let total = workspace_paths.len() + base_paths.len();
+            let mut done = 0;
+            let mut last_percent = u32::MAX;
+            // Throttle to whole-percent changes (plus the final count) so a
+            // 10k-file scan sends ~100 notifications, not 10k.
+            let mut progress = |_done_in_batch: usize, _batch_total: usize| {
+                done += 1;
+                let percent = (done * 100 / total.max(1)) as u32;
+                if percent != last_percent || done == total {
+                    last_percent = percent;
+                    let _ = tx.send((done, total));
+                }
+            };
+            let scanned = scan_files(&analyzer, &workspace_paths, &mut progress);
+            let base_scanned = scan_files(&analyzer, &base_paths, &mut progress);
+            (scanned, base_scanned)
+        });
+        while let Some((done, total)) = rx.recv().await {
+            self.report_scan_progress(&progress_token, done, total).await;
+        }
+        let (scanned, base_scanned) = handle.await.unwrap_or_default();
         let base_ini_count = base_scanned
             .iter()
             .filter(|(_, _, _, _, models, _)| models.is_empty())
@@ -595,6 +665,16 @@ impl Backend {
         self.base_indexed_count
             .store(base_ini_count, Ordering::Relaxed);
         self.scan_finished.store(true, Ordering::Relaxed);
+        let ini_total = base_ini_count
+            + scanned
+                .iter()
+                .filter(|(_, _, _, _, models, _)| models.is_empty())
+                .count();
+        let model_total: usize = base_scanned
+            .iter()
+            .chain(scanned.iter())
+            .map(|(_, _, _, _, models, _)| models.len())
+            .sum();
         // Don't overwrite index entries for already-open documents with stale
         // disk content; `initialized` calls `refresh` for each open doc right
         // after this returns, so they will populate the index from live text.
@@ -603,20 +683,90 @@ impl Backend {
             .iter()
             .map(|e| e.key().as_str().to_string())
             .collect();
-        let Ok(mut idx) = self.index.write() else {
-            return;
-        };
-        for (uri, defs, refs, tags, models, text) in base_scanned.into_iter().chain(scanned) {
-            if let Some(text) = text {
-                self.virtual_files.insert(uri.clone(), text);
-            }
-            if !open.contains(&uri) {
-                idx.set_file(&uri, defs);
-                idx.set_file_refs(&uri, refs);
-                idx.set_file_tags(&uri, tags);
-                idx.set_file_models(&uri, models);
+        {
+            let Ok(mut idx) = self.index.write() else {
+                return;
+            };
+            for (uri, defs, refs, tags, models, text) in base_scanned.into_iter().chain(scanned) {
+                if let Some(text) = text {
+                    self.virtual_files.insert(uri.clone(), text);
+                }
+                if !open.contains(&uri) {
+                    idx.set_file(&uri, defs);
+                    idx.set_file_refs(&uri, refs);
+                    idx.set_file_tags(&uri, tags);
+                    idx.set_file_models(&uri, models);
+                }
             }
         }
+        self.end_scan_progress(progress_token, ini_total, model_total)
+            .await;
+    }
+
+    /// Ask the client to show an indexing spinner. Returns the token to end
+    /// it with, or `None` when the client doesn't support work-done progress.
+    async fn begin_scan_progress(&self) -> Option<NumberOrString> {
+        if !self.progress_support.get().copied().unwrap_or(false) {
+            return None;
+        }
+        let token = NumberOrString::String("zerosyntax/indexing".into());
+        self.client
+            .send_request::<request::WorkDoneProgressCreate>(WorkDoneProgressCreateParams {
+                token: token.clone(),
+            })
+            .await
+            .ok()?;
+        self.client
+            .send_notification::<notification::Progress>(ProgressParams {
+                token: token.clone(),
+                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
+                    WorkDoneProgressBegin {
+                        title: "Indexing game data".into(),
+                        message: Some("scanning workspace and base INI roots".into()),
+                        cancellable: Some(false),
+                        // Signals that reports will carry a percentage.
+                        percentage: Some(0),
+                    },
+                )),
+            })
+            .await;
+        Some(token)
+    }
+
+    /// Forward one `done/total` update to the client's progress UI.
+    async fn report_scan_progress(&self, token: &Option<NumberOrString>, done: usize, total: usize) {
+        let Some(token) = token else { return };
+        self.client
+            .send_notification::<notification::Progress>(ProgressParams {
+                token: token.clone(),
+                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
+                    WorkDoneProgressReport {
+                        message: Some(format!("{done}/{total} files")),
+                        percentage: Some((done * 100 / total.max(1)) as u32),
+                        cancellable: Some(false),
+                    },
+                )),
+            })
+            .await;
+    }
+
+    async fn end_scan_progress(
+        &self,
+        token: Option<NumberOrString>,
+        ini_total: usize,
+        model_total: usize,
+    ) {
+        let Some(token) = token else { return };
+        self.client
+            .send_notification::<notification::Progress>(ProgressParams {
+                token,
+                value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(WorkDoneProgressEnd {
+                    message: Some(format!(
+                        "{ini_total} INI files, {model_total} W3D models indexed"
+                    )),
+                })),
+            })
+            .await;
     }
 
     /// The cached state for an open document (rope + parse), if any.
@@ -753,6 +903,14 @@ impl LanguageServer for Backend {
             .unwrap_or(false);
         let _ = self.snippet_support.set(snippet_support);
 
+        let progress_support = params
+            .capabilities
+            .window
+            .as_ref()
+            .and_then(|w| w.work_done_progress)
+            .unwrap_or(false);
+        let _ = self.progress_support.set(progress_support);
+
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "zerosyntax-lsp".into(),
@@ -810,8 +968,21 @@ impl LanguageServer for Backend {
         for uri in open {
             self.refresh(&uri).await;
         }
+        let (ini, models) = {
+            let idx = self.index.read().ok();
+            let models = idx
+                .as_ref()
+                .map(|i| i.model_names().count())
+                .unwrap_or_default();
+            (self.base_indexed_count.load(Ordering::Relaxed), models)
+        };
         self.client
-            .log_message(MessageType::INFO, "zerosyntax language server ready")
+            .log_message(
+                MessageType::INFO,
+                format!(
+                    "zerosyntax language server ready ({ini} base INI files, {models} W3D models indexed)"
+                ),
+            )
             .await;
     }
 
@@ -1549,6 +1720,66 @@ mod tests {
     }
 
     #[test]
+    fn w3d_root_scan_powers_model_and_bone_completions() {
+        // End-to-end over the `baseIniRoots` path: a directory containing a
+        // loose .w3d file is scanned, indexed, and drives completions.
+        let mut pivots = Vec::new();
+        pivots.extend_from_slice(b"Tire01");
+        pivots.resize(60, 0);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0x0000_0102u32.to_le_bytes());
+        bytes.extend_from_slice(&(pivots.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&pivots);
+
+        let dir = std::env::temp_dir().join(format!("zerosyntax-w3d-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Good.w3d"), bytes).unwrap();
+
+        let analyzer = Analyzer::embedded();
+        let scanned = scan_roots(&analyzer, &[dir.clone()]);
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let mut idx = WorkspaceIndex::new();
+        for (uri, defs, refs, tags, models, _) in scanned {
+            idx.set_file(&uri, defs);
+            idx.set_file_refs(&uri, refs);
+            idx.set_file_tags(&uri, tags);
+            idx.set_file_models(&uri, models);
+        }
+        assert!(idx.is_model_asset("Good"), "model name from file stem");
+
+        let src = "\
+Object Tank
+  Draw = W3DTankDraw ModuleTag_01
+    DefaultConditionState
+      Model = 
+      HideSubObject = 
+    End
+  End
+End
+";
+        let parse = analyzer.parse(src);
+        let labels_at = |offset: usize| -> Vec<String> {
+            completion::complete(&analyzer, &parse, offset as u32, Some(&idx), None)
+                .into_iter()
+                .map(|c| c.label)
+                .collect()
+        };
+        let model_offset = src.find("Model = ").unwrap() + "Model = ".len();
+        assert!(labels_at(model_offset).contains(&"Good".to_string()));
+
+        let src = src.replace("Model = ", "Model = Good");
+        let parse = analyzer.parse(&src);
+        let bone_offset = src.find("HideSubObject = ").unwrap() + "HideSubObject = ".len();
+        let labels: Vec<String> =
+            completion::complete(&analyzer, &parse, bone_offset as u32, Some(&idx), None)
+                .into_iter()
+                .map(|c| c.label)
+                .collect();
+        assert!(labels.contains(&"Tire".to_string()), "{labels:?}");
+    }
+
+    #[test]
     fn parses_w3d_model_names_and_members() {
         fn fixed<const N: usize>(name: &str) -> [u8; N] {
             let mut out = [0; N];
@@ -1587,6 +1818,54 @@ mod tests {
         let good = models.iter().find(|m| m.name == "Good").unwrap();
         assert!(good.members.iter().any(|m| m == "Tire01"), "{good:?}");
         assert!(good.members.iter().any(|m| m == "Cargo01"), "{good:?}");
+    }
+
+    #[test]
+    fn parses_w3d_aggregate_and_emitter_names() {
+        fn fixed<const N: usize>(name: &str) -> [u8; N] {
+            let mut out = [0; N];
+            let bytes = name.as_bytes();
+            out[..bytes.len().min(N)].copy_from_slice(&bytes[..bytes.len().min(N)]);
+            out
+        }
+        fn chunk(kind: u32, payload: Vec<u8>) -> Vec<u8> {
+            let mut out = Vec::new();
+            out.extend_from_slice(&kind.to_le_bytes());
+            out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+            out.extend_from_slice(&payload);
+            out
+        }
+        // Version + Name[16] header, wrapped in its container chunk.
+        let mut header = Vec::new();
+        header.extend_from_slice(&1u32.to_le_bytes());
+        header.extend_from_slice(&fixed::<16>("Aggro"));
+        let mut bytes = chunk(0x0000_0600, chunk(0x0000_0601, header));
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&1u32.to_le_bytes());
+        header.extend_from_slice(&fixed::<16>("Smoke"));
+        bytes.extend(chunk(0x0000_0500, chunk(0x0000_0501, header)));
+
+        let models = parse_w3d_models(&bytes, "");
+        assert!(models.iter().any(|m| m.name == "Aggro"), "{models:?}");
+        assert!(models.iter().any(|m| m.name == "Smoke"), "{models:?}");
+    }
+
+    #[test]
+    fn w3d_chunk_walker_survives_hostile_deep_nesting() {
+        // A self-nesting container at every level: each 8-byte header claims
+        // the rest of the file as payload. Without a depth cap this recursed
+        // once per 8 bytes and could overflow the stack on a large file.
+        let total: usize = 64 * 1024;
+        let mut bytes = Vec::with_capacity(total);
+        let mut remaining = total;
+        while remaining >= 8 {
+            bytes.extend_from_slice(&0x0000_0700u32.to_le_bytes());
+            bytes.extend_from_slice(&((remaining - 8) as u32).to_le_bytes());
+            remaining -= 8;
+        }
+        // Must terminate without smashing the stack; content is garbage.
+        let _ = parse_w3d_models(&bytes, "Fallback");
     }
 
     #[test]

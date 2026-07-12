@@ -162,10 +162,28 @@ pub(crate) fn model_member_matches(member: &str, value: &str) -> bool {
     member.eq_ignore_ascii_case(value) || model_member_ini_name(member).eq_ignore_ascii_case(value)
 }
 
+/// Models referenced by W3D-model-typed fields visible from `scope_node`:
+/// the scope's own subtree first, then — because a `ConditionState` inherits
+/// its model from `DefaultConditionState` when it sets none (see the engine's
+/// `W3DModelDraw`) — each enclosing scope's subtree, stopping at the nearest
+/// one that declares any model. The climb never crosses the top-level block,
+/// so per-root cached diagnostics stay independent of sibling blocks.
 pub(crate) fn models_in_scope(analyzer: &Analyzer, scope_node: &SyntaxNode) -> Vec<String> {
     let mut out = Vec::new();
-    collect_models(analyzer, scope_node, &mut out);
-    out
+    let mut node = scope_node.clone();
+    loop {
+        collect_models(analyzer, &node, &mut out);
+        if !out.is_empty() {
+            return out;
+        }
+        match node
+            .parent()
+            .filter(|p| matches!(p.kind(), SyntaxKind::BLOCK | SyntaxKind::MODULE))
+        {
+            Some(parent) => node = parent,
+            None => return out,
+        }
+    }
 }
 
 fn collect_models(analyzer: &Analyzer, node: &SyntaxNode, out: &mut Vec<String>) {

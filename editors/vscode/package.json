@@ -2,7 +2,7 @@
   "name": "zerosyntax-vscode",
   "displayName": "ZeroSyntax v2",
   "description": "Language support (diagnostics, completion, semantic highlighting) for C&C Generals: Zero Hour INI files, powered by ZeroSyntax v2.",
-  "version": "1.0.2",
+  "version": "1.0.4",
   "license": "MIT",
   "repository": {
     "type": "GitHub",
@@ -85,6 +85,7 @@
     "test": "npm run compile && npm run compile:test && node ./out-test/src/test/runTest.js"
   },
   "dependencies": {
+    "vsce": "^2.15.0",
     "vscode-languageclient": "^10.1.0"
   },
   "devDependencies": {
