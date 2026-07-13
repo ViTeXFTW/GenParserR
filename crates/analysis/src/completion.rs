@@ -743,7 +743,9 @@ Object Tank
   End
 End
 ";
-        let offset = src.find("ConditionState = DAMAGED\n      Model = ").unwrap()
+        let offset = src
+            .find("ConditionState = DAMAGED\n      Model = ")
+            .unwrap()
             + "ConditionState = DAMAGED\n      Model = ".len();
         let out: Vec<_> = complete(&a, &a.parse(src), offset as u32, Some(&index), None)
             .into_iter()

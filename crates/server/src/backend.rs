@@ -655,7 +655,8 @@ impl Backend {
             (scanned, base_scanned)
         });
         while let Some((done, total)) = rx.recv().await {
-            self.report_scan_progress(&progress_token, done, total).await;
+            self.report_scan_progress(&progress_token, done, total)
+                .await;
         }
         let (scanned, base_scanned) = handle.await.unwrap_or_default();
         let base_ini_count = base_scanned
@@ -734,7 +735,12 @@ impl Backend {
     }
 
     /// Forward one `done/total` update to the client's progress UI.
-    async fn report_scan_progress(&self, token: &Option<NumberOrString>, done: usize, total: usize) {
+    async fn report_scan_progress(
+        &self,
+        token: &Option<NumberOrString>,
+        done: usize,
+        total: usize,
+    ) {
         let Some(token) = token else { return };
         self.client
             .send_notification::<notification::Progress>(ProgressParams {
