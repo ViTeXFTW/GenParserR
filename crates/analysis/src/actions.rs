@@ -207,8 +207,8 @@ fn diagnostic_fixes(
     }
 }
 
-/// For an `unreachable-set` diagnostic offer (a) remove the dead sub-block
-/// and (b) insert the trigger module before the enclosing Object's `End`.
+/// For an `unreachable-set` diagnostic offer the mechanical counterpart:
+/// remove/scaffold for dead sets, or add the missing set for a useless upgrade.
 fn unreachable_set_fixes(
     parse: &Parse,
     text: &str,
@@ -231,6 +231,9 @@ fn unreachable_set_fixes(
         .and_then(|n| n.parent())
         .filter(|n| n.kind() == SyntaxKind::MODULE);
     let Some(set_module_node) = set_module_node else {
+        if tok.text().eq_ignore_ascii_case("WeaponSetUpgrade") {
+            unused_weapon_set_upgrade_fix(text, &tok, scaffold_seen, out);
+        }
         return;
     };
 
@@ -286,13 +289,7 @@ fn unreachable_set_fixes(
     let insert_at = find_end_line_start(&object_node, text)
         .unwrap_or_else(|| u32::from(object_node.text_range().end()));
 
-    // Indent: the set module starts at its own leading whitespace.
-    let module_start = u32::from(set_module_node.text_range().start()) as usize;
-    let indent_len = text[module_start..]
-        .bytes()
-        .take_while(|&b| b == b' ' || b == b'\t')
-        .count();
-    let indent = &text[module_start..module_start + indent_len];
+    let indent = leading_indent(&set_module_node, text);
     let body_indent = format!("{indent}  ");
 
     out.push(Fix {
@@ -302,6 +299,47 @@ fn unreachable_set_fixes(
             "{indent}Behavior = {trigger} {tag}\n{body_indent}TriggeredBy = Upgrade_TODO\n{indent}End\n"
         ),
     });
+}
+
+fn unused_weapon_set_upgrade_fix(
+    text: &str,
+    tok: &SyntaxToken,
+    scaffold_seen: &mut std::collections::HashSet<(u32, &'static str)>,
+    out: &mut Vec<Fix>,
+) {
+    let Some(module_node) = tok.parent().filter(|n| n.kind() == SyntaxKind::MODULE) else {
+        return;
+    };
+    let Some(object_node) = module_node
+        .ancestors()
+        .find(|n| n.kind() == SyntaxKind::BLOCK)
+    else {
+        return;
+    };
+    let block_start = u32::from(object_node.text_range().start());
+    if !scaffold_seen.insert((block_start, "WeaponSet")) {
+        return;
+    }
+
+    let insert_at = u32::from(module_node.text_range().start());
+    let indent = leading_indent(&module_node, text);
+    let body_indent = format!("{indent}  ");
+    out.push(Fix {
+        title: "Insert `PLAYER_UPGRADE` WeaponSet".to_string(),
+        span: Span::new(insert_at, insert_at),
+        new_text: format!(
+            "{indent}WeaponSet\n{body_indent}Conditions = PLAYER_UPGRADE\n{body_indent}Weapon = PRIMARY NONE\n{indent}End\n"
+        ),
+    });
+}
+
+fn leading_indent<'a>(node: &SyntaxNode, text: &'a str) -> &'a str {
+    let start = u32::from(node.text_range().start()) as usize;
+    let indent_len = text[start..]
+        .bytes()
+        .take_while(|&b| b == b' ' || b == b'\t')
+        .count();
+    &text[start..start + indent_len]
 }
 
 /// Return the byte offset of the start of the `End` line within `block`.
@@ -592,6 +630,37 @@ mod tests {
             result2.contains("TriggeredBy = Upgrade_TODO"),
             "TriggeredBy missing: {result2}"
         );
+    }
+
+    #[test]
+    fn unused_weapon_set_upgrade_offers_player_upgrade_weapon_set() {
+        let src = concat!(
+            "Object Tank\n",
+            "  WeaponSet\n",
+            "    Conditions = NONE\n",
+            "    Weapon = PRIMARY MyGun\n",
+            "  End\n",
+            "  Behavior = WeaponSetUpgrade ModuleTag_01\n",
+            "    TriggeredBy = Upgrade_MyGun\n",
+            "  End\n",
+            "End\n",
+            "Weapon MyGun\n",
+            "  PrimaryDamage = 10.0\n",
+            "End\n",
+        );
+        let fx = all_fixes(src);
+        let insert = fx
+            .iter()
+            .find(|f| f.title.contains("PLAYER_UPGRADE") && f.title.contains("WeaponSet"))
+            .expect("missing WeaponSet scaffold fix");
+        let mut result = src.to_string();
+        result.replace_range(
+            insert.span.start as usize..insert.span.end as usize,
+            &insert.new_text,
+        );
+        assert!(result.contains(
+            "  WeaponSet\n    Conditions = PLAYER_UPGRADE\n    Weapon = PRIMARY NONE\n  End\n  Behavior = WeaponSetUpgrade"
+        ));
     }
 
     #[test]

@@ -654,6 +654,7 @@ impl<'a> Ctx<'a> {
         const ARMOR_TRIGGERS: [&str; 1] = ["ArmorUpgrade"];
 
         let mut module_names: Vec<String> = Vec::new();
+        let mut weapon_set_upgrade_modules: Vec<SyntaxToken> = Vec::new();
         // (set keyword, the PLAYER_UPGRADE condition token) per set sub-block.
         let mut player_upgrade_sets: Vec<(&'static str, SyntaxToken)> = Vec::new();
         let mut is_override_patch = has_direct_field(node, "RemoveModule");
@@ -675,6 +676,9 @@ impl<'a> Ctx<'a> {
                 }
                 _ => {
                     if let Some(name) = module.module_name() {
+                        if name.text() == "WeaponSetUpgrade" {
+                            weapon_set_upgrade_modules.push(name.clone());
+                        }
                         module_names.push(name.text().to_string());
                     }
                 }
@@ -682,6 +686,17 @@ impl<'a> Ctx<'a> {
         }
         if is_override_patch {
             return;
+        }
+        let has_player_upgrade_weapon_set =
+            player_upgrade_sets.iter().any(|(kw, _)| *kw == "WeaponSet");
+        if !has_player_upgrade_weapon_set {
+            for tok in weapon_set_upgrade_modules {
+                self.warning(
+                    &tok,
+                    "unreachable-set",
+                    "this `WeaponSetUpgrade` module sets `PLAYER_UPGRADE`, but this object has no `WeaponSet` with that condition".to_string(),
+                );
+            }
         }
         for (kw, tok) in player_upgrade_sets {
             let triggers: &[&str] = if kw == "WeaponSet" {
@@ -1377,6 +1392,27 @@ mod tests {
         let vet =
             "Object T\n  WeaponSet\n    Conditions = VETERAN\n    Weapon = PRIMARY G\n  End\nEnd\n";
         assert!(!codes(vet).contains(&"unreachable-set"));
+    }
+
+    #[test]
+    fn weapon_set_upgrade_without_player_upgrade_weapon_set_warns() {
+        let src = "\
+Object T
+  WeaponSet
+    Conditions = NONE
+    Weapon = PRIMARY G
+  End
+  Behavior = WeaponSetUpgrade ModuleTag_01
+    TriggeredBy = Upgrade_X
+  End
+End
+";
+        let d = diags(src);
+        assert!(d.iter().any(|d| {
+            d.code == "unreachable-set"
+                && d.severity == Severity::Warning
+                && &src[d.span.start as usize..d.span.end as usize] == "WeaponSetUpgrade"
+        }));
     }
 
     #[test]
