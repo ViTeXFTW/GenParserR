@@ -85,7 +85,6 @@
     "test": "npm run compile && npm run compile:test && node ./out-test/src/test/runTest.js"
   },
   "dependencies": {
-    "vsce": "^2.15.0",
     "vscode-languageclient": "^10.1.0"
   },
   "devDependencies": {
