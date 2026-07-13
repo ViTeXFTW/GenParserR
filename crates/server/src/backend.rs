@@ -1742,7 +1742,7 @@ mod tests {
         std::fs::write(dir.join("Good.w3d"), bytes).unwrap();
 
         let analyzer = Analyzer::embedded();
-        let scanned = scan_roots(&analyzer, &[dir.clone()]);
+        let scanned = scan_roots(&analyzer, std::slice::from_ref(&dir));
         let _ = std::fs::remove_dir_all(&dir);
 
         let mut idx = WorkspaceIndex::new();
