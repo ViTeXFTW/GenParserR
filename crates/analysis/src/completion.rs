@@ -10,7 +10,9 @@ use zerosyntax_schema::ValueType;
 use zerosyntax_syntax::ast::{Block, Field, Module};
 use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode};
 
-use crate::model::scope_schema;
+use crate::model::{
+    is_model_asset_type, is_model_member_type, model_member_ini_name, models_in_scope, scope_schema,
+};
 use crate::{Analyzer, WorkspaceIndex};
 
 /// The role of a completion item, mapped to LSP `CompletionItemKind` by the server.
@@ -296,10 +298,17 @@ fn field_value_completions(
     // DisplayName: add string table keys from the companion .str file when available.
     let mut base = {
         let scope = scope_schema(analyzer, scope_node);
-        scope
-            .field(key)
-            .map(|f| completions_for_type(analyzer, &f.value_type, value_index, index))
-            .unwrap_or_default()
+        if let Some(f) = scope.field(key) {
+            if let Some(asset_completions) =
+                model_asset_completions(analyzer, scope_node, &f.value_type, value_index, index)
+            {
+                asset_completions
+            } else {
+                completions_for_type(analyzer, &f.value_type, value_index, index)
+            }
+        } else {
+            Vec::new()
+        }
     };
     if key.eq_ignore_ascii_case("DisplayName") {
         if let (Some(idx), Some(f)) = (index, file) {
@@ -312,6 +321,61 @@ fn field_value_completions(
         }
     }
     base
+}
+
+fn model_asset_completions(
+    analyzer: &Analyzer,
+    scope_node: &SyntaxNode,
+    ty: &ValueType,
+    value_index: usize,
+    index: Option<&WorkspaceIndex>,
+) -> Option<Vec<Completion>> {
+    let index = index?;
+    if !index.has_model_assets() {
+        return None;
+    }
+    let ty = token_value_type(ty, value_index);
+    if is_model_asset_type(ty) {
+        return Some(
+            index
+                .model_names()
+                .map(|name| Completion {
+                    label: name.to_string(),
+                    kind: CompletionKind::Reference,
+                    detail: Some("W3D model".into()),
+                    insert: None,
+                })
+                .collect(),
+        );
+    }
+    if !is_model_member_type(ty) {
+        return None;
+    }
+    let mut seen = std::collections::HashSet::new();
+    let out = models_in_scope(analyzer, scope_node)
+        .into_iter()
+        .flat_map(|model| {
+            index
+                .model_members(&model)
+                .map(|member| model_member_ini_name(member).to_string())
+                .collect::<Vec<_>>()
+        })
+        .filter(|member| seen.insert(member.to_ascii_lowercase()))
+        .map(|member| Completion {
+            label: member,
+            kind: CompletionKind::Reference,
+            detail: Some("W3D model member".into()),
+            insert: None,
+        })
+        .collect();
+    Some(out)
+}
+
+fn token_value_type(ty: &ValueType, value_index: usize) -> &ValueType {
+    match ty {
+        ValueType::TokenList { tokens } => tokens.get(value_index).unwrap_or(ty),
+        _ => ty,
+    }
 }
 
 /// Build a single-token snippet placeholder for a value type, used when
@@ -335,6 +399,8 @@ fn type_snippet_placeholder(ty: &ValueType, n: usize) -> String {
         ValueType::AsciiString | ValueType::AsciiStringList | ValueType::QuotedString => {
             format!("${{{n}:Value}}")
         }
+        ValueType::W3dModel => format!("${{{n}:Model}}"),
+        ValueType::W3dModelMember => format!("${{{n}:Bone}}"),
         _ => format!("${{{n}:?}}"),
     }
 }
@@ -437,6 +503,7 @@ fn completions_for_type(
             }));
             out
         }
+        ValueType::W3dModel | ValueType::W3dModelMember => Vec::new(),
         _ => Vec::new(),
     }
 }
@@ -548,6 +615,8 @@ fn type_label(ty: &ValueType) -> String {
         ValueType::Enum { value_set } => format!("enum {value_set}"),
         ValueType::BitFlags { value_set } => format!("flags {value_set}"),
         ValueType::Reference { ref_kind } => format!("ref {ref_kind:?}"),
+        ValueType::W3dModel => "w3d model".into(),
+        ValueType::W3dModelMember => "w3d model member".into(),
         other => format!("{other:?}")
             .split(['{', ' '])
             .next()
@@ -611,5 +680,122 @@ mod tests {
         let offset = "Object Tank\n  Body = ".len() as u32;
         let out = labels(src, offset);
         assert!(out.contains(&"ActiveBody".to_string()), "{out:?}");
+    }
+
+    #[test]
+    fn model_asset_completions_use_index() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        index.set_file_models(
+            "models/Good.w3d",
+            vec![crate::index::ModelAsset {
+                name: "Good".into(),
+                members: vec!["Cargo01".into(), "Tire01".into()],
+            }],
+        );
+        let src = "\
+Object Tank
+  Draw = W3DTruckDraw ModuleTag_01
+    DefaultConditionState
+      Model = 
+      HideSubObject = 
+    End
+  End
+End
+";
+        let model_offset = src.find("Model = ").unwrap() + "Model = ".len();
+        let out: Vec<_> = complete(&a, &a.parse(src), model_offset as u32, Some(&index), None)
+            .into_iter()
+            .map(|c| c.label)
+            .collect();
+        assert!(out.contains(&"Good".to_string()), "{out:?}");
+
+        let src = src.replace("Model = ", "Model = Good");
+        let bone_offset = src.find("HideSubObject = ").unwrap() + "HideSubObject = ".len();
+        let out: Vec<_> = complete(&a, &a.parse(&src), bone_offset as u32, Some(&index), None)
+            .into_iter()
+            .map(|c| c.label)
+            .collect();
+        assert!(out.contains(&"Cargo".to_string()), "{out:?}");
+        assert!(out.contains(&"Tire".to_string()), "{out:?}");
+    }
+
+    #[test]
+    fn model_completions_inside_named_condition_state() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        index.set_file_models(
+            "models/Good.w3d",
+            vec![crate::index::ModelAsset {
+                name: "Good".into(),
+                members: vec!["Turret01".into()],
+            }],
+        );
+        let src = "\
+Object Tank
+  Draw = W3DTankDraw ModuleTag_01
+    DefaultConditionState
+      Model = Good
+    End
+    ConditionState = DAMAGED
+      Model = 
+    End
+  End
+End
+";
+        let offset = src
+            .find("ConditionState = DAMAGED\n      Model = ")
+            .unwrap()
+            + "ConditionState = DAMAGED\n      Model = ".len();
+        let out: Vec<_> = complete(&a, &a.parse(src), offset as u32, Some(&index), None)
+            .into_iter()
+            .map(|c| c.label)
+            .collect();
+        assert!(out.contains(&"Good".to_string()), "{out:?}");
+    }
+
+    #[test]
+    fn weapon_bone_completions_use_token_positions() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        index.set_file_models(
+            "models/Good.w3d",
+            vec![crate::index::ModelAsset {
+                name: "Good".into(),
+                members: vec!["Muzzle01".into(), "Muzzle02".into()],
+            }],
+        );
+        let src = "\
+Object Tank
+  Draw = W3DTruckDraw ModuleTag_01
+    DefaultConditionState
+      Model = Good
+      WeaponFireFXBone = 
+    End
+  End
+End
+";
+        let slot_offset = src.find("WeaponFireFXBone = ").unwrap() + "WeaponFireFXBone = ".len();
+        let out: Vec<_> = complete(&a, &a.parse(src), slot_offset as u32, Some(&index), None)
+            .into_iter()
+            .map(|c| c.label)
+            .collect();
+        assert!(out.contains(&"PRIMARY".to_string()), "{out:?}");
+        assert!(!out.contains(&"Muzzle".to_string()), "{out:?}");
+
+        let src = src.replace("WeaponFireFXBone = ", "WeaponFireFXBone = PRIMARY ");
+        let bone_offset = src.find("PRIMARY ").unwrap() + "PRIMARY ".len();
+        let out: Vec<_> = complete(&a, &a.parse(&src), bone_offset as u32, Some(&index), None)
+            .into_iter()
+            .map(|c| c.label)
+            .collect();
+        assert!(out.contains(&"Muzzle".to_string()), "{out:?}");
+        assert_eq!(
+            out.iter()
+                .filter(|label| label.as_str() == "Muzzle")
+                .count(),
+            1
+        );
+        assert!(!out.contains(&"PRIMARY".to_string()), "{out:?}");
     }
 }

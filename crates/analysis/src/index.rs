@@ -14,6 +14,13 @@ use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode};
 use crate::model::{scope_schema, ScopeSchema};
 use crate::{Analyzer, Span};
 
+/// Model data discovered from a W3D asset.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelAsset {
+    pub name: String,
+    pub members: Vec<String>,
+}
+
 /// A definition's location within a file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Location {
@@ -73,6 +80,13 @@ pub struct WorkspaceIndex {
     /// String table keys from companion `.str` files, keyed by the INI file URI.
     /// Powers DisplayName completions when a map.str is present.
     ini_str_keys: HashMap<String, Vec<String>>,
+    /// W3D model assets, keyed case-insensitively by model name. Each entry
+    /// keeps the per-file contributions, so re-indexing or removing one asset
+    /// file (e.g. a patch archive overriding a base-game model) never drops
+    /// another file's model of the same name.
+    model_assets: HashMap<String, Vec<(String, ModelAsset)>>,
+    /// Reverse map for removing/replacing models contributed by one asset file.
+    file_models: HashMap<String, Vec<ModelAsset>>,
 }
 
 impl WorkspaceIndex {
@@ -140,11 +154,14 @@ impl WorkspaceIndex {
 
     /// Drop all definitions contributed by `file`.
     pub fn remove_file(&mut self, file: &str) {
-        if self.files.get(file).is_some_and(|v| !v.is_empty()) {
+        if self.files.get(file).is_some_and(|v| !v.is_empty())
+            || self.file_models.get(file).is_some_and(|v| !v.is_empty())
+        {
             self.generation += 1;
         }
         self.remove_entries(file);
         self.remove_site_entries(file);
+        self.remove_model_entries(file);
     }
 
     fn remove_site_entries(&mut self, file: &str) {
@@ -169,6 +186,45 @@ impl WorkspaceIndex {
                         if entry.locations.is_empty() {
                             names.remove(&lower);
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Replace W3D model assets contributed by `file`.
+    pub fn set_file_models(&mut self, file: &str, models: Vec<ModelAsset>) {
+        let normalized = normalized_model_assets(&models);
+        let changed = match self.file_models.get(file) {
+            Some(old) => normalized_model_assets(old) != normalized,
+            None => !models.is_empty(),
+        };
+        if changed {
+            self.generation += 1;
+        }
+        self.remove_model_entries(file);
+        let mut stored = Vec::with_capacity(models.len());
+        for mut model in models {
+            dedup_case_insensitive(&mut model.members);
+            self.model_assets
+                .entry(model.name.to_ascii_lowercase())
+                .or_default()
+                .push((file.to_string(), model.clone()));
+            stored.push(model);
+        }
+        if !stored.is_empty() {
+            self.file_models.insert(file.to_string(), stored);
+        }
+    }
+
+    fn remove_model_entries(&mut self, file: &str) {
+        if let Some(models) = self.file_models.remove(file) {
+            for model in models {
+                let lower = model.name.to_ascii_lowercase();
+                if let Some(contribs) = self.model_assets.get_mut(&lower) {
+                    contribs.retain(|(f, _)| f != file);
+                    if contribs.is_empty() {
+                        self.model_assets.remove(&lower);
                     }
                 }
             }
@@ -226,6 +282,35 @@ impl WorkspaceIndex {
             .get(ini_file)
             .into_iter()
             .flat_map(|keys| keys.iter().map(|k| k.as_str()))
+    }
+
+    /// Whether any W3D model assets have been indexed.
+    pub fn has_model_assets(&self) -> bool {
+        !self.model_assets.is_empty()
+    }
+
+    /// Is a W3D model known from indexed assets?
+    pub fn is_model_asset(&self, name: &str) -> bool {
+        self.model_assets.contains_key(&name.to_ascii_lowercase())
+    }
+
+    /// Known W3D model names, in display casing.
+    pub fn model_names(&self) -> impl Iterator<Item = &str> {
+        self.model_assets
+            .values()
+            .filter_map(|contribs| contribs.first())
+            .map(|(_, m)| m.name.as_str())
+    }
+
+    /// User-addressable members (pivots/subobjects/meshes) for `model`,
+    /// across every file that contributes the model. May repeat a member
+    /// when several files define the same model; callers dedup or use `any`.
+    pub fn model_members<'a>(&'a self, model: &str) -> impl Iterator<Item = &'a str> {
+        self.model_assets
+            .get(&model.to_ascii_lowercase())
+            .into_iter()
+            .flatten()
+            .flat_map(|(_, m)| m.members.iter().map(|b| b.as_str()))
     }
 
     /// Is `name` defined for `kind` anywhere in the workspace?
@@ -289,6 +374,29 @@ impl WorkspaceIndex {
                 })
         })
     }
+}
+
+fn dedup_case_insensitive(values: &mut Vec<String>) {
+    let mut seen = std::collections::HashSet::new();
+    values.retain(|value| seen.insert(value.to_ascii_lowercase()));
+}
+
+fn normalized_model_assets(models: &[ModelAsset]) -> Vec<(String, Vec<String>)> {
+    let mut out = models
+        .iter()
+        .map(|model| {
+            let mut members = model
+                .members
+                .iter()
+                .map(|member| member.to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            members.sort();
+            members.dedup();
+            (model.name.to_ascii_lowercase(), members)
+        })
+        .collect::<Vec<_>>();
+    out.sort();
+    out
 }
 
 /// Collect every reference site in a parsed document: each value token of a
@@ -527,5 +635,64 @@ mod tests {
         );
         assert!(!idx.is_defined(RefKind::Weapon, "Old"));
         assert!(idx.is_defined(RefKind::Weapon, "New"));
+    }
+
+    #[test]
+    fn model_asset_member_changes_bump_generation() {
+        let mut idx = WorkspaceIndex::new();
+        idx.set_file_models(
+            "model.w3d",
+            vec![ModelAsset {
+                name: "Tank".into(),
+                members: vec!["Tire01".into()],
+            }],
+        );
+        let g1 = idx.generation();
+        idx.set_file_models(
+            "model.w3d",
+            vec![ModelAsset {
+                name: "Tank".into(),
+                members: vec!["Tire02".into()],
+            }],
+        );
+        assert_ne!(idx.generation(), g1);
+    }
+
+    #[test]
+    fn removing_one_file_keeps_other_files_models_of_same_name() {
+        // Base game and a patch archive both ship a model called "Tank"
+        // (patches overriding base models is the normal case).
+        let mut idx = WorkspaceIndex::new();
+        idx.set_file_models(
+            "base.w3d",
+            vec![ModelAsset {
+                name: "Tank".into(),
+                members: vec!["Tire01".into()],
+            }],
+        );
+        idx.set_file_models(
+            "patch.w3d",
+            vec![ModelAsset {
+                name: "TANK".into(),
+                members: vec!["Cargo01".into()],
+            }],
+        );
+        let members: Vec<_> = idx.model_members("tank").collect();
+        assert!(members.contains(&"Tire01") && members.contains(&"Cargo01"));
+
+        idx.remove_file("patch.w3d");
+        assert!(idx.is_model_asset("Tank"));
+        let members: Vec<_> = idx.model_members("Tank").collect();
+        assert_eq!(members, vec!["Tire01"]);
+
+        // Re-indexing the remaining file (a rescan) must not lose it either.
+        idx.set_file_models(
+            "base.w3d",
+            vec![ModelAsset {
+                name: "Tank".into(),
+                members: vec!["Tire01".into()],
+            }],
+        );
+        assert!(idx.is_model_asset("Tank"));
     }
 }

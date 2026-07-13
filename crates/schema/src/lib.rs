@@ -193,6 +193,10 @@ pub enum ValueType {
     QuotedString,
     /// A list of ASCII strings (variadic).
     AsciiStringList,
+    /// A W3D model asset name, backed by indexed `.w3d` files.
+    W3dModel,
+    /// A bone, subobject, mesh, or other member of a W3D model asset.
+    W3dModelMember,
     /// `R:r G:g B:b [A:a]` color.
     Color,
     /// `X:x Y:y` coordinate.

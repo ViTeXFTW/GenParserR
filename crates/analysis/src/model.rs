@@ -1,7 +1,8 @@
 //! Bridges the syntax tree to the schema: given a scope node (a `BLOCK` or
 //! `MODULE`), determine which schema entity it is and look up fields / slots.
 
-use zerosyntax_schema::{BlockType, Field, ModuleSlot, ModuleType, SubBlock};
+use zerosyntax_schema::{BlockType, Field, ModuleSlot, ModuleType, SubBlock, ValueType};
+use zerosyntax_syntax::ast::Field as AstField;
 
 /// Returns true when `module` implements at least one of the interfaces the
 /// `slot` accepts. Used to filter completions and validate module placement.
@@ -138,4 +139,81 @@ pub fn enclosing_scopes<'a>(analyzer: &'a Analyzer, node: &SyntaxNode) -> Vec<Sc
         cur = n.parent();
     }
     out
+}
+
+pub(crate) fn is_model_asset_type(ty: &ValueType) -> bool {
+    matches!(ty, ValueType::W3dModel)
+}
+
+pub(crate) fn is_model_member_type(ty: &ValueType) -> bool {
+    matches!(ty, ValueType::W3dModelMember)
+}
+
+pub(crate) fn model_member_ini_name(member: &str) -> &str {
+    let trimmed = member.trim_end_matches(|c: char| c.is_ascii_digit());
+    if trimmed.is_empty() {
+        member
+    } else {
+        trimmed
+    }
+}
+
+pub(crate) fn model_member_matches(member: &str, value: &str) -> bool {
+    member.eq_ignore_ascii_case(value) || model_member_ini_name(member).eq_ignore_ascii_case(value)
+}
+
+/// Models referenced by W3D-model-typed fields visible from `scope_node`:
+/// the scope's own subtree first, then — because a `ConditionState` inherits
+/// its model from `DefaultConditionState` when it sets none (see the engine's
+/// `W3DModelDraw`) — each enclosing scope's subtree, stopping at the nearest
+/// one that declares any model. The climb never crosses the top-level block,
+/// so per-root cached diagnostics stay independent of sibling blocks.
+pub(crate) fn models_in_scope(analyzer: &Analyzer, scope_node: &SyntaxNode) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut node = scope_node.clone();
+    loop {
+        collect_models(analyzer, &node, &mut out);
+        if !out.is_empty() {
+            return out;
+        }
+        match node
+            .parent()
+            .filter(|p| matches!(p.kind(), SyntaxKind::BLOCK | SyntaxKind::MODULE))
+        {
+            Some(parent) => node = parent,
+            None => return out,
+        }
+    }
+}
+
+fn collect_models(analyzer: &Analyzer, node: &SyntaxNode, out: &mut Vec<String>) {
+    let scope = scope_schema(analyzer, node);
+    for child in node.children() {
+        match child.kind() {
+            SyntaxKind::FIELD => {
+                let field = AstField(child);
+                let Some(schema_field) = field.key().and_then(|key| scope.field(key.text())) else {
+                    continue;
+                };
+                let values = field.value_tokens();
+                match &schema_field.value_type {
+                    ValueType::TokenList { tokens } => {
+                        for (spec, value) in tokens.iter().zip(values.iter()) {
+                            if is_model_asset_type(spec) {
+                                out.push(value.text().trim_matches('"').to_string());
+                            }
+                        }
+                    }
+                    ty if is_model_asset_type(ty) => {
+                        if let Some(value) = values.first() {
+                            out.push(value.text().trim_matches('"').to_string());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            SyntaxKind::MODULE | SyntaxKind::BLOCK => collect_models(analyzer, &child, out),
+            _ => {}
+        }
+    }
 }
