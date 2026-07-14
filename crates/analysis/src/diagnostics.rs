@@ -949,6 +949,9 @@ impl<'a> Ctx<'a> {
         // but 5 of 862 cases, so the omission is almost always an accident.
         // (Not checked for ArmorSet: omitting it there is common practice.)
         if let ScopeSchema::SubBlock(sb) = &inner {
+            if let Some(argument_type) = &sb.argument_type {
+                self.validate_sub_block_argument(&module, argument_type);
+            }
             if sb.keyword == "WeaponSet" && !has_direct_field(node, "Conditions") {
                 if let Some(slot) = module.slot() {
                     self.warning(
@@ -963,6 +966,33 @@ impl<'a> Ctx<'a> {
         }
 
         self.walk(node, &inner);
+    }
+
+    fn validate_sub_block_argument(&mut self, module: &Module, ty: &ValueType) {
+        let tokens = module.argument_tokens();
+        if tokens.is_empty() {
+            return;
+        }
+        match ty {
+            ValueType::BitFlags { .. } | ValueType::ReferenceList { .. } => {
+                for token in &tokens {
+                    self.check_token(token, ty);
+                }
+            }
+            ValueType::TokenList { tokens: specs } => {
+                for (token, spec) in tokens.iter().zip(specs) {
+                    self.check_token(token, spec);
+                }
+            }
+            ValueType::OneOf { .. } => {
+                if let Some(variant) =
+                    ty.variant_for_first_token(tokens.first().map(|t| unquote(t.text())))
+                {
+                    self.check_token(&tokens[0], variant);
+                }
+            }
+            single => self.check_token(&tokens[0], single),
+        }
     }
 
     /// Validate a field's value tokens against its declared type.

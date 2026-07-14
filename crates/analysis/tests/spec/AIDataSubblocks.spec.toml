@@ -18,6 +18,17 @@ code = "unknown-field"
 on = "Location"
 absent = true
 
+[[diag]]
+severity = "warning"
+code = "unresolved-reference"
+on = "AIDataSpecBuilding"
+absent = true
+
+[[diag]]
+severity = "warning"
+code = "unresolved-reference"
+on = "MissingAIDataStructure"
+
 [[complete]]
 at = "$1"
 includes = ["ResourceGatherersEasy", "BaseDefenseStructure1", "SkillSet1"]

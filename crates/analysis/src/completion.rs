@@ -64,8 +64,7 @@ pub fn complete(
             &scope_node,
             &key,
             value_index,
-            current_token.as_deref(),
-            first_token.as_deref(),
+            (current_token.as_deref(), first_token.as_deref()),
             index,
             file,
         ),
@@ -294,11 +293,11 @@ fn field_value_completions(
     scope_node: &SyntaxNode,
     key: &str,
     value_index: usize,
-    current_token: Option<&str>,
-    first_token: Option<&str>,
+    tokens: (Option<&str>, Option<&str>),
     index: Option<&WorkspaceIndex>,
     file: Option<&str>,
 ) -> Vec<Completion> {
+    let (current_token, first_token) = tokens;
     // RemoveModule / ReplaceModule: suggest module tags from the origin object.
     if key.eq_ignore_ascii_case("RemoveModule") || key.eq_ignore_ascii_case("ReplaceModule") {
         if let Some(idx) = index {
