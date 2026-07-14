@@ -17580,8 +17580,8 @@
         {
           "name": "AutoAcquireEnemiesWhenIdle",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
+            "kind": "bit_flags",
+            "value_set": "auto_acquire_enemies"
           },
           "parse_fn": "INI::parseBitString32",
           "doc": null
@@ -17700,8 +17700,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -17862,8 +17862,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -18063,8 +18063,8 @@
         {
           "name": "AutoAcquireEnemiesWhenIdle",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
+            "kind": "bit_flags",
+            "value_set": "auto_acquire_enemies"
           },
           "parse_fn": "INI::parseBitString32",
           "doc": null
@@ -18199,8 +18199,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -18361,8 +18361,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -20737,8 +20737,8 @@
         {
           "name": "AutoAcquireEnemiesWhenIdle",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
+            "kind": "bit_flags",
+            "value_set": "auto_acquire_enemies"
           },
           "parse_fn": "INI::parseBitString32",
           "doc": null
@@ -21026,8 +21026,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -21188,8 +21188,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -22338,8 +22338,8 @@
         {
           "name": "AutoAcquireEnemiesWhenIdle",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
+            "kind": "bit_flags",
+            "value_set": "auto_acquire_enemies"
           },
           "parse_fn": "INI::parseBitString32",
           "doc": null
@@ -22531,8 +22531,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -22693,8 +22693,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -23009,8 +23009,8 @@
         {
           "name": "AutoAcquireEnemiesWhenIdle",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
+            "kind": "bit_flags",
+            "value_set": "auto_acquire_enemies"
           },
           "parse_fn": "INI::parseBitString32",
           "doc": null
@@ -23177,8 +23177,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -23339,8 +23339,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -23497,8 +23497,8 @@
         {
           "name": "AutoAcquireEnemiesWhenIdle",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
+            "kind": "bit_flags",
+            "value_set": "auto_acquire_enemies"
           },
           "parse_fn": "INI::parseBitString32",
           "doc": null
@@ -23641,8 +23641,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -23803,8 +23803,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -25476,8 +25476,8 @@
         {
           "name": "AutoAcquireEnemiesWhenIdle",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
+            "kind": "bit_flags",
+            "value_set": "auto_acquire_enemies"
           },
           "parse_fn": "INI::parseBitString32",
           "doc": null
@@ -26304,8 +26304,8 @@
         {
           "name": "AutoAcquireEnemiesWhenIdle",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
+            "kind": "bit_flags",
+            "value_set": "auto_acquire_enemies"
           },
           "parse_fn": "INI::parseBitString32",
           "doc": null
@@ -26504,8 +26504,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -26666,8 +26666,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -28478,8 +28478,8 @@
         {
           "name": "AutoAcquireEnemiesWhenIdle",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
+            "kind": "bit_flags",
+            "value_set": "auto_acquire_enemies"
           },
           "parse_fn": "INI::parseBitString32",
           "doc": null
@@ -28752,8 +28752,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -28914,8 +28914,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -29754,8 +29754,8 @@
         {
           "name": "AutoAcquireEnemiesWhenIdle",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
+            "kind": "bit_flags",
+            "value_set": "auto_acquire_enemies"
           },
           "parse_fn": "INI::parseBitString32",
           "doc": null
@@ -30014,8 +30014,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -30176,8 +30176,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -32568,8 +32568,8 @@
         {
           "name": "AutoAcquireEnemiesWhenIdle",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
+            "kind": "bit_flags",
+            "value_set": "auto_acquire_enemies"
           },
           "parse_fn": "INI::parseBitString32",
           "doc": null
@@ -32704,8 +32704,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -32866,8 +32866,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -34991,8 +34991,8 @@
         {
           "name": "AutoAcquireEnemiesWhenIdle",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
+            "kind": "bit_flags",
+            "value_set": "auto_acquire_enemies"
           },
           "parse_fn": "INI::parseBitString32",
           "doc": null
@@ -35119,8 +35119,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -35281,8 +35281,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -40286,8 +40286,8 @@
         {
           "name": "AutoAcquireEnemiesWhenIdle",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
+            "kind": "bit_flags",
+            "value_set": "auto_acquire_enemies"
           },
           "parse_fn": "INI::parseBitString32",
           "doc": null
@@ -40447,8 +40447,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -40609,8 +40609,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -48683,8 +48683,8 @@
         {
           "name": "AutoAcquireEnemiesWhenIdle",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
+            "kind": "bit_flags",
+            "value_set": "auto_acquire_enemies"
           },
           "parse_fn": "INI::parseBitString32",
           "doc": null
@@ -48803,8 +48803,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -48965,8 +48965,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -59992,8 +59992,8 @@
         {
           "name": "AutoAcquireEnemiesWhenIdle",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
+            "kind": "bit_flags",
+            "value_set": "auto_acquire_enemies"
           },
           "parse_fn": "INI::parseBitString32",
           "doc": null
@@ -60112,8 +60112,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -60274,8 +60274,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -60688,8 +60688,8 @@
         {
           "name": "AutoAcquireEnemiesWhenIdle",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
+            "kind": "bit_flags",
+            "value_set": "auto_acquire_enemies"
           },
           "parse_fn": "INI::parseBitString32",
           "doc": null
@@ -60881,8 +60881,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -61043,8 +61043,8 @@
             {
               "name": "ControlledWeaponSlots",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseTWS"
+                "kind": "bit_flags",
+                "value_set": "weapon_slot"
               },
               "parse_fn": "parseTWS",
               "doc": null
@@ -62075,6 +62075,31 @@
         },
         {
           "name": "DEFAULT_SWITCH_WEAPON",
+          "value": 4
+        }
+      ]
+    },
+    {
+      "id": "auto_acquire_enemies",
+      "members": [
+        {
+          "name": "YES",
+          "value": 0
+        },
+        {
+          "name": "STEALTHED",
+          "value": 1
+        },
+        {
+          "name": "NO",
+          "value": 2
+        },
+        {
+          "name": "NOTWHILEATTACKING",
+          "value": 3
+        },
+        {
+          "name": "ATTACK_BUILDINGS",
           "value": 4
         }
       ]

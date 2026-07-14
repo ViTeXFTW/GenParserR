@@ -1,0 +1,9 @@
+no_errors = true
+
+[[complete]]
+at = "$1"
+includes = ["PRIMARY", "SECONDARY", "TERTIARY"]
+
+[[complete]]
+at = "$2"
+includes = ["YES", "STEALTHED", "NO", "NOTWHILEATTACKING", "ATTACK_BUILDINGS"]
