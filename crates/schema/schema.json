@@ -38616,7 +38616,8 @@
         {
           "name": "SpecialObject",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "reference",
+            "ref_kind": "object"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
