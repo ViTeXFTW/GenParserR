@@ -80,7 +80,10 @@ pub fn reference_at(analyzer: &Analyzer, parse: &Parse, offset: u32) -> Option<R
                 if !actual.eq_ignore_ascii_case(prefix) {
                     return None;
                 }
-                let start = u32::from(tok.text_range().start()) + actual.len() as u32 + 1;
+                let start = u32::from(tok.text_range().start())
+                    + u32::from(tok.text().starts_with('"'))
+                    + actual.len() as u32
+                    + 1;
                 (
                     name.to_string(),
                     crate::Span {
@@ -183,5 +186,19 @@ mod tests {
             }
             _ => panic!("expected field hover"),
         }
+    }
+
+    #[test]
+    fn quoted_prefixed_reference_span_excludes_quotes_and_prefix() {
+        let a = Analyzer::embedded();
+        let src = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    DamagedParticleSystem1 = Bone:NONE RandomBone:No \"PSys:MissingParticle\"\n  End\nEnd\n";
+        let offset = src.find("MissingParticle").unwrap() as u32;
+        let reference = reference_at(&a, &a.parse(src), offset).unwrap();
+        assert_eq!(reference.kind, RefKind::ParticleSystem);
+        assert_eq!(reference.name, "MissingParticle");
+        assert_eq!(
+            &src[reference.span.start as usize..reference.span.end as usize],
+            "MissingParticle"
+        );
     }
 }

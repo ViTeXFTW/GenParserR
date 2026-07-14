@@ -505,8 +505,10 @@ fn collect_refs_from_type(
                             if !actual.eq_ignore_ascii_case(prefix) {
                                 continue;
                             }
-                            let start =
-                                u32::from(tok.text_range().start()) + actual.len() as u32 + 1;
+                            let start = u32::from(tok.text_range().start())
+                                + u32::from(tok.text().starts_with('"'))
+                                + actual.len() as u32
+                                + 1;
                             push(
                                 *ref_kind,
                                 name,
@@ -651,6 +653,22 @@ mod tests {
         assert_eq!(idx.reference_sites(RefKind::Upgrade, "Upgrade_B").len(), 1);
         idx.set_file_refs("f.ini", Vec::new());
         assert!(!idx.is_referenced(RefKind::Upgrade, "Upgrade_A"));
+    }
+
+    #[test]
+    fn quoted_prefixed_reference_site_span_excludes_quotes_and_prefix() {
+        let a = Analyzer::embedded();
+        let src = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    DamagedParticleSystem1 = Bone:NONE RandomBone:No \"PSys:MissingParticle\"\n  End\nEnd\n";
+        let refs = references_in(&a, &a.parse(src));
+        let reference = refs
+            .iter()
+            .find(|reference| reference.name == "MissingParticle")
+            .unwrap();
+        assert_eq!(reference.kind, RefKind::ParticleSystem);
+        assert_eq!(
+            &src[reference.span.start as usize..reference.span.end as usize],
+            "MissingParticle"
+        );
     }
 
     #[test]
