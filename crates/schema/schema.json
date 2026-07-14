@@ -12422,8 +12422,17 @@
             {
               "name": "AutoChooseSources",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "WeaponTemplateSet::parseAutoChoose"
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "enum",
+                    "value_set": "weapon_slot"
+                  },
+                  {
+                    "kind": "bit_flags",
+                    "value_set": "command_source"
+                  }
+                ]
               },
               "parse_fn": "WeaponTemplateSet::parseAutoChoose",
               "doc": null
@@ -62042,6 +62051,31 @@
         {
           "name": "TERTIARY",
           "value": 2
+        }
+      ]
+    },
+    {
+      "id": "command_source",
+      "members": [
+        {
+          "name": "FROM_PLAYER",
+          "value": 0
+        },
+        {
+          "name": "FROM_SCRIPT",
+          "value": 1
+        },
+        {
+          "name": "FROM_AI",
+          "value": 2
+        },
+        {
+          "name": "FROM_DOZER",
+          "value": 3
+        },
+        {
+          "name": "DEFAULT_SWITCH_WEAPON",
+          "value": 4
         }
       ]
     },

@@ -1027,6 +1027,14 @@ impl<'a> Ctx<'a> {
                         }
                     }
                 }
+                if let Some(spec) = specs
+                    .last()
+                    .filter(|spec| matches!(spec, ValueType::BitFlags { .. }))
+                {
+                    for tok in tokens.iter().skip(specs.len()) {
+                        self.check_token(tok, spec);
+                    }
+                }
             }
             // `R:0 G:0 B:0 [A:255]` — components are ints in 0..=255, the `A`
             // component is optional (INI.cpp parseRGBColor / parseColorInt).

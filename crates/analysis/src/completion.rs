@@ -538,8 +538,8 @@ fn completions_for_type(
         }
         // Token lists: at position 0 offer a full-sequence snippet plus per-token completions.
         ValueType::TokenList { tokens } => {
-            let mut out = tokens
-                .get(value_index)
+            let mut out = ty
+                .token_type_at(value_index)
                 .map(|elem| {
                     completions_for_type(analyzer, elem, 0, current_token, first_token, index)
                 })

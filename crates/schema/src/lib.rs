@@ -216,8 +216,8 @@ pub enum ValueType {
     /// A fixed sequence of individually-typed tokens, for engine parse
     /// functions that consume several tokens in order (e.g. Armor
     /// coefficients: `Armor = <DamageType> <percent>`, or WeaponSet's
-    /// `Weapon = <slot> <weapon name>`). Each listed token is required;
-    /// tokens beyond the list are ignored (lenient).
+    /// `Weapon = <slot> <weapon name>`). Each listed token is required. A
+    /// trailing BitFlags element consumes all remaining tokens.
     TokenList { tokens: Vec<ValueType> },
     /// A single token with a literal prefix and colon before the typed value
     /// (e.g. `PSys:<ParticleSystem>` or `RandomBone:<Yes|No>`).
@@ -255,6 +255,19 @@ impl ValueType {
                 })
             })
             .or_else(|| variants.first())
+    }
+
+    /// The value type consumed at a token position. A trailing bitflag type
+    /// represents the variable-length mask accepted by `INI::parseBitString32`.
+    pub fn token_type_at(&self, index: usize) -> Option<&ValueType> {
+        let ValueType::TokenList { tokens } = self else {
+            return Some(self);
+        };
+        tokens.get(index).or_else(|| {
+            tokens
+                .last()
+                .filter(|ty| matches!(ty, ValueType::BitFlags { .. }))
+        })
     }
 }
 

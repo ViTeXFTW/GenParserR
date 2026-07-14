@@ -1,0 +1,4 @@
+[[diag]]
+severity = "error"
+code = "bad-flag"
+on = "BAD_SOURCE"

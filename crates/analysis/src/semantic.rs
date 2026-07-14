@@ -184,10 +184,7 @@ impl<'a> Sem<'a> {
         });
         for (i, tok) in value_tokens.iter().enumerate() {
             // Token lists classify each position by its own element type.
-            let elem = match active_ty {
-                Some(ValueType::TokenList { tokens }) => tokens.get(i),
-                other => other,
-            };
+            let elem = active_ty.and_then(|ty| ty.token_type_at(i));
             self.set(tok, value_token_kind(tok, elem));
         }
     }
