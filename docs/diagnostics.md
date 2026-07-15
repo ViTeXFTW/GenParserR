@@ -43,6 +43,7 @@ file. Fix error-level syntax and schema problems rather than suppressing them.
 | `bad-number` | A numeric field does not contain a valid number. |
 | `bad-enum` | A value is not a member of the expected enum. |
 | `bad-flag` | A bitflag is not a member of the expected flag set. |
+| `bad-prefixed` | A tagged value does not use its required `Prefix:value` form. |
 | `unresolved-reference` | A referenced definition is not found in the workspace or configured base INI roots. |
 | `unknown-model` | A model name is not found in the indexed W3D assets. |
 | `unknown-model-member` | A bone or subobject is not found in the models active in that scope. |

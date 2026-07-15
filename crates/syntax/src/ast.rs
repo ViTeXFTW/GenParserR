@@ -23,6 +23,23 @@ fn header_tokens(node: &SyntaxNode) -> impl Iterator<Item = SyntaxToken> + '_ {
         .filter_map(move |el| el.into_token().filter(|t| !token_kind(t).is_trivia()))
 }
 
+fn header_value_tokens(node: &SyntaxNode) -> Vec<SyntaxToken> {
+    let mut seen_key = false;
+    let mut out = Vec::new();
+    for element in node.children_with_tokens() {
+        let Some(token) = element.into_token() else {
+            break;
+        };
+        match token_kind(&token) {
+            SyntaxKind::NEWLINE => break,
+            SyntaxKind::WORD if !seen_key => seen_key = true,
+            SyntaxKind::WORD | SyntaxKind::STRING if seen_key => out.push(token),
+            _ => {}
+        }
+    }
+    out
+}
+
 /// A top-level block, e.g. `Weapon AK47 ... End`.
 #[derive(Debug, Clone)]
 pub struct Block(pub SyntaxNode);
@@ -80,6 +97,11 @@ impl Module {
         self.word_after_equals(1)
     }
 
+    /// Header arguments after the slot keyword, with or without `=`.
+    pub fn argument_tokens(&self) -> Vec<SyntaxToken> {
+        header_value_tokens(&self.0)
+    }
+
     fn word_after_equals(&self, nth: usize) -> Option<SyntaxToken> {
         let mut seen_equals = false;
         let mut skip = nth;
@@ -132,16 +154,7 @@ impl Field {
     /// another separator (INI.cpp seps are `" \n\r\t="`), so `RemoveModule
     /// ModuleTag_01` carries a value exactly like `Key = Value` does.
     pub fn value_tokens(&self) -> Vec<SyntaxToken> {
-        let mut seen_key = false;
-        let mut out = Vec::new();
-        for t in header_tokens(&self.0) {
-            match token_kind(&t) {
-                SyntaxKind::WORD if !seen_key => seen_key = true,
-                SyntaxKind::WORD | SyntaxKind::STRING if seen_key => out.push(t),
-                _ => {}
-            }
-        }
-        out
+        header_value_tokens(&self.0)
     }
 }
 

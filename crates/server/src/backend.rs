@@ -251,38 +251,28 @@ fn parse_w3d_models(bytes: &[u8], fallback_name: &str) -> Vec<ModelAsset> {
         names.push(fallback_name.to_string());
     }
     walk_w3d_chunks(bytes, 0, bytes.len(), 0, &mut |kind, payload| match kind {
-        0x0000_001F => {
-            if payload.len() >= 40 {
-                push_name(&mut members, read_fixed_name(&payload[8..24]));
-                push_name(&mut names, read_fixed_name(&payload[24..40]));
-            }
+        0x0000_001F if payload.len() >= 40 => {
+            push_name(&mut members, read_fixed_name(&payload[8..24]));
+            push_name(&mut names, read_fixed_name(&payload[24..40]));
         }
         // HIERARCHY_HEADER, EMITTER_HEADER, AGGREGATE_HEADER: Version + Name[16].
-        0x0000_0101 | 0x0000_0501 | 0x0000_0601 => {
-            if payload.len() >= 20 {
-                push_name(&mut names, read_fixed_name(&payload[4..20]));
-            }
+        0x0000_0101 | 0x0000_0501 | 0x0000_0601 if payload.len() >= 20 => {
+            push_name(&mut names, read_fixed_name(&payload[4..20]));
         }
         0x0000_0102 => {
             for pivot in payload.chunks_exact(60) {
                 push_name(&mut members, read_fixed_name(&pivot[..16]));
             }
         }
-        0x0000_0701 => {
-            if payload.len() >= 40 {
-                push_name(&mut names, read_fixed_name(&payload[8..24]));
-                push_name(&mut names, read_fixed_name(&payload[24..40]));
-            }
+        0x0000_0701 if payload.len() >= 40 => {
+            push_name(&mut names, read_fixed_name(&payload[8..24]));
+            push_name(&mut names, read_fixed_name(&payload[24..40]));
         }
-        0x0000_0704 => {
-            if payload.len() >= 36 {
-                push_name(&mut members, read_fixed_name(&payload[4..36]));
-            }
+        0x0000_0704 if payload.len() >= 36 => {
+            push_name(&mut members, read_fixed_name(&payload[4..36]));
         }
-        0x0000_0740 => {
-            if payload.len() >= 40 {
-                push_name(&mut members, read_fixed_name(&payload[8..40]));
-            }
+        0x0000_0740 if payload.len() >= 40 => {
+            push_name(&mut members, read_fixed_name(&payload[8..40]));
         }
         0x0000_0750 if payload.len() >= 48 => {
             push_name(&mut members, read_fixed_name(&payload[16..48]))

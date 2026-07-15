@@ -1,0 +1,6 @@
+no_errors = true
+
+# `AutoChooseSources` consumes a weapon slot followed by CommandSource flags.
+[[complete]]
+at = "$1"
+includes = ["FROM_PLAYER", "FROM_SCRIPT", "FROM_AI", "FROM_DOZER", "DEFAULT_SWITCH_WEAPON"]
