@@ -6,8 +6,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [dev, prod]
   pull_request:
+    branches: [dev, prod]
   workflow_call:
 
 permissions:
@@ -30,7 +31,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
       - name: cargo test
         run: cargo test --locked
@@ -47,7 +48,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
       - name: cargo fmt
         run: cargo fmt --all --check
@@ -57,9 +58,9 @@ jobs:
   extension:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm

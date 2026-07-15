@@ -1,67 +1,119 @@
-# Tag-triggered release pipeline.
-#
-# Push a tag `vX.Y.Z` (matching the workspace version in Cargo.toml) and this
-# workflow builds the server for Windows x64 and Linux x64 (musl-static),
-# packages platform-specific VS Code extensions with the binary bundled,
-# publishes a GitHub Release with SHA-256 checksums, and — when VSCE_PAT is
-# configured as a repository secret — publishes the extension to the VS Code
-# Marketplace (skipped, not failed, when the token is absent).
-#
-# See docs/release.md for the step-by-step release procedure.
+# Manual release pipeline for both GitHub pre-releases and live releases.
 
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: Release type
+        required: true
+        default: prerelease
+        type: choice
+        options:
+          - prerelease
+          - release
 
 permissions:
   contents: write
+  pull-requests: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 env:
   BIN_NAME: zerosyntax-lsp
   CARGO_TERM_COLOR: always
 
 jobs:
-  ci:
-    uses: ./.github/workflows/ci.yml
-
-  corpus:
-    uses: ./.github/workflows/corpus.yml
-
-  # The tag is the single source of truth for the release version; it must
-  # match the Rust workspace version so the binary's provenance is unambiguous.
-  # (The extension version is stamped from the tag at package time.)
-  check-version:
-    needs: [ci, corpus]
+  prepare:
     runs-on: ubuntu-latest
+    outputs:
+      dev_sha: ${{ steps.release.outputs.dev_sha }}
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Tag matches workspace version
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Resolve and validate release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TYPE: ${{ inputs.release_type }}
         run: |
-          tag="${GITHUB_REF_NAME#v}"
-          crate="$(cargo metadata --locked --no-deps --format-version 1 \
-            | jq -r '.packages[] | select(.name == "zerosyntax-server") | .version')"
-          if [ "$tag" != "$crate" ]; then
-            echo "::error::tag v$tag does not match workspace version $crate" >&2
+          if [ "$GITHUB_REF" != "refs/heads/dev" ]; then
+            echo "::error::run the release workflow from the dev branch" >&2
             exit 1
           fi
 
+          version="$(cargo metadata --locked --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "zerosyntax-server") | .version')"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Cargo workspace version must be a major.minor.patch release version, got '$version'" >&2
+            exit 1
+          fi
+
+          dev_sha="$(git rev-parse HEAD)"
+          stable_tag="v$version"
+          if [ "$RELEASE_TYPE" = "prerelease" ]; then
+            tag="$stable_tag-pre.$GITHUB_RUN_NUMBER"
+            if git ls-remote --exit-code --tags origin "refs/tags/$stable_tag" >/dev/null 2>&1 \
+              || gh release view "$stable_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "::error::$stable_tag is already released; bump the Cargo workspace version" >&2
+              exit 1
+            fi
+          else
+            tag="$stable_tag"
+            git fetch origin prod:refs/remotes/origin/prod
+            base="$(git merge-base origin/prod "$dev_sha")"
+            if ! git diff --quiet "$base" origin/prod; then
+              echo "::error::prod has content changes not present in dev; merge prod into dev first" >&2
+              exit 1
+            fi
+            if git diff --quiet origin/prod "$dev_sha"; then
+              echo "::error::dev has no changes to release" >&2
+              exit 1
+            fi
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1 \
+            || gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::$tag already exists" >&2
+            exit 1
+          fi
+
+          echo "dev_sha=$dev_sha" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  ci:
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
+
+  corpus:
+    needs: prepare
+    uses: ./.github/workflows/corpus.yml
+
   build:
-    needs: check-version
+    needs: [prepare, ci, corpus]
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-          # musl => fully static binary, runs on any x64 Linux regardless of
-          # glibc version (all dependencies are pure Rust).
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
     runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.dev_sha }}
       - name: Install musl linker
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: sudo apt-get update && sudo apt-get install -y musl-tools
@@ -69,16 +121,13 @@ jobs:
         run: rustup target add ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
+          key: release-${{ matrix.target }}
       - name: Build
         run: cargo build --locked --release -p zerosyntax-server --target ${{ matrix.target }}
-
-      # Archive on the build machine so the Unix executable bit survives
-      # (upload-artifact does not preserve file permissions).
       - name: Package (unix)
         if: runner.os != 'Windows'
         run: |
-          staging="${BIN_NAME}-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          staging="${BIN_NAME}-${RELEASE_TAG}-${{ matrix.target }}"
           mkdir "$staging" bin
           cp "target/${{ matrix.target }}/release/${BIN_NAME}" bin/
           cp "target/${{ matrix.target }}/release/${BIN_NAME}" "$staging/"
@@ -90,7 +139,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $staging = "$env:BIN_NAME-$env:GITHUB_REF_NAME-${{ matrix.target }}"
+          $staging = "$env:BIN_NAME-$env:RELEASE_TAG-${{ matrix.target }}"
           New-Item -ItemType Directory -Path $staging | Out-Null
           New-Item -ItemType Directory -Path bin | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/$env:BIN_NAME.exe" bin
@@ -100,9 +149,7 @@ jobs:
           Compress-Archive -Path $staging -DestinationPath "$staging.zip"
           (Get-FileHash "$staging.zip" -Algorithm SHA256).Hash.ToLower() + "  $staging.zip" `
             | Out-File -Encoding ascii "$staging.zip.sha256"
-
-      - name: Upload release archive
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.target }}
           path: |
@@ -111,21 +158,14 @@ jobs:
             *.zip
             *.zip.sha256
           if-no-files-found: error
-      # Raw binary for the vsix job (which re-sets the exec bit itself). The
-      # bin/ staging dir holds exactly the binary — a target-dir glob would
-      # also catch .d/.pdb build by-products.
-      - name: Upload raw binary
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: bin-${{ matrix.target }}
           path: bin/*
           if-no-files-found: error
 
-  # One .vsix per platform, each with that platform's server binary bundled
-  # under the extension's server/ directory (`vsce package --target`). The
-  # extension still honors the `zerosyntax.server.path` override.
   vsix:
-    needs: build
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -136,44 +176,57 @@ jobs:
           - vsce-target: linux-x64
             rust-target: x86_64-unknown-linux-musl
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.dev_sha }}
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: editors/vscode/package-lock.json
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: bin-${{ matrix.rust-target }}
           path: editors/vscode/server
       - name: Package extension
         working-directory: editors/vscode
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_TYPE: ${{ inputs.release_type }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           chmod +x server/${BIN_NAME}* || true
           [ -f ../../LICENSE ] && cp ../../LICENSE .
           npm ci
-          # Stamp the extension with the release version (tag is authoritative).
-          npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
-          npx --yes @vscode/vsce package --target ${{ matrix.vsce-target }} \
-            -o "zerosyntax-vscode-${{ matrix.vsce-target }}-${GITHUB_REF_NAME#v}.vsix"
-      - uses: actions/upload-artifact@v4
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          args=()
+          if [ "$RELEASE_TYPE" = "prerelease" ]; then args+=(--pre-release); fi
+          npx --yes @vscode/vsce package "${args[@]}" --target ${{ matrix.vsce-target }} \
+            -o "zerosyntax-vscode-${{ matrix.vsce-target }}-${RELEASE_TAG#v}.vsix"
+      - uses: actions/upload-artifact@v7
         with:
           name: vsix-${{ matrix.vsce-target }}
           path: editors/vscode/*.vsix
           if-no-files-found: error
 
-  release:
-    needs: [build, vsix]
+  publish-release:
+    needs: [prepare, build, vsix]
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+      RELEASE_TYPE: ${{ inputs.release_type }}
     steps:
-      # Only dist-* and vsix-* — merging bin-* would collide the
-      # identically-named raw binaries from different targets.
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.dev_sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v8
         with:
           pattern: dist-*
           path: dist
           merge-multiple: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: vsix-*
           path: dist
@@ -182,20 +235,57 @@ jobs:
         run: |
           cd dist
           sha256sum *.tar.gz *.zip *.vsix > SHA256SUMS.txt
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Merge production release
+        id: target
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "$GITHUB_REF_NAME" \
-            --generate-notes
+          dev_sha="${{ needs.prepare.outputs.dev_sha }}"
+          if [ "$RELEASE_TYPE" = "release" ]; then
+            pr_url="$(gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
+              --base prod \
+              --head dev \
+              --title "Release $RELEASE_TAG" \
+              --body "Automated production release for $RELEASE_TAG.")"
+            gh pr merge "$pr_url" \
+              --repo "$GITHUB_REPOSITORY" \
+              --merge \
+              --match-head-commit "$dev_sha"
+            target_sha="$(gh pr view "$pr_url" --repo "$GITHUB_REPOSITORY" \
+              --json mergeCommit --jq '.mergeCommit.oid')"
+            if [ -z "$target_sha" ] || [ "$target_sha" = "null" ]; then
+              echo "::error::could not resolve the prod merge commit" >&2
+              exit 1
+            fi
+          else
+            target_sha="$dev_sha"
+          fi
+          echo "sha=$target_sha" >> "$GITHUB_OUTPUT"
+      - name: Create tag and GitHub Release
+        run: |
+          target_sha="${{ steps.target.outputs.sha }}"
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" --method POST \
+            -f ref="refs/tags/$RELEASE_TAG" -f sha="$target_sha"
 
-  # Publishing requires the VSCE_PAT secret configured in the repository;
-  # the job is skipped (not failed) when the token is absent, so the GitHub
-  # Release itself never depends on marketplace credentials.
+          previous_stable="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq 'map(select(.draft == false and .prerelease == false))[0].tag_name // ""')"
+          args=(
+            --repo "$GITHUB_REPOSITORY"
+            --title "$RELEASE_TAG"
+            --target "$target_sha"
+            --verify-tag
+            --generate-notes
+          )
+          if [ -n "$previous_stable" ]; then args+=(--notes-start-tag "$previous_stable"); fi
+          if [ "$RELEASE_TYPE" = "prerelease" ]; then
+            args+=(--prerelease --latest=false)
+          else
+            args+=(--latest)
+          fi
+          gh release create "$RELEASE_TAG" dist/* "${args[@]}"
+
   publish-marketplace:
-    needs: release
+    needs: publish-release
+    if: inputs.release_type == 'release'
     runs-on: ubuntu-latest
     env:
       VSCE_PAT: ${{ secrets.VSCE_PAT }}
@@ -204,9 +294,9 @@ jobs:
         id: token
         run: |
           if [ -n "$VSCE_PAT" ]; then echo "present=true" >> "$GITHUB_OUTPUT"; fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.token.outputs.present == 'true'
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         if: steps.token.outputs.present == 'true'
         with:
           node-version: 22
@@ -216,7 +306,7 @@ jobs:
         if: steps.token.outputs.present == 'true'
         working-directory: editors/vscode
         run: npm ci
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: steps.token.outputs.present == 'true'
         with:
           pattern: vsix-*

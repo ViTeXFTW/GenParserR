@@ -20,7 +20,7 @@ enum RawToken {
     Newline,
 
     // `;` to end of line.
-    #[regex(r";[^\n\r]*")]
+    #[regex(r";[^\n\r]*", allow_greedy = true)]
     Comment,
 
     #[token("=")]

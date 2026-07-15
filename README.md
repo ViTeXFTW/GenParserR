@@ -47,9 +47,10 @@ and starts the bundled language server automatically.
 Formatting is off by default. Enable it with `zerosyntax.format.enable` when you
 want the server to advertise document formatting to VS Code.
 
-For map/solo.ini diagnostics, set `zerosyntax.baseIniRoots` to game or mod INI
-directories and/or `.big` archives. Those definitions are treated as already
-loaded before the map file.
+For map/solo.ini diagnostics and W3D model/bone completions, set
+`zerosyntax.baseIniRoots` to game or mod directories and/or `.big` archives.
+INI definitions are treated as already loaded before the map file; W3D assets
+are indexed for model and bone checks.
 
 ### Standalone language server
 

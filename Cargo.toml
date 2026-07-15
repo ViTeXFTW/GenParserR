@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/schema", "crates/syntax", "crates/analysis", "crates/server"]
 
 [workspace.package]
-version = "1.0.3"
+version = "1.0.5"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ViTeXFTW/ZeroSyntaxV2"
@@ -16,14 +16,14 @@ zerosyntax-analysis = { path = "crates/analysis" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.8"
+toml = "1.1"
 anyhow = "1"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # syntax
-logos = "0.15"
+logos = "0.16"
 rowan = "0.16"
 
 # server
@@ -36,4 +36,4 @@ dashmap = "6"
 walkdir = "2"
 
 # benches
-criterion = "0.5"
+criterion = "0.8"

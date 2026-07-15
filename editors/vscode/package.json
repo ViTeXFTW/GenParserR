@@ -2,7 +2,7 @@
   "name": "zerosyntax-vscode",
   "displayName": "ZeroSyntax v2",
   "description": "Language support (diagnostics, completion, semantic highlighting) for C&C Generals: Zero Hour INI files, powered by ZeroSyntax v2.",
-  "version": "1.0.2",
+  "version": "1.0.4",
   "license": "MIT",
   "repository": {
     "type": "GitHub",
@@ -61,7 +61,7 @@
           "items": {
             "type": "string"
           },
-          "markdownDescription": "Directories or `.big` archives containing base game/mod INI files that should be treated as already loaded before `map.ini`/`solo.ini`. Changing this restarts the language server."
+          "markdownDescription": "Directories or `.big` archives containing base game/mod INI files and W3D assets. INI definitions are treated as already loaded before `map.ini`/`solo.ini`; W3D assets power model and bone completions/diagnostics. Changing this restarts the language server."
         },
         "zerosyntax.trace.server": {
           "type": "string",
@@ -93,7 +93,7 @@
     "@types/vscode": "^1.84.0",
     "@vscode/test-electron": "^3.0.0",
     "@vscode/vsce": "^3.9.2",
-    "mocha": "^11.7.6",
-    "typescript": "^5.4.0"
+    "mocha": "^11.3.0",
+    "typescript": "^6.0.3"
   }
 }

@@ -9,6 +9,17 @@ severity = "warning"
 code = "unresolved-reference"
 on = "NoSuchImage"
 
+# Rider fields are positional token lists: object and command-set tokens are references.
+[[diag]]
+severity = "warning"
+code = "unresolved-reference"
+on = "NoSuchRiderObject"
+
+[[diag]]
+severity = "warning"
+code = "unresolved-reference"
+on = "NoSuchCommandSet"
+
 # `ButtonImage =` offers the workspace's mapped images.
 [[complete]]
 at = "$1"
@@ -28,3 +39,28 @@ includes = ["TestFireSound"]
 [[complete]]
 at = "$4"
 includes = ["Command_RefTest"]
+
+# Rider1 value positions complete by their typed token.
+[[complete]]
+at = "$5"
+includes = ["RefTestObject"]
+
+[[complete]]
+at = "$6"
+includes = ["RIDER1"]
+
+[[complete]]
+at = "$7"
+includes = ["WEAPON_RIDER1"]
+
+[[complete]]
+at = "$8"
+includes = ["STATUS_RIDER1"]
+
+[[complete]]
+at = "$9"
+includes = ["RefTestCommandSet"]
+
+[[complete]]
+at = "$10"
+includes = ["SET_NORMAL"]

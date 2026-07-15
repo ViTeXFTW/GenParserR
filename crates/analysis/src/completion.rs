@@ -10,7 +10,9 @@ use zerosyntax_schema::ValueType;
 use zerosyntax_syntax::ast::{Block, Field, Module};
 use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode};
 
-use crate::model::scope_schema;
+use crate::model::{
+    is_model_asset_type, is_model_member_type, model_member_ini_name, models_in_scope, scope_schema,
+};
 use crate::{Analyzer, WorkspaceIndex};
 
 /// The role of a completion item, mapped to LSP `CompletionItemKind` by the server.
@@ -55,10 +57,20 @@ pub fn complete(
             scope_node,
             key,
             value_index,
-        } => field_value_completions(analyzer, &scope_node, &key, value_index, index, file),
+            current_token,
+            first_token,
+        } => field_value_completions(
+            analyzer,
+            &scope_node,
+            &key,
+            value_index,
+            (current_token.as_deref(), first_token.as_deref()),
+            index,
+            file,
+        ),
         PosContext::ModuleName { slot_accepts } => module_name_completions(analyzer, &slot_accepts),
         PosContext::SubBlockArg { argument_type } => {
-            completions_for_type(analyzer, &argument_type, 0, index)
+            completions_for_type(analyzer, &argument_type, 0, None, None, index)
         }
     }
 }
@@ -74,6 +86,8 @@ enum PosContext {
         scope_node: SyntaxNode,
         key: String,
         value_index: usize,
+        current_token: Option<String>,
+        first_token: Option<String>,
     },
     /// Completing a module type name after a slot `=`. Carries the slot's
     /// accepted interfaces so completions can be filtered to valid modules only.
@@ -103,15 +117,27 @@ fn classify_position(analyzer: &Analyzer, root: &SyntaxNode, offset: u32) -> Pos
                 .key()
                 .map(|k| k.text().to_string())
                 .unwrap_or_default();
-            let value_index = field
-                .value_tokens()
+            let value_tokens = field.value_tokens();
+            let value_index = value_tokens
                 .iter()
-                .filter(|t| u32::from(t.text_range().end()) <= offset)
+                .filter(|t| u32::from(t.text_range().end()) < offset)
                 .count();
+            let current_token = value_tokens
+                .iter()
+                .find(|t| {
+                    let range = t.text_range();
+                    u32::from(range.start()) <= offset && offset <= u32::from(range.end())
+                })
+                .map(|t| t.text().trim_matches('"').to_string());
+            let first_token = value_tokens
+                .first()
+                .map(|t| t.text().trim_matches('"').to_string());
             return PosContext::FieldValue {
                 scope_node: scope_node.unwrap_or_else(|| root.clone()),
                 key,
                 value_index,
+                current_token,
+                first_token,
             };
         }
         return match scope_node {
@@ -200,7 +226,7 @@ fn field_key_completions(analyzer: &Analyzer, scope_node: &SyntaxNode) -> Vec<Co
             label: f.name.clone(),
             kind: CompletionKind::Field,
             detail: Some(type_label(&f.value_type)),
-            insert: None,
+            insert: value_snippet(&f.value_type).map(|value| format!("{} = {value}", f.name)),
         })
         .collect();
     for slot in scope.module_slots() {
@@ -267,9 +293,11 @@ fn field_value_completions(
     scope_node: &SyntaxNode,
     key: &str,
     value_index: usize,
+    tokens: (Option<&str>, Option<&str>),
     index: Option<&WorkspaceIndex>,
     file: Option<&str>,
 ) -> Vec<Completion> {
+    let (current_token, first_token) = tokens;
     // RemoveModule / ReplaceModule: suggest module tags from the origin object.
     if key.eq_ignore_ascii_case("RemoveModule") || key.eq_ignore_ascii_case("ReplaceModule") {
         if let Some(idx) = index {
@@ -296,10 +324,24 @@ fn field_value_completions(
     // DisplayName: add string table keys from the companion .str file when available.
     let mut base = {
         let scope = scope_schema(analyzer, scope_node);
-        scope
-            .field(key)
-            .map(|f| completions_for_type(analyzer, &f.value_type, value_index, index))
-            .unwrap_or_default()
+        if let Some(f) = scope.field(key) {
+            if let Some(asset_completions) =
+                model_asset_completions(analyzer, scope_node, &f.value_type, value_index, index)
+            {
+                asset_completions
+            } else {
+                completions_for_type(
+                    analyzer,
+                    &f.value_type,
+                    value_index,
+                    current_token,
+                    first_token,
+                    index,
+                )
+            }
+        } else {
+            Vec::new()
+        }
     };
     if key.eq_ignore_ascii_case("DisplayName") {
         if let (Some(idx), Some(f)) = (index, file) {
@@ -314,11 +356,90 @@ fn field_value_completions(
     base
 }
 
+fn model_asset_completions(
+    analyzer: &Analyzer,
+    scope_node: &SyntaxNode,
+    ty: &ValueType,
+    value_index: usize,
+    index: Option<&WorkspaceIndex>,
+) -> Option<Vec<Completion>> {
+    let index = index?;
+    if !index.has_model_assets() {
+        return None;
+    }
+    let ty = token_value_type(ty, value_index);
+    if is_model_asset_type(ty) {
+        return Some(
+            index
+                .model_names()
+                .map(|name| Completion {
+                    label: name.to_string(),
+                    kind: CompletionKind::Reference,
+                    detail: Some("W3D model".into()),
+                    insert: None,
+                })
+                .collect(),
+        );
+    }
+    if !is_model_member_type(ty) {
+        return None;
+    }
+    let mut seen = std::collections::HashSet::new();
+    let out = models_in_scope(analyzer, scope_node)
+        .into_iter()
+        .flat_map(|model| {
+            index
+                .model_members(&model)
+                .map(|member| model_member_ini_name(member).to_string())
+                .collect::<Vec<_>>()
+        })
+        .filter(|member| seen.insert(member.to_ascii_lowercase()))
+        .map(|member| Completion {
+            label: member,
+            kind: CompletionKind::Reference,
+            detail: Some("W3D model member".into()),
+            insert: None,
+        })
+        .collect();
+    Some(out)
+}
+
+fn token_value_type(ty: &ValueType, value_index: usize) -> &ValueType {
+    match ty {
+        ValueType::TokenList { tokens } => tokens.get(value_index).unwrap_or(ty),
+        _ => ty,
+    }
+}
+
 /// Build a single-token snippet placeholder for a value type, used when
 /// generating a full-sequence snippet for TokenList or structured types.
 /// `n` is the tab-stop index (1-based).
 fn type_snippet_placeholder(ty: &ValueType, n: usize) -> String {
     match ty {
+        ValueType::Prefixed { prefix, value_type } => {
+            if prefix.eq_ignore_ascii_case("Bone")
+                && matches!(
+                    value_type.as_ref(),
+                    ValueType::AsciiString | ValueType::QuotedString
+                )
+            {
+                format!("{prefix}:${{{n}:NONE}}")
+            } else if prefix.eq_ignore_ascii_case("RandomBone")
+                && matches!(value_type.as_ref(), ValueType::Bool)
+            {
+                format!("{prefix}:${{{n}:No}}")
+            } else if prefix.eq_ignore_ascii_case("Loc")
+                && matches!(value_type.as_ref(), ValueType::AsciiString)
+            {
+                format!("{prefix}:X:${{{n}:0}}")
+            } else {
+                format!("{prefix}:{}", type_snippet_placeholder(value_type, n))
+            }
+        }
+        ValueType::OneOf { variants } => variants
+            .first()
+            .map(|variant| type_snippet_placeholder(variant, n))
+            .unwrap_or_else(|| format!("${{{n}:?}}")),
         ValueType::Bool => format!("${{{n}:Yes}}"),
         ValueType::Int | ValueType::UInt => format!("${{{n}:0}}"),
         ValueType::Real
@@ -335,7 +456,26 @@ fn type_snippet_placeholder(ty: &ValueType, n: usize) -> String {
         ValueType::AsciiString | ValueType::AsciiStringList | ValueType::QuotedString => {
             format!("${{{n}:Value}}")
         }
+        ValueType::W3dModel => format!("${{{n}:Model}}"),
+        ValueType::W3dModelMember => format!("${{{n}:Bone}}"),
         _ => format!("${{{n}:?}}"),
+    }
+}
+
+fn value_snippet(ty: &ValueType) -> Option<String> {
+    match ty {
+        ValueType::TokenList { tokens } if tokens.len() > 1 => {
+            let mut snippet = tokens
+                .iter()
+                .enumerate()
+                .map(|(i, t)| type_snippet_placeholder(t, i + 1))
+                .collect::<Vec<_>>()
+                .join(" ");
+            snippet.push_str("$0");
+            Some(snippet)
+        }
+        ValueType::OneOf { variants } => variants.first().and_then(value_snippet),
+        _ => None,
     }
 }
 
@@ -343,32 +483,79 @@ fn completions_for_type(
     analyzer: &Analyzer,
     ty: &ValueType,
     value_index: usize,
+    current_token: Option<&str>,
+    first_token: Option<&str>,
     index: Option<&WorkspaceIndex>,
 ) -> Vec<Completion> {
     match ty {
+        ValueType::OneOf { variants } => {
+            if current_token.is_some() || value_index > 0 {
+                return ty
+                    .variant_for_first_token(first_token.or(current_token))
+                    .map(|variant| {
+                        completions_for_type(
+                            analyzer,
+                            variant,
+                            value_index,
+                            current_token,
+                            first_token,
+                            index,
+                        )
+                    })
+                    .unwrap_or_default();
+            }
+            variants
+                .iter()
+                .flat_map(|variant| {
+                    completions_for_type(analyzer, variant, 0, None, first_token, index)
+                })
+                .collect()
+        }
+        ValueType::Prefixed { prefix, value_type } => {
+            let prefix_already_typed = current_token
+                .and_then(|t| t.split_once(':').map(|(actual, _)| actual))
+                .is_some_and(|actual| actual.eq_ignore_ascii_case(prefix));
+            completions_for_type(
+                analyzer,
+                value_type,
+                value_index,
+                current_token,
+                first_token,
+                index,
+            )
+            .into_iter()
+            .map(|mut c| {
+                if !prefix_already_typed {
+                    c.insert = Some(format!(
+                        "{prefix}:{}",
+                        c.insert.unwrap_or_else(|| c.label.clone())
+                    ));
+                }
+                c
+            })
+            .collect()
+        }
         // Token lists: at position 0 offer a full-sequence snippet plus per-token completions.
         ValueType::TokenList { tokens } => {
-            let mut out = tokens
-                .get(value_index)
-                .map(|elem| completions_for_type(analyzer, elem, 0, index))
+            let mut out = ty
+                .token_type_at(value_index)
+                .map(|elem| {
+                    completions_for_type(analyzer, elem, 0, current_token, first_token, index)
+                })
                 .unwrap_or_default();
             // At the first token, also inject a full-sequence snippet.
-            if value_index == 0 && tokens.len() > 1 {
-                let snippet: String = tokens
-                    .iter()
-                    .enumerate()
-                    .map(|(i, t)| type_snippet_placeholder(t, i + 1))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                out.insert(
-                    0,
-                    Completion {
-                        label: "<full sequence>".into(),
-                        kind: CompletionKind::Value,
-                        detail: Some(format!("{} tokens", tokens.len())),
-                        insert: Some(snippet),
-                    },
-                );
+            if value_index == 0 {
+                if let Some(snippet) = value_snippet(ty) {
+                    out.insert(
+                        0,
+                        Completion {
+                            label: "<full sequence>".into(),
+                            kind: CompletionKind::Value,
+                            detail: Some(format!("{} tokens", tokens.len())),
+                            insert: Some(snippet),
+                        },
+                    );
+                }
             }
             out
         }
@@ -437,6 +624,7 @@ fn completions_for_type(
             }));
             out
         }
+        ValueType::W3dModel | ValueType::W3dModelMember => Vec::new(),
         _ => Vec::new(),
     }
 }
@@ -548,6 +736,16 @@ fn type_label(ty: &ValueType) -> String {
         ValueType::Enum { value_set } => format!("enum {value_set}"),
         ValueType::BitFlags { value_set } => format!("flags {value_set}"),
         ValueType::Reference { ref_kind } => format!("ref {ref_kind:?}"),
+        ValueType::W3dModel => "w3d model".into(),
+        ValueType::W3dModelMember => "w3d model member".into(),
+        ValueType::Prefixed { prefix, value_type } => {
+            format!("{prefix}:{}", type_label(value_type))
+        }
+        ValueType::OneOf { variants } => variants
+            .iter()
+            .map(type_label)
+            .collect::<Vec<_>>()
+            .join(" | "),
         other => format!("{other:?}")
             .split(['{', ' '])
             .next()
@@ -566,6 +764,27 @@ mod tests {
             .into_iter()
             .map(|c| c.label)
             .collect()
+    }
+
+    fn item(src: &str, offset: u32, label: &str) -> Completion {
+        let a = Analyzer::embedded();
+        complete(&a, &a.parse(src), offset, None, None)
+            .into_iter()
+            .find(|c| c.label == label)
+            .unwrap_or_else(|| panic!("missing completion `{label}`"))
+    }
+
+    fn item_with_defs(src: &str, offset: u32, defs: &str, label: &str) -> Completion {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        index.set_file(
+            "defs.ini",
+            crate::index::definitions_in(&a, &a.parse(defs), "defs.ini"),
+        );
+        complete(&a, &a.parse(src), offset, Some(&index), None)
+            .into_iter()
+            .find(|c| c.label == label)
+            .unwrap_or_else(|| panic!("missing completion `{label}`"))
     }
 
     #[test]
@@ -611,5 +830,175 @@ mod tests {
         let offset = "Object Tank\n  Body = ".len() as u32;
         let out = labels(src, offset);
         assert!(out.contains(&"ActiveBody".to_string()), "{out:?}");
+    }
+
+    #[test]
+    fn model_asset_completions_use_index() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        index.set_file_models(
+            "models/Good.w3d",
+            vec![crate::index::ModelAsset {
+                name: "Good".into(),
+                members: vec!["Cargo01".into(), "Tire01".into()],
+            }],
+        );
+        let src = "\
+Object Tank
+  Draw = W3DTruckDraw ModuleTag_01
+    DefaultConditionState
+      Model = 
+      HideSubObject = 
+    End
+  End
+End
+";
+        let model_offset = src.find("Model = ").unwrap() + "Model = ".len();
+        let out: Vec<_> = complete(&a, &a.parse(src), model_offset as u32, Some(&index), None)
+            .into_iter()
+            .map(|c| c.label)
+            .collect();
+        assert!(out.contains(&"Good".to_string()), "{out:?}");
+
+        let src = src.replace("Model = ", "Model = Good");
+        let bone_offset = src.find("HideSubObject = ").unwrap() + "HideSubObject = ".len();
+        let out: Vec<_> = complete(&a, &a.parse(&src), bone_offset as u32, Some(&index), None)
+            .into_iter()
+            .map(|c| c.label)
+            .collect();
+        assert!(out.contains(&"Cargo".to_string()), "{out:?}");
+        assert!(out.contains(&"Tire".to_string()), "{out:?}");
+    }
+
+    #[test]
+    fn model_completions_inside_named_condition_state() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        index.set_file_models(
+            "models/Good.w3d",
+            vec![crate::index::ModelAsset {
+                name: "Good".into(),
+                members: vec!["Turret01".into()],
+            }],
+        );
+        let src = "\
+Object Tank
+  Draw = W3DTankDraw ModuleTag_01
+    DefaultConditionState
+      Model = Good
+    End
+    ConditionState = DAMAGED
+      Model = 
+    End
+  End
+End
+";
+        let offset = src
+            .find("ConditionState = DAMAGED\n      Model = ")
+            .unwrap()
+            + "ConditionState = DAMAGED\n      Model = ".len();
+        let out: Vec<_> = complete(&a, &a.parse(src), offset as u32, Some(&index), None)
+            .into_iter()
+            .map(|c| c.label)
+            .collect();
+        assert!(out.contains(&"Good".to_string()), "{out:?}");
+    }
+
+    #[test]
+    fn weapon_bone_completions_use_token_positions() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        index.set_file_models(
+            "models/Good.w3d",
+            vec![crate::index::ModelAsset {
+                name: "Good".into(),
+                members: vec!["Muzzle01".into(), "Muzzle02".into()],
+            }],
+        );
+        let src = "\
+Object Tank
+  Draw = W3DTruckDraw ModuleTag_01
+    DefaultConditionState
+      Model = Good
+      WeaponFireFXBone = 
+    End
+  End
+End
+";
+        let slot_offset = src.find("WeaponFireFXBone = ").unwrap() + "WeaponFireFXBone = ".len();
+        let out: Vec<_> = complete(&a, &a.parse(src), slot_offset as u32, Some(&index), None)
+            .into_iter()
+            .map(|c| c.label)
+            .collect();
+        assert!(out.contains(&"PRIMARY".to_string()), "{out:?}");
+        assert!(!out.contains(&"Muzzle".to_string()), "{out:?}");
+
+        let src = src.replace("WeaponFireFXBone = ", "WeaponFireFXBone = PRIMARY ");
+        let bone_offset = src.find("PRIMARY ").unwrap() + "PRIMARY ".len();
+        let out: Vec<_> = complete(&a, &a.parse(&src), bone_offset as u32, Some(&index), None)
+            .into_iter()
+            .map(|c| c.label)
+            .collect();
+        assert!(out.contains(&"Muzzle".to_string()), "{out:?}");
+        assert_eq!(
+            out.iter()
+                .filter(|label| label.as_str() == "Muzzle")
+                .count(),
+            1
+        );
+        assert!(!out.contains(&"PRIMARY".to_string()), "{out:?}");
+    }
+
+    #[test]
+    fn transition_damage_particle_field_inserts_full_snippet() {
+        let src = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    \n  End\nEnd\n";
+        let offset = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    ".len() as u32;
+        let got = item(src, offset, "DamagedParticleSystem1");
+        assert_eq!(
+            got.insert.as_deref(),
+            Some(
+                "DamagedParticleSystem1 = Bone:${1:NONE} RandomBone:${2:No} PSys:${3:ParticleSystem}$0"
+            )
+        );
+    }
+
+    #[test]
+    fn transition_damage_fx_and_ocl_fields_insert_full_snippets() {
+        let src = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    \n  End\nEnd\n";
+        let offset = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    ".len() as u32;
+        assert_eq!(
+            item(src, offset, "DamagedFXList1").insert.as_deref(),
+            Some("DamagedFXList1 = Bone:${1:NONE} RandomBone:${2:No} FXList:${3:FxList}$0")
+        );
+        assert_eq!(
+            item(src, offset, "DamagedOCL10").insert.as_deref(),
+            Some("DamagedOCL10 = Bone:${1:NONE} RandomBone:${2:No} OCL:${3:ObjectCreationList}$0")
+        );
+    }
+
+    #[test]
+    fn prefixed_particle_reference_suggests_while_typing() {
+        let src = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    DamagedParticleSystem1 = Bone:NONE RandomBone:No PSys:Str\n  End\nEnd\n";
+        let offset = src.find("PSys:Str").unwrap() + "PSys:Str".len();
+        let got = item_with_defs(
+            src,
+            offset as u32,
+            "ParticleSystem StructureTransitionMediumSmoke\nEnd\n",
+            "StructureTransitionMediumSmoke",
+        );
+        assert_eq!(got.insert, None);
+    }
+
+    #[test]
+    fn loc_variant_reference_suggests_while_typing() {
+        let src = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    DamagedFXList1 = Loc:X:0.0 Y:0.0 Z:0.0 FXList:FX_\n  End\nEnd\n";
+        let offset = src.find("FXList:FX_").unwrap() + "FXList:FX_".len();
+        let got = item_with_defs(
+            src,
+            offset as u32,
+            "FXList FX_TankDamageTransition\nEnd\n",
+            "FX_TankDamageTransition",
+        );
+        assert_eq!(got.insert, None);
     }
 }

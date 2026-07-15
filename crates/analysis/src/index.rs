@@ -9,10 +9,17 @@ use std::collections::HashMap;
 
 use zerosyntax_schema::{RefKind, ValueType};
 use zerosyntax_syntax::ast::{Block, Field, Module};
-use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode};
+use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode, SyntaxToken};
 
 use crate::model::{scope_schema, ScopeSchema};
 use crate::{Analyzer, Span};
+
+/// Model data discovered from a W3D asset.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelAsset {
+    pub name: String,
+    pub members: Vec<String>,
+}
 
 /// A definition's location within a file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,6 +80,13 @@ pub struct WorkspaceIndex {
     /// String table keys from companion `.str` files, keyed by the INI file URI.
     /// Powers DisplayName completions when a map.str is present.
     ini_str_keys: HashMap<String, Vec<String>>,
+    /// W3D model assets, keyed case-insensitively by model name. Each entry
+    /// keeps the per-file contributions, so re-indexing or removing one asset
+    /// file (e.g. a patch archive overriding a base-game model) never drops
+    /// another file's model of the same name.
+    model_assets: HashMap<String, Vec<(String, ModelAsset)>>,
+    /// Reverse map for removing/replacing models contributed by one asset file.
+    file_models: HashMap<String, Vec<ModelAsset>>,
 }
 
 impl WorkspaceIndex {
@@ -140,11 +154,14 @@ impl WorkspaceIndex {
 
     /// Drop all definitions contributed by `file`.
     pub fn remove_file(&mut self, file: &str) {
-        if self.files.get(file).is_some_and(|v| !v.is_empty()) {
+        if self.files.get(file).is_some_and(|v| !v.is_empty())
+            || self.file_models.get(file).is_some_and(|v| !v.is_empty())
+        {
             self.generation += 1;
         }
         self.remove_entries(file);
         self.remove_site_entries(file);
+        self.remove_model_entries(file);
     }
 
     fn remove_site_entries(&mut self, file: &str) {
@@ -169,6 +186,45 @@ impl WorkspaceIndex {
                         if entry.locations.is_empty() {
                             names.remove(&lower);
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Replace W3D model assets contributed by `file`.
+    pub fn set_file_models(&mut self, file: &str, models: Vec<ModelAsset>) {
+        let normalized = normalized_model_assets(&models);
+        let changed = match self.file_models.get(file) {
+            Some(old) => normalized_model_assets(old) != normalized,
+            None => !models.is_empty(),
+        };
+        if changed {
+            self.generation += 1;
+        }
+        self.remove_model_entries(file);
+        let mut stored = Vec::with_capacity(models.len());
+        for mut model in models {
+            dedup_case_insensitive(&mut model.members);
+            self.model_assets
+                .entry(model.name.to_ascii_lowercase())
+                .or_default()
+                .push((file.to_string(), model.clone()));
+            stored.push(model);
+        }
+        if !stored.is_empty() {
+            self.file_models.insert(file.to_string(), stored);
+        }
+    }
+
+    fn remove_model_entries(&mut self, file: &str) {
+        if let Some(models) = self.file_models.remove(file) {
+            for model in models {
+                let lower = model.name.to_ascii_lowercase();
+                if let Some(contribs) = self.model_assets.get_mut(&lower) {
+                    contribs.retain(|(f, _)| f != file);
+                    if contribs.is_empty() {
+                        self.model_assets.remove(&lower);
                     }
                 }
             }
@@ -226,6 +282,35 @@ impl WorkspaceIndex {
             .get(ini_file)
             .into_iter()
             .flat_map(|keys| keys.iter().map(|k| k.as_str()))
+    }
+
+    /// Whether any W3D model assets have been indexed.
+    pub fn has_model_assets(&self) -> bool {
+        !self.model_assets.is_empty()
+    }
+
+    /// Is a W3D model known from indexed assets?
+    pub fn is_model_asset(&self, name: &str) -> bool {
+        self.model_assets.contains_key(&name.to_ascii_lowercase())
+    }
+
+    /// Known W3D model names, in display casing.
+    pub fn model_names(&self) -> impl Iterator<Item = &str> {
+        self.model_assets
+            .values()
+            .filter_map(|contribs| contribs.first())
+            .map(|(_, m)| m.name.as_str())
+    }
+
+    /// User-addressable members (pivots/subobjects/meshes) for `model`,
+    /// across every file that contributes the model. May repeat a member
+    /// when several files define the same model; callers dedup or use `any`.
+    pub fn model_members<'a>(&'a self, model: &str) -> impl Iterator<Item = &'a str> {
+        self.model_assets
+            .get(&model.to_ascii_lowercase())
+            .into_iter()
+            .flatten()
+            .flat_map(|(_, m)| m.members.iter().map(|b| b.as_str()))
     }
 
     /// Is `name` defined for `kind` anywhere in the workspace?
@@ -291,6 +376,29 @@ impl WorkspaceIndex {
     }
 }
 
+fn dedup_case_insensitive(values: &mut Vec<String>) {
+    let mut seen = std::collections::HashSet::new();
+    values.retain(|value| seen.insert(value.to_ascii_lowercase()));
+}
+
+fn normalized_model_assets(models: &[ModelAsset]) -> Vec<(String, Vec<String>)> {
+    let mut out = models
+        .iter()
+        .map(|model| {
+            let mut members = model
+                .members
+                .iter()
+                .map(|member| member.to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            members.sort();
+            members.dedup();
+            (model.name.to_ascii_lowercase(), members)
+        })
+        .collect::<Vec<_>>();
+    out.sort();
+    out
+}
+
 /// Collect every reference site in a parsed document: each value token of a
 /// `Reference`/`ReferenceList`-typed field (including reference elements of
 /// `token_list` fields). Null sentinels (`None`, audio `NoSound`) and engine
@@ -328,8 +436,7 @@ fn collect_field_refs(
         return;
     };
     let tokens = field.value_tokens();
-    let mut push = |kind: RefKind, tok: &zerosyntax_syntax::SyntaxToken| {
-        let name = tok.text().trim_matches('"');
+    let mut push = |kind: RefKind, name: &str, span: Span| {
         if name.is_empty()
             || name.eq_ignore_ascii_case("None")
             || (kind == RefKind::AudioEvent && name.eq_ignore_ascii_case("NoSound"))
@@ -340,26 +447,79 @@ fn collect_field_refs(
         out.push(ReferenceSite {
             name: name.to_string(),
             kind,
-            span: tok.text_range().into(),
+            span,
         });
     };
-    match &schema_field.value_type {
+    collect_refs_from_type(&schema_field.value_type, &tokens, &mut push);
+}
+
+fn collect_refs_from_type(
+    ty: &ValueType,
+    tokens: &[SyntaxToken],
+    push: &mut impl FnMut(RefKind, &str, Span),
+) {
+    match ty {
+        ValueType::OneOf { .. } => {
+            if let Some(variant) =
+                ty.variant_for_first_token(tokens.first().map(|t| t.text().trim_matches('"')))
+            {
+                collect_refs_from_type(variant, tokens, push);
+            }
+        }
         ValueType::Reference { ref_kind } => {
             if let Some(tok) = tokens.first() {
-                push(*ref_kind, tok);
+                push(
+                    *ref_kind,
+                    tok.text().trim_matches('"'),
+                    tok.text_range().into(),
+                );
             }
         }
         ValueType::ReferenceList { ref_kind } => {
-            for tok in &tokens {
-                push(*ref_kind, tok);
+            for tok in tokens {
+                push(
+                    *ref_kind,
+                    tok.text().trim_matches('"'),
+                    tok.text_range().into(),
+                );
             }
         }
         ValueType::TokenList { tokens: specs } => {
             for (spec, tok) in specs.iter().zip(tokens.iter()) {
-                if let ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } =
-                    spec
-                {
-                    push(*ref_kind, tok);
+                match spec {
+                    ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } => {
+                        push(
+                            *ref_kind,
+                            tok.text().trim_matches('"'),
+                            tok.text_range().into(),
+                        );
+                    }
+                    ValueType::Prefixed { prefix, value_type } => {
+                        if let ValueType::Reference { ref_kind }
+                        | ValueType::ReferenceList { ref_kind } = value_type.as_ref()
+                        {
+                            let text = tok.text().trim_matches('"');
+                            let Some((actual, name)) = text.split_once(':') else {
+                                continue;
+                            };
+                            if !actual.eq_ignore_ascii_case(prefix) {
+                                continue;
+                            }
+                            let start = u32::from(tok.text_range().start())
+                                + u32::from(tok.text().starts_with('"'))
+                                + actual.len() as u32
+                                + 1;
+                            push(
+                                *ref_kind,
+                                name,
+                                Span {
+                                    start,
+                                    end: start + name.len() as u32,
+                                },
+                            );
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -496,6 +656,22 @@ mod tests {
     }
 
     #[test]
+    fn quoted_prefixed_reference_site_span_excludes_quotes_and_prefix() {
+        let a = Analyzer::embedded();
+        let src = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    DamagedParticleSystem1 = Bone:NONE RandomBone:No \"PSys:MissingParticle\"\n  End\nEnd\n";
+        let refs = references_in(&a, &a.parse(src));
+        let reference = refs
+            .iter()
+            .find(|reference| reference.name == "MissingParticle")
+            .unwrap();
+        assert_eq!(reference.kind, RefKind::ParticleSystem);
+        assert_eq!(
+            &src[reference.span.start as usize..reference.span.end as usize],
+            "MissingParticle"
+        );
+    }
+
+    #[test]
     fn workspace_symbols_match_by_substring() {
         let a = Analyzer::embedded();
         let mut idx = WorkspaceIndex::new();
@@ -527,5 +703,64 @@ mod tests {
         );
         assert!(!idx.is_defined(RefKind::Weapon, "Old"));
         assert!(idx.is_defined(RefKind::Weapon, "New"));
+    }
+
+    #[test]
+    fn model_asset_member_changes_bump_generation() {
+        let mut idx = WorkspaceIndex::new();
+        idx.set_file_models(
+            "model.w3d",
+            vec![ModelAsset {
+                name: "Tank".into(),
+                members: vec!["Tire01".into()],
+            }],
+        );
+        let g1 = idx.generation();
+        idx.set_file_models(
+            "model.w3d",
+            vec![ModelAsset {
+                name: "Tank".into(),
+                members: vec!["Tire02".into()],
+            }],
+        );
+        assert_ne!(idx.generation(), g1);
+    }
+
+    #[test]
+    fn removing_one_file_keeps_other_files_models_of_same_name() {
+        // Base game and a patch archive both ship a model called "Tank"
+        // (patches overriding base models is the normal case).
+        let mut idx = WorkspaceIndex::new();
+        idx.set_file_models(
+            "base.w3d",
+            vec![ModelAsset {
+                name: "Tank".into(),
+                members: vec!["Tire01".into()],
+            }],
+        );
+        idx.set_file_models(
+            "patch.w3d",
+            vec![ModelAsset {
+                name: "TANK".into(),
+                members: vec!["Cargo01".into()],
+            }],
+        );
+        let members: Vec<_> = idx.model_members("tank").collect();
+        assert!(members.contains(&"Tire01") && members.contains(&"Cargo01"));
+
+        idx.remove_file("patch.w3d");
+        assert!(idx.is_model_asset("Tank"));
+        let members: Vec<_> = idx.model_members("Tank").collect();
+        assert_eq!(members, vec!["Tire01"]);
+
+        // Re-indexing the remaining file (a rescan) must not lose it either.
+        idx.set_file_models(
+            "base.w3d",
+            vec![ModelAsset {
+                name: "Tank".into(),
+                members: vec!["Tire01".into()],
+            }],
+        );
+        assert!(idx.is_model_asset("Tank"));
     }
 }

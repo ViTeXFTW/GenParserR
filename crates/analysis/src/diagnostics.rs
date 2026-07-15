@@ -20,7 +20,10 @@ use zerosyntax_schema::{RefKind, ValueType};
 use zerosyntax_syntax::ast::{Block, Field, Module};
 use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode, SyntaxToken};
 
-use crate::model::{module_fits_slot, scope_schema, ScopeSchema};
+use crate::model::{
+    is_model_asset_type, is_model_member_type, model_member_matches, models_in_scope,
+    module_fits_slot, scope_schema, ScopeSchema,
+};
 use crate::{Analyzer, Span, WorkspaceIndex};
 
 /// Severity of a diagnostic, mapped to LSP severities by the server.
@@ -88,7 +91,10 @@ pub const KNOWN_CODES: &[&str] = &[
     "bad-number",
     "bad-enum",
     "bad-flag",
+    "bad-prefixed",
     "unresolved-reference",
+    "unknown-model",
+    "unknown-model-member",
     "unknown-suppression",
     "module-wrong-slot",
     "duplicate-module-tag",
@@ -649,6 +655,7 @@ impl<'a> Ctx<'a> {
         const ARMOR_TRIGGERS: [&str; 1] = ["ArmorUpgrade"];
 
         let mut module_names: Vec<String> = Vec::new();
+        let mut weapon_set_upgrade_modules: Vec<SyntaxToken> = Vec::new();
         // (set keyword, the PLAYER_UPGRADE condition token) per set sub-block.
         let mut player_upgrade_sets: Vec<(&'static str, SyntaxToken)> = Vec::new();
         let mut is_override_patch = has_direct_field(node, "RemoveModule");
@@ -670,6 +677,9 @@ impl<'a> Ctx<'a> {
                 }
                 _ => {
                     if let Some(name) = module.module_name() {
+                        if name.text() == "WeaponSetUpgrade" {
+                            weapon_set_upgrade_modules.push(name.clone());
+                        }
                         module_names.push(name.text().to_string());
                     }
                 }
@@ -677,6 +687,17 @@ impl<'a> Ctx<'a> {
         }
         if is_override_patch {
             return;
+        }
+        let has_player_upgrade_weapon_set =
+            player_upgrade_sets.iter().any(|(kw, _)| *kw == "WeaponSet");
+        if !has_player_upgrade_weapon_set {
+            for tok in weapon_set_upgrade_modules {
+                self.warning(
+                    &tok,
+                    "unreachable-set",
+                    "this `WeaponSetUpgrade` module sets `PLAYER_UPGRADE`, but this object has no `WeaponSet` with that condition".to_string(),
+                );
+            }
         }
         for (kw, tok) in player_upgrade_sets {
             let triggers: &[&str] = if kw == "WeaponSet" {
@@ -703,7 +724,7 @@ impl<'a> Ctx<'a> {
     fn walk(&mut self, node: &SyntaxNode, scope: &ScopeSchema) {
         for child in node.children() {
             match child.kind() {
-                SyntaxKind::FIELD => self.field(&child, scope),
+                SyntaxKind::FIELD => self.field(&child, scope, node),
                 SyntaxKind::MODULE => self.module(&child, scope),
                 SyntaxKind::BLOCK => {
                     // Blocks nested in blocks are unusual but handled for safety.
@@ -715,13 +736,14 @@ impl<'a> Ctx<'a> {
         }
     }
 
-    fn field(&mut self, node: &SyntaxNode, scope: &ScopeSchema) {
+    fn field(&mut self, node: &SyntaxNode, scope: &ScopeSchema, scope_node: &SyntaxNode) {
         let field = Field(node.clone());
         let Some(key) = field.key() else { return };
         let name = key.text();
 
         if let Some(schema_field) = scope.field(name) {
             self.validate_value(&field, &schema_field.value_type);
+            self.validate_model_asset(&field, schema_field, scope_node);
         } else if scope.has_field_schema()
             && !scope.module_slots().iter().any(|s| s.keyword == name)
         {
@@ -729,6 +751,81 @@ impl<'a> Ctx<'a> {
                 &key,
                 "unknown-field",
                 format!("unknown field `{name}` in {}", scope.label()),
+            );
+        }
+    }
+
+    fn validate_model_asset(
+        &mut self,
+        field: &Field,
+        schema_field: &zerosyntax_schema::Field,
+        scope_node: &SyntaxNode,
+    ) {
+        let Some(index) = self.index else { return };
+        if !index.has_model_assets() {
+            return;
+        }
+        let tokens = field.value_tokens();
+        match &schema_field.value_type {
+            ValueType::TokenList { tokens: specs } => {
+                for (spec, tok) in specs.iter().zip(tokens.iter()) {
+                    self.validate_model_asset_token(spec, tok, scope_node);
+                }
+            }
+            ty => {
+                if let Some(tok) = tokens.first() {
+                    self.validate_model_asset_token(ty, tok, scope_node);
+                }
+            }
+        }
+    }
+
+    fn validate_model_asset_token(
+        &mut self,
+        ty: &ValueType,
+        tok: &SyntaxToken,
+        scope_node: &SyntaxNode,
+    ) {
+        let Some(index) = self.index else { return };
+        let value = unquote(tok.text());
+        if value.is_empty() || value.eq_ignore_ascii_case("None") {
+            return;
+        }
+        if is_model_asset_type(ty) {
+            if !index.is_model_asset(value) {
+                self.warning(
+                    tok,
+                    "unknown-model",
+                    format!("`{value}` is not a known W3D model asset"),
+                );
+            }
+            return;
+        }
+        if !is_model_member_type(ty) {
+            return;
+        }
+        let models = models_in_scope(self.analyzer, scope_node);
+        if models.is_empty() {
+            return;
+        }
+        let mut checked_any_model = false;
+        for model in models {
+            if !index.is_model_asset(&model) {
+                continue;
+            }
+            checked_any_model = true;
+            if index
+                .model_members(&model)
+                .any(|member| model_member_matches(member, value))
+            {
+                return;
+            }
+        }
+        if checked_any_model {
+            self.warning(
+                tok,
+                "unknown-model-member",
+                format!("`{value}` is not a known W3D model bone or subobject"),
             );
         }
     }
@@ -852,6 +949,9 @@ impl<'a> Ctx<'a> {
         // but 5 of 862 cases, so the omission is almost always an accident.
         // (Not checked for ArmorSet: omitting it there is common practice.)
         if let ScopeSchema::SubBlock(sb) = &inner {
+            if let Some(argument_type) = &sb.argument_type {
+                self.validate_sub_block_argument(&module, argument_type);
+            }
             if sb.keyword == "WeaponSet" && !has_direct_field(node, "Conditions") {
                 if let Some(slot) = module.slot() {
                     self.warning(
@@ -866,6 +966,33 @@ impl<'a> Ctx<'a> {
         }
 
         self.walk(node, &inner);
+    }
+
+    fn validate_sub_block_argument(&mut self, module: &Module, ty: &ValueType) {
+        let tokens = module.argument_tokens();
+        if tokens.is_empty() {
+            return;
+        }
+        match ty {
+            ValueType::BitFlags { .. } | ValueType::ReferenceList { .. } => {
+                for token in &tokens {
+                    self.check_token(token, ty);
+                }
+            }
+            ValueType::TokenList { tokens: specs } => {
+                for (token, spec) in tokens.iter().zip(specs) {
+                    self.check_token(token, spec);
+                }
+            }
+            ValueType::OneOf { .. } => {
+                if let Some(variant) =
+                    ty.variant_for_first_token(tokens.first().map(|t| unquote(t.text())))
+                {
+                    self.check_token(&tokens[0], variant);
+                }
+            }
+            single => self.check_token(&tokens[0], single),
+        }
     }
 
     /// Validate a field's value tokens against its declared type.
@@ -885,6 +1012,13 @@ impl<'a> Ctx<'a> {
             return;
         }
         match ty {
+            ValueType::OneOf { .. } => {
+                if let Some(variant) =
+                    ty.variant_for_first_token(tokens.first().map(|t| unquote(t.text())))
+                {
+                    self.validate_value(field, variant);
+                }
+            }
             ValueType::BitFlags { value_set } => {
                 for tok in &tokens {
                     let raw = tok.text().trim_start_matches(['+', '-']);
@@ -921,6 +1055,14 @@ impl<'a> Ctx<'a> {
                             }
                             break;
                         }
+                    }
+                }
+                if let Some(spec) = specs
+                    .last()
+                    .filter(|spec| matches!(spec, ValueType::BitFlags { .. }))
+                {
+                    for tok in tokens.iter().skip(specs.len()) {
+                        self.check_token(tok, spec);
                     }
                 }
             }
@@ -991,15 +1133,120 @@ impl<'a> Ctx<'a> {
             ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } => {
                 self.check_reference(*ref_kind, tok)
             }
+            ValueType::Prefixed { prefix, value_type } => {
+                self.check_prefixed_token(tok, prefix, value_type)
+            }
             // No single-token validation for these.
             ValueType::AsciiString
             | ValueType::QuotedString
             | ValueType::AsciiStringList
+            | ValueType::W3dModel
+            | ValueType::W3dModelMember
             | ValueType::Color
             | ValueType::Coord2D
             | ValueType::Coord3D
             | ValueType::TokenList { .. }
+            | ValueType::OneOf { .. }
             | ValueType::Unknown { .. } => {}
+        }
+    }
+
+    fn check_prefixed_token(&mut self, tok: &SyntaxToken, prefix: &str, ty: &ValueType) {
+        let text = unquote(tok.text());
+        let Some((actual, value)) = text.split_once(':') else {
+            self.error(
+                tok,
+                "bad-prefixed",
+                format!("expected `{prefix}:...`, found `{text}`"),
+            );
+            return;
+        };
+        if !actual.eq_ignore_ascii_case(prefix) {
+            self.error(
+                tok,
+                "bad-prefixed",
+                format!("expected `{prefix}:...`, found `{text}`"),
+            );
+            return;
+        }
+        if prefix.eq_ignore_ascii_case("Loc") {
+            let Some((axis, n)) = value.split_once(':') else {
+                self.error(
+                    tok,
+                    "bad-prefixed",
+                    format!("expected `Loc:X:<n>`, found `{text}`"),
+                );
+                return;
+            };
+            if !axis.eq_ignore_ascii_case("X") {
+                self.error(
+                    tok,
+                    "bad-prefixed",
+                    format!("expected `Loc:X:<n>`, found `{text}`"),
+                );
+                return;
+            }
+            if n.parse::<f64>().is_err() {
+                self.error(
+                    tok,
+                    "bad-number",
+                    format!("expected a number for `Loc:X:`, found `{n}`"),
+                );
+            }
+            return;
+        }
+        match ty {
+            ValueType::Bool => {
+                let v = value.to_ascii_lowercase();
+                if v != "yes" && v != "no" {
+                    self.error(
+                        tok,
+                        "bad-bool",
+                        format!("expected `Yes` or `No`, found `{value}`"),
+                    );
+                }
+            }
+            ValueType::Int => self.check_prefixed_number(tok, prefix, value, NumKind::Int),
+            ValueType::UInt => self.check_prefixed_number(tok, prefix, value, NumKind::UInt),
+            ValueType::Real
+            | ValueType::PositiveReal
+            | ValueType::AngleReal
+            | ValueType::Velocity
+            | ValueType::Acceleration
+            | ValueType::Duration => self.check_prefixed_number(tok, prefix, value, NumKind::Real),
+            ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } => {
+                self.check_reference_name(*ref_kind, tok, value)
+            }
+            ValueType::Enum { value_set } => self.check_enum_member_name(value_set, tok, value),
+            ValueType::BitFlags { value_set } => {
+                let raw = value.trim_start_matches(['+', '-']);
+                if !raw.eq_ignore_ascii_case("NONE") && !raw.eq_ignore_ascii_case("ALL") {
+                    self.check_bitflag_member_name(value_set, tok, raw);
+                }
+            }
+            ValueType::AsciiString | ValueType::AsciiStringList | ValueType::QuotedString => {}
+            _ => {}
+        }
+    }
+
+    fn check_prefixed_number(
+        &mut self,
+        tok: &SyntaxToken,
+        prefix: &str,
+        value: &str,
+        kind: NumKind,
+    ) {
+        let ok = match kind {
+            NumKind::Int => value.parse::<i64>().is_ok(),
+            NumKind::UInt => value.parse::<u64>().is_ok(),
+            NumKind::Real => value.parse::<f64>().is_ok(),
+        };
+        if !ok {
+            self.error(
+                tok,
+                "bad-number",
+                format!("expected a number for `{prefix}:`, found `{value}`"),
+            );
         }
     }
 
@@ -1119,13 +1366,16 @@ impl<'a> Ctx<'a> {
     }
 
     fn check_enum_member(&mut self, value_set: &str, tok: &SyntaxToken) {
+        self.check_enum_member_name(value_set, tok, tok.text());
+    }
+
+    fn check_enum_member_name(&mut self, value_set: &str, tok: &SyntaxToken, v: &str) {
         let Some(set) = self.analyzer.value_set(value_set) else {
             return;
         };
         if set.members.is_empty() {
             return; // value set we couldn't populate; don't flag
         }
-        let v = tok.text();
         if !set.members.iter().any(|m| m.name.eq_ignore_ascii_case(v)) {
             self.error(
                 tok,
@@ -1136,6 +1386,10 @@ impl<'a> Ctx<'a> {
     }
 
     fn check_bitflag_member(&mut self, value_set: &str, tok: &SyntaxToken, raw: &str) {
+        self.check_bitflag_member_name(value_set, tok, raw);
+    }
+
+    fn check_bitflag_member_name(&mut self, value_set: &str, tok: &SyntaxToken, raw: &str) {
         let Some(set) = self.analyzer.value_set(value_set) else {
             return;
         };
@@ -1152,8 +1406,11 @@ impl<'a> Ctx<'a> {
     }
 
     fn check_reference(&mut self, kind: RefKind, tok: &SyntaxToken) {
+        self.check_reference_name(kind, tok, unquote(tok.text()));
+    }
+
+    fn check_reference_name(&mut self, kind: RefKind, tok: &SyntaxToken, name: &str) {
         let Some(index) = self.index else { return };
-        let name = unquote(tok.text());
         // `None` is the universal null reference; `NoSound` is the audio one;
         // builtins (e.g. `Upgrade_Veterancy_*`) exist in no file by design.
         if name.is_empty()
@@ -1297,6 +1554,27 @@ mod tests {
     }
 
     #[test]
+    fn weapon_set_upgrade_without_player_upgrade_weapon_set_warns() {
+        let src = "\
+Object T
+  WeaponSet
+    Conditions = NONE
+    Weapon = PRIMARY G
+  End
+  Behavior = WeaponSetUpgrade ModuleTag_01
+    TriggeredBy = Upgrade_X
+  End
+End
+";
+        let d = diags(src);
+        assert!(d.iter().any(|d| {
+            d.code == "unreachable-set"
+                && d.severity == Severity::Warning
+                && &src[d.span.start as usize..d.span.end as usize] == "WeaponSetUpgrade"
+        }));
+    }
+
+    #[test]
     fn unknown_field_is_warning() {
         let src = "Weapon AK47\n  PrimaryDamg = 50.0\nEnd\n";
         let d = diags(src);
@@ -1343,6 +1621,54 @@ End
         let c = codes(src);
         assert!(c.contains(&"bad-number"), "{c:?}");
         assert!(c.contains(&"unknown-field"), "{c:?}");
+    }
+
+    #[test]
+    fn transition_damage_particle_tokens_are_validated() {
+        let ok = "\
+Object Tank
+  Behavior = TransitionDamageFX ModuleTag_01
+    DamagedParticleSystem1 = Bone:NONE RandomBone:No PSys:StructureTransitionMediumSmoke
+  End
+End
+";
+        let ok_codes = codes(ok);
+        assert!(!ok_codes.contains(&"bad-prefixed"), "{ok_codes:?}");
+        assert!(!ok_codes.contains(&"bad-bool"), "{ok_codes:?}");
+
+        let bad = "\
+Object Tank
+  Behavior = TransitionDamageFX ModuleTag_01
+    DamagedParticleSystem1 = Bone:NONE RandomBone:Maybe ParticleSystem:StructureTransitionMediumSmoke
+  End
+End
+";
+        let bad_codes = codes(bad);
+        assert!(bad_codes.contains(&"bad-bool"), "{bad_codes:?}");
+        assert!(bad_codes.contains(&"bad-prefixed"), "{bad_codes:?}");
+    }
+
+    #[test]
+    fn transition_damage_loc_tokens_are_validated() {
+        let ok = "\
+Object Tank
+  Behavior = TransitionDamageFX ModuleTag_01
+    DamagedFXList1 = Loc:X:0.0 Y:0.0 Z:0.0 FXList:FX_TankDamageTransition
+  End
+End
+";
+        let ok_codes = codes(ok);
+        assert!(!ok_codes.contains(&"bad-prefixed"), "{ok_codes:?}");
+        assert!(!ok_codes.contains(&"bad-number"), "{ok_codes:?}");
+
+        let bad = "\
+Object Tank
+  Behavior = TransitionDamageFX ModuleTag_01
+    DamagedFXList1 = Loc:X:0.0 Y:nope Z:0.0 FXList:FX_TankDamageTransition
+  End
+End
+";
+        assert!(codes(bad).contains(&"bad-number"));
     }
 
     #[test]
@@ -1586,5 +1912,108 @@ End
             crate::index::definitions_in(&a, &a.parse("Weapon AK47\nEnd\n"), "a.ini"),
         );
         assert!(index.is_defined(RefKind::Weapon, "AK47"));
+    }
+
+    #[test]
+    fn model_assets_validate_models_and_members_when_indexed() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        index.set_file_models(
+            "models/Good.w3d",
+            vec![crate::index::ModelAsset {
+                name: "Good".into(),
+                members: vec!["Tire01".into(), "Cargo01".into(), "Muzzle01".into()],
+            }],
+        );
+        let src = "\
+Object Tank
+  Draw = W3DTruckDraw ModuleTag_01
+    DefaultConditionState
+      Model = MissingModel
+      HideSubObject = MissingBone
+      WeaponFireFXBone = PRIMARY Muzzle
+      WeaponLaunchBone = BAD_SLOT Muzzle
+      WeaponRecoilBone = PRIMARY MissingMuzzle
+    End
+  End
+End
+";
+        let parse = a.parse(src);
+        let diags = diagnose(&a, &parse, Some(&index), Some("test.ini"));
+        assert!(diags.iter().any(|d| d.code == "unknown-model"), "{diags:?}");
+        assert!(
+            !diags.iter().any(|d| d.code == "unknown-model-member"),
+            "unknown model should not cascade into member warnings: {diags:?}"
+        );
+
+        let src = src.replace("MissingModel", "Good");
+        let parse = a.parse(&src);
+        let diags = diagnose(&a, &parse, Some(&index), Some("test.ini"));
+        assert!(
+            diags.iter().any(|d| d.code == "unknown-model-member"),
+            "{diags:?}"
+        );
+        assert!(
+            diags.iter().any(|d| {
+                d.code == "bad-enum"
+                    && &src[d.span.start as usize..d.span.end as usize] == "BAD_SLOT"
+            }),
+            "{diags:?}"
+        );
+        assert!(
+            diags.iter().any(|d| {
+                d.code == "unknown-model-member"
+                    && &src[d.span.start as usize..d.span.end as usize] == "MissingMuzzle"
+            }),
+            "{diags:?}"
+        );
+        assert!(!diags.iter().any(|d| {
+            d.code == "unknown-model-member"
+                && &src[d.span.start as usize..d.span.end as usize] == "Muzzle"
+        }));
+    }
+
+    #[test]
+    fn condition_state_inherits_model_from_sibling_default_state() {
+        // Real game data: a ConditionState that sets no Model inherits the
+        // DefaultConditionState's model, so its bones validate against it.
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        index.set_file_models(
+            "models/Good.w3d",
+            vec![crate::index::ModelAsset {
+                name: "Good".into(),
+                members: vec!["Turret01".into()],
+            }],
+        );
+        let src = "\
+Object Tank
+  Draw = W3DTankDraw ModuleTag_01
+    DefaultConditionState
+      Model = Good
+    End
+    ConditionState = DAMAGED
+      HideSubObject = Turret01
+      ShowSubObject = MissingBone
+    End
+  End
+End
+";
+        let parse = a.parse(src);
+        let diags = diagnose(&a, &parse, Some(&index), Some("test.ini"));
+        assert!(
+            !diags.iter().any(|d| {
+                d.code == "unknown-model-member"
+                    && &src[d.span.start as usize..d.span.end as usize] == "Turret01"
+            }),
+            "{diags:?}"
+        );
+        assert!(
+            diags.iter().any(|d| {
+                d.code == "unknown-model-member"
+                    && &src[d.span.start as usize..d.span.end as usize] == "MissingBone"
+            }),
+            "{diags:?}"
+        );
     }
 }
