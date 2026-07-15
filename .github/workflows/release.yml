@@ -263,8 +263,8 @@ jobs:
       - name: Create tag and GitHub Release
         run: |
           target_sha="${{ steps.target.outputs.sha }}"
-          git tag "$RELEASE_TAG" "$target_sha"
-          git push origin "refs/tags/$RELEASE_TAG"
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" --method POST \
+            -f ref="refs/tags/$RELEASE_TAG" -f sha="$target_sha"
 
           previous_stable="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
             --jq 'map(select(.draft == false and .prerelease == false))[0].tag_name // ""')"
