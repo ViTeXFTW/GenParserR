@@ -1,0 +1,5 @@
+no_errors = true
+
+[[complete]]
+at = "$1"
+includes = ["LaserBeam"]

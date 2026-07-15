@@ -1,0 +1,4 @@
+[[diag]]
+severity = "warning"
+code = "unresolved-reference"
+on = "MissingSpecialObject"

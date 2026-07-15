@@ -53,20 +53,60 @@ pub fn reference_at(analyzer: &Analyzer, parse: &Parse, offset: u32) -> Option<R
         .find(|n| matches!(n.kind(), SyntaxKind::BLOCK | SyntaxKind::MODULE))?;
     let schema = scope_schema(analyzer, &scope);
     let key = field.key()?;
-    let ref_kind = match &schema.field(key.text())?.value_type {
+    let value_tokens = field.value_tokens();
+    let value_type = &schema.field(key.text())?.value_type;
+    let active_type = value_type
+        .variant_for_first_token(value_tokens.first().map(|t| t.text().trim_matches('"')))?;
+    let ref_kind = match active_type {
         ValueType::Reference { ref_kind } if pos == 0 => *ref_kind,
         ValueType::ReferenceList { ref_kind } => *ref_kind,
         ValueType::TokenList { tokens } => match tokens.get(pos)? {
             ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } => *ref_kind,
+            ValueType::Prefixed { value_type, .. } => match value_type.as_ref() {
+                ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } => {
+                    *ref_kind
+                }
+                _ => return None,
+            },
             _ => return None,
         },
         _ => return None,
     };
-    let name = tok.text().trim_matches('"').to_string();
+    let (name, span) = if let ValueType::TokenList { tokens } = active_type {
+        match tokens.get(pos) {
+            Some(ValueType::Prefixed { prefix, .. }) => {
+                let text = tok.text().trim_matches('"');
+                let (actual, name) = text.split_once(':')?;
+                if !actual.eq_ignore_ascii_case(prefix) {
+                    return None;
+                }
+                let start = u32::from(tok.text_range().start())
+                    + u32::from(tok.text().starts_with('"'))
+                    + actual.len() as u32
+                    + 1;
+                (
+                    name.to_string(),
+                    crate::Span {
+                        start,
+                        end: start + name.len() as u32,
+                    },
+                )
+            }
+            _ => (
+                tok.text().trim_matches('"').to_string(),
+                tok.text_range().into(),
+            ),
+        }
+    } else {
+        (
+            tok.text().trim_matches('"').to_string(),
+            tok.text_range().into(),
+        )
+    };
     Some(ReferenceAt {
         kind: ref_kind,
         name,
-        span: tok.text_range().into(),
+        span,
     })
 }
 
@@ -146,5 +186,19 @@ mod tests {
             }
             _ => panic!("expected field hover"),
         }
+    }
+
+    #[test]
+    fn quoted_prefixed_reference_span_excludes_quotes_and_prefix() {
+        let a = Analyzer::embedded();
+        let src = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    DamagedParticleSystem1 = Bone:NONE RandomBone:No \"PSys:MissingParticle\"\n  End\nEnd\n";
+        let offset = src.find("MissingParticle").unwrap() as u32;
+        let reference = reference_at(&a, &a.parse(src), offset).unwrap();
+        assert_eq!(reference.kind, RefKind::ParticleSystem);
+        assert_eq!(reference.name, "MissingParticle");
+        assert_eq!(
+            &src[reference.span.start as usize..reference.span.end as usize],
+            "MissingParticle"
+        );
     }
 }
