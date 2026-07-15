@@ -1,17 +1,33 @@
 # Release process
 
-`dev` is the staging branch. `prod` is the live branch. Merging `dev` into
-`prod` creates the `vX.Y.Z` tag from the Rust workspace version in `Cargo.toml`
-and runs the live release pipeline.
+`dev` is the staging and default branch. `prod` contains live releases. Both
+release types are started manually from the `Release` workflow on the `dev`
+branch; tags created by the workflow do not trigger another workflow.
 
-## Prerequisites
+## Versioning
 
-- Push access to `dev` and `prod`.
-- A clean checkout of `dev` for staging work.
-- Repository secret `VSCE_PAT` to publish VS Code Marketplace builds. Without
-  it, the live workflow still creates the GitHub Release and `.vsix` assets.
+`[workspace.package].version` in `Cargo.toml` is the release version and must be
+a plain `major.minor.patch` value. The workflow stamps the VS Code extension
+with that version while packaging, so its committed manifest is not a release
+input.
 
-## Before merging
+- A pre-release from version `1.0.5` gets a unique tag such as
+  `v1.0.5-pre.42` on the tested `dev` commit.
+- A live release gets `v1.0.5` on the `dev`-to-`prod` merge commit.
+
+Tags are immutable. Do not reuse or move a release tag; bump the Cargo version
+instead. GitHub pre-releases do not publish to the VS Code Marketplace. This
+keeps the later live extension on the same Cargo version without conflicting
+with Marketplace's numeric version rules.
+
+The historical `v1.0.4` GitHub pre-release used the stable tag shape and also
+published Marketplace version `1.0.4`. It remains as-is; `1.0.5` is the next
+available live version.
+
+## Before dispatching
+
+Commit the version bump to `dev`, then run the normal local checks when
+appropriate:
 
 ```sh
 cargo test --locked
@@ -24,62 +40,43 @@ npm run compile
 cd ../..
 ```
 
-Run the corpus gate when the ignored corpus is available:
+The release workflow repeats CI and the real-corpus gate before building any
+release assets.
 
-```sh
-scripts/fetch-corpus.sh
-cargo test --release -p zerosyntax-analysis --test corpus -- --ignored --nocapture
-```
+## Running a pre-release
 
-On Windows, use `pwsh scripts/fetch-corpus.ps1`.
+1. Open **Actions → Release → Run workflow**.
+2. Select the `dev` branch and `prerelease`.
+3. Run the workflow.
 
-## Version bump
+The workflow pins the selected `dev` commit, runs all gates, builds Windows x64
+and Linux x64 server archives and platform VSIX packages, then creates a GitHub
+pre-release with checksums. It does not change `prod` or publish to Marketplace.
 
-1. Update `[workspace.package].version` in `Cargo.toml`.
-2. Update `editors/vscode/package.json` if preparing a local package. The
-   staging and live workflows stamp the extension version during packaging.
-3. Run `cargo check --locked` if `Cargo.lock` changes are expected.
-4. Commit the version bump before merging `dev` into `prod`.
+## Running a live release
 
-## Staging
+1. Open **Actions → Release → Run workflow**.
+2. Select the `dev` branch and `release`.
+3. Run the workflow.
 
-Pushes to `dev` run CI. After CI passes on `dev`, `Dev Pre-release` publishes
-Marketplace pre-release builds only when `[workspace.package].version` changed.
-The check compares the final commit against the branch state before the push, so
-batched pushes with a version bump still publish. Dependabot-only dependency
-bumps therefore run CI without publishing a staging extension. Use
-`workflow_dispatch` for a manual pre-release rerun.
+After all gates and packages succeed, the workflow creates a `dev` → `prod`
+PR and merges it automatically. The merge is rejected if `dev` moved since the
+workflow started. The merge commit receives the stable tag and GitHub Release;
+the packaged extensions are then published to Marketplace when `VSCE_PAT` is
+configured.
 
-## Live release
+If `prod` contains changes that are not in `dev`, the workflow stops before
+building and asks for `prod` to be merged back into `dev` first.
 
-Open a PR from `dev` into `prod`. After merge, `Prod Release Tag` reads
-`Cargo.toml`, creates `vX.Y.Z` if it does not already exist, and calls the live
-`Release` workflow.
+## Repository settings
 
-The live `Release` workflow will:
-
-- Re-run CI.
-- Verify the tag matches the Rust workspace version.
-- Build `zerosyntax-lsp` for Windows x64 and Linux x64.
-- Package platform-specific VS Code `.vsix` files.
-- Create a GitHub Release with checksums.
-- Publish to the VS Code Marketplace only when `VSCE_PAT` is configured.
-
-## GitHub repository settings
-
-Set `dev` as the default branch unless there is a reason to keep another branch
-as the default.
-
-Protect `dev` with:
-
-- Require pull requests before merging.
-- Require status checks from CI.
-- Block force pushes and direct pushes.
-
-Protect `prod` with:
-
-- Require pull requests before merging.
-- Require one maintainer approval.
-- Require status checks from CI.
-- Require branches to be up to date before merging.
-- Block force pushes and direct pushes.
+- Keep `dev` as the default branch so the manual workflow is available.
+- Keep normal pull-request and CI protection on `dev`.
+- Under **Settings → Actions → General**, enable **Allow GitHub Actions to
+  create and approve pull requests**. The workflow already requests only the
+  required `contents: write` and `pull-requests: write` token scopes.
+- Keep `prod` available for the workflow-created merge PR. If branch protection
+  is later added to `prod`, give the release workflow a deliberate bypass or
+  change the flow to wait for approval.
+- Configure `VSCE_PAT` to publish live VS Code Marketplace builds. Without it,
+  the stable GitHub Release still succeeds.
