@@ -14,7 +14,7 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 
 cd editors/vscode
 npm ci
-npm run compile
+npm test
 ```
 
 The optional real-game corpus is not committed. Fetch it only when you need the
@@ -43,4 +43,5 @@ describe the workflow the feature should improve.
 
 ## Releases
 
-Maintainers release from tags. See [docs/release.md](docs/release.md).
+Maintainers release from the `dev` and `prod` branches. See the
+[release process](docs/release.md).

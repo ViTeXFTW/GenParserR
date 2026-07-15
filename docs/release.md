@@ -20,9 +20,13 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 
 cd editors/vscode
 npm ci
-npm run compile
+npm test
 cd ../..
 ```
+
+Review the root README, extension README, and files under `docs/` whenever a
+release changes installation, settings, supported platforms, or user-visible
+behavior.
 
 Run the corpus gate when the ignored corpus is available:
 
@@ -36,9 +40,10 @@ On Windows, use `pwsh scripts/fetch-corpus.ps1`.
 ## Version bump
 
 1. Update `[workspace.package].version` in `Cargo.toml`.
-2. Update `editors/vscode/package.json` if preparing a local package. The
-   staging and live workflows stamp the extension version during packaging.
-3. Run `cargo check --locked` if `Cargo.lock` changes are expected.
+2. Run `npm version X.Y.Z --no-git-tag-version` in `editors/vscode` to update
+   both extension package files. The workflows also stamp this version during
+   packaging.
+3. Run `cargo check` to update `Cargo.lock`, then repeat the locked checks above.
 4. Commit the version bump before merging `dev` into `prod`.
 
 ## Staging
@@ -64,6 +69,11 @@ The live `Release` workflow will:
 - Package platform-specific VS Code `.vsix` files.
 - Create a GitHub Release with checksums.
 - Publish to the VS Code Marketplace only when `VSCE_PAT` is configured.
+
+After it finishes, verify that the GitHub Release contains both server archives,
+both platform-specific `.vsix` files, and `SHA256SUMS.txt`. Install the matching
+`.vsix` in a clean VS Code profile and open a Generals INI file. If Marketplace
+publishing is enabled, confirm the same version appears there.
 
 ## GitHub repository settings
 
