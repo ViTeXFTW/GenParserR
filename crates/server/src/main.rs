@@ -11,8 +11,9 @@ use tower_lsp::{LspService, Server};
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode {
-    if std::env::args_os().len() > 1 {
-        return cli::run(std::env::args_os());
+    let args: Vec<_> = std::env::args_os().collect();
+    if args.len() > 1 && !(args.len() == 2 && args[1] == "--stdio") {
+        return cli::run(args);
     }
 
     // Log to stderr (stdout is reserved for the LSP wire protocol).
