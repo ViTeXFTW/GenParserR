@@ -2,13 +2,19 @@
 //! INI files. Speaks LSP over stdio.
 
 mod backend;
+mod cli;
 mod convert;
+mod scan;
 
 use backend::Backend;
 use tower_lsp::{LspService, Server};
 
 #[tokio::main]
-async fn main() {
+async fn main() -> std::process::ExitCode {
+    if std::env::args_os().len() > 1 {
+        return cli::run(std::env::args_os());
+    }
+
     // Log to stderr (stdout is reserved for the LSP wire protocol).
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
@@ -24,4 +30,5 @@ async fn main() {
         .custom_method("zerosyntax/readVirtualFile", Backend::read_virtual_file)
         .finish();
     Server::new(stdin, stdout, socket).serve(service).await;
+    std::process::ExitCode::SUCCESS
 }
