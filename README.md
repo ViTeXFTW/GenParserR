@@ -1,5 +1,9 @@
 # ZeroSyntax v2
 
+<p align="center">
+  <img src="icon/ZeroSyntaxLogo256.png" alt="ZeroSyntax logo">
+</p>
+
 [![CI](https://github.com/ViTeXFTW/ZeroSyntaxV2/actions/workflows/ci.yml/badge.svg)](https://github.com/ViTeXFTW/ZeroSyntaxV2/actions/workflows/ci.yml)
 [![Release](https://github.com/ViTeXFTW/ZeroSyntaxV2/actions/workflows/release.yml/badge.svg)](https://github.com/ViTeXFTW/ZeroSyntaxV2/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)

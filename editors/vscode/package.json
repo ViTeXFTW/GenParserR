@@ -9,6 +9,7 @@
     "url": "https://github.com/ViTeXFTW/ZeroSyntaxV2"
   },
   "publisher": "ViTeXFTW",
+  "icon": "icon/ZeroSyntaxLogo256.png",
   "engines": {
     "vscode": "^1.84.0"
   },
@@ -80,7 +81,7 @@
     "compile": "tsc -p ./",
     "compile:test": "tsc -p ./tsconfig.test.json",
     "watch": "tsc -watch -p ./",
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "node -e \"const fs=require('fs');fs.mkdirSync('icon',{recursive:true});fs.copyFileSync('../../icon/ZeroSyntaxLogo256.png','icon/ZeroSyntaxLogo256.png')\" && npm run compile",
     "package": "vsce package --allow-missing-repository",
     "test": "npm run compile && npm run compile:test && node ./out-test/src/test/runTest.js"
   },
