@@ -629,12 +629,10 @@ impl<'a> Ctx<'a> {
         false
     }
 
-    /// Block-local dead-code check: a `WeaponSet`/`ArmorSet` carrying the
-    /// `PLAYER_UPGRADE` condition is only ever selected after a module on the
-    /// *same* object sets that flag (WeaponSetUpgrade / the TransportContain
-    /// family with armed passengers; ArmorUpgrade for armor). Both sides live
-    /// in the same top-level block, so the check is sound under the per-block
-    /// diagnostics cache. Skipped for map.ini-style override blocks
+    /// Block-local dead-code check for conditional weapon, armor, and locomotor
+    /// sets. Both the set and its selecting module live in the same top-level
+    /// block, so the check is sound under the per-block diagnostics cache.
+    /// Skipped for map.ini-style override blocks
     /// (`AddModule`/`RemoveModule`/`ReplaceModule` present): those are
     /// partial definitions.
     fn check_set_reachability(&mut self, node: &SyntaxNode) {
@@ -687,6 +685,20 @@ impl<'a> Ctx<'a> {
         }
         if is_override_patch {
             return;
+        }
+        if !module_names.iter().any(|m| m == "LocomotorSetUpgrade") {
+            for tok in Block(node.clone())
+                .fields()
+                .filter(|f| f.key().is_some_and(|k| k.text() == "Locomotor"))
+                .filter_map(|f| f.value_tokens().first().cloned())
+                .filter(|t| t.text().eq_ignore_ascii_case("SET_NORMAL_UPGRADED"))
+            {
+                self.warning(
+                    &tok,
+                    "unreachable-set",
+                    "this locomotor set requires `LocomotorSetUpgrade` — the set can never be selected".to_string(),
+                );
+            }
         }
         let has_player_upgrade_weapon_set =
             player_upgrade_sets.iter().any(|(kw, _)| *kw == "WeaponSet");
