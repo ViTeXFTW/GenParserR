@@ -859,9 +859,11 @@ impl<'a> Ctx<'a> {
                 "unknown-model-member",
                 format!(
                     "`{value}` is not a known W3D model bone or subobject{}",
-                    (index.model_member_strictness() == ModelMemberStrictness::Strict)
-                        .then(|| format!(" in {}", missing.join(", ")))
-                        .unwrap_or_default()
+                    if index.model_member_strictness() == ModelMemberStrictness::Strict {
+                        format!(" in {}", missing.join(", "))
+                    } else {
+                        String::new()
+                    }
                 ),
             );
         }
