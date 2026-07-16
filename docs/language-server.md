@@ -45,9 +45,10 @@ symbols.
 ```
 
 - `format.enable` controls whether the server advertises document formatting.
-- `analysis.modelMemberStrictness` is `off`, `compatible` (member exists in any
-  applicable model), or `strict` (member exists in every applicable model).
   It defaults to `false`.
+- `analysis.modelMemberStrictness` is `off`, `compatible` (member exists in any
+  applicable model), or `strict` (member exists in every applicable model). It
+  defaults to `compatible`.
 - `baseIniRoots` accepts directories and `.big` archives containing base game
   or mod INI files and W3D assets. Those INI definitions are treated as loaded
   before `map.ini` and `solo.ini`.
