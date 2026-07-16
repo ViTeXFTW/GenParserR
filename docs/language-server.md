@@ -35,6 +35,7 @@ symbols.
 ```json
 {
   "format": { "enable": false },
+  "schemaPath": "C:/Mods/MyMod/schema.json",
   "baseIniRoots": [
     "C:/Games/Zero Hour",
     "C:/Mods/MyMod/Data/INI",
@@ -45,6 +46,8 @@ symbols.
 
 - `format.enable` controls whether the server advertises document formatting.
   It defaults to `false`.
+- `schemaPath` points to a custom schema JSON file. Unreadable or invalid files
+  produce a warning and fall back to the built-in schema.
 - `baseIniRoots` accepts directories and `.big` archives containing base game
   or mod INI files and W3D assets. Those INI definitions are treated as loaded
   before `map.ini` and `solo.ini`.
