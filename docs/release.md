@@ -36,9 +36,13 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 
 cd editors/vscode
 npm ci
-npm run compile
+npm test
 cd ../..
 ```
+
+Review the root README, extension README, and files under `docs/` whenever a
+release changes installation, settings, supported platforms, or user-visible
+behavior.
 
 The release workflow repeats CI and the real-corpus gate before building any
 release assets.
@@ -67,6 +71,14 @@ configured.
 
 If `prod` contains changes that are not in `dev`, the workflow stops before
 building and asks for `prod` to be merged back into `dev` first.
+
+## After release
+
+Verify that the GitHub Release contains both server archives, both
+platform-specific `.vsix` files, and `SHA256SUMS.txt`. Install the matching
+`.vsix` in a clean VS Code profile and open a Generals INI file. For a live
+release, confirm the same version appears in the Marketplace when publishing is
+enabled.
 
 ## Repository settings
 

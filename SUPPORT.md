@@ -1,6 +1,8 @@
 # Support
 
-Use GitHub issues for reproducible bugs and focused feature requests. Or write a message in the discord server [ZeroSyntax](https://discord.gg/FShKq5s2hH)
+Use [GitHub Issues](https://github.com/ViTeXFTW/ZeroSyntaxV2/issues) for
+reproducible bugs and focused feature requests. For questions, join the
+[ZeroSyntax Discord server](https://discord.gg/FShKq5s2hH).
 
 Before opening an issue:
 
