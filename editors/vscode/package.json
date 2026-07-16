@@ -64,6 +64,12 @@
           },
           "markdownDescription": "Directories or `.big` archives containing base game/mod INI files and W3D assets. INI definitions are treated as already loaded before `map.ini`/`solo.ini`; W3D assets power model and bone completions/diagnostics. Changing this restarts the language server."
         },
+        "zerosyntax.analysis.modelMemberStrictness": {
+          "type": "string",
+          "enum": ["off", "compatible", "strict"],
+          "default": "compatible",
+          "markdownDescription": "Model-member diagnostics: off disables warnings, compatible accepts a bone/subobject present in any applicable model, and strict requires it in every applicable model. Changing this restarts the language server."
+        },
         "zerosyntax.trace.server": {
           "type": "string",
           "enum": [

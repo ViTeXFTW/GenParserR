@@ -39,6 +39,9 @@ export function activate(context: vscode.ExtensionContext) {
         enable: setting<boolean>("format.enable", false),
       },
       baseIniRoots: setting<string[]>("baseIniRoots", []),
+      analysis: {
+        modelMemberStrictness: setting<string>("analysis.modelMemberStrictness", "compatible"),
+      },
       clientBaseIniHint: true,
     }),
   };

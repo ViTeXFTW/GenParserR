@@ -20,8 +20,9 @@ use zerosyntax_schema::{RefKind, ValueType};
 use zerosyntax_syntax::ast::{Block, Field, Module};
 use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode, SyntaxToken};
 
+use crate::index::ModelMemberStrictness;
 use crate::model::{
-    is_model_asset_type, is_model_member_type, model_member_matches, models_in_scope,
+    is_model_asset_type, is_model_member_type, model_member_matches, models_for_source,
     module_fits_slot, scope_schema, ScopeSchema,
 };
 use crate::{Analyzer, Span, WorkspaceIndex};
@@ -781,12 +782,22 @@ impl<'a> Ctx<'a> {
         match &schema_field.value_type {
             ValueType::TokenList { tokens: specs } => {
                 for (spec, tok) in specs.iter().zip(tokens.iter()) {
-                    self.validate_model_asset_token(spec, tok, scope_node);
+                    self.validate_model_asset_token(
+                        spec,
+                        tok,
+                        scope_node,
+                        schema_field.model_source.as_ref(),
+                    );
                 }
             }
             ty => {
                 if let Some(tok) = tokens.first() {
-                    self.validate_model_asset_token(ty, tok, scope_node);
+                    self.validate_model_asset_token(
+                        ty,
+                        tok,
+                        scope_node,
+                        schema_field.model_source.as_ref(),
+                    );
                 }
             }
         }
@@ -797,6 +808,7 @@ impl<'a> Ctx<'a> {
         ty: &ValueType,
         tok: &SyntaxToken,
         scope_node: &SyntaxNode,
+        source: Option<&zerosyntax_schema::ModelSource>,
     ) {
         let Some(index) = self.index else { return };
         let value = unquote(tok.text());
@@ -816,11 +828,15 @@ impl<'a> Ctx<'a> {
         if !is_model_member_type(ty) {
             return;
         }
-        let models = models_in_scope(self.analyzer, scope_node);
+        if index.model_member_strictness() == ModelMemberStrictness::Off {
+            return;
+        }
+        let models = models_for_source(self.analyzer, scope_node, source, index);
         if models.is_empty() {
             return;
         }
         let mut checked_any_model = false;
+        let mut missing = Vec::new();
         for model in models {
             if !index.is_model_asset(&model) {
                 continue;
@@ -830,14 +846,23 @@ impl<'a> Ctx<'a> {
                 .model_members(&model)
                 .any(|member| model_member_matches(member, value))
             {
-                return;
+                if index.model_member_strictness() == ModelMemberStrictness::Compatible {
+                    return;
+                }
+            } else {
+                missing.push(model);
             }
         }
-        if checked_any_model {
+        if checked_any_model && !missing.is_empty() {
             self.warning(
                 tok,
                 "unknown-model-member",
-                format!("`{value}` is not a known W3D model bone or subobject"),
+                format!(
+                    "`{value}` is not a known W3D model bone or subobject{}",
+                    (index.model_member_strictness() == ModelMemberStrictness::Strict)
+                        .then(|| format!(" in {}", missing.join(", ")))
+                        .unwrap_or_default()
+                ),
             );
         }
     }
@@ -2027,5 +2052,86 @@ End
             }),
             "{diags:?}"
         );
+    }
+
+    #[test]
+    fn ocl_members_resolve_through_transport_object() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        index.set_file_models(
+            "models/A10.w3d",
+            vec![crate::index::ModelAsset {
+                name: "A10".into(),
+                members: vec!["WeaponA01".into(), "Missile01".into()],
+            }],
+        );
+        let object = "Object AmericaJetA10Thunderbolt\n  Draw = W3DModelDraw ModuleTag_Draw\n    DefaultConditionState\n      Model = A10\n    End\n  End\nEnd\n";
+        let object_parse = a.parse(object);
+        index.set_file(
+            "objects.ini",
+            crate::index::definitions_in(&a, &object_parse, "objects.ini"),
+        );
+        index.set_file_object_models(
+            "objects.ini",
+            crate::index::object_models_in(&a, &object_parse),
+        );
+
+        let src = "ObjectCreationList Strike\n  DeliverPayload\n    Transport = AmericaJetA10Thunderbolt\n    VisibleDropBoneBaseName = WeaponA\n    VisibleSubObjectBaseName = Missing\n  End\nEnd\n";
+        let parse = a.parse(src);
+        let diags = diagnose(&a, &parse, Some(&index), Some("ocl.ini"));
+        assert!(
+            !diags.iter().any(|d| d.code == "unknown-model-member"
+                && &src[d.span.start as usize..d.span.end as usize] == "WeaponA"),
+            "{diags:?}"
+        );
+        assert!(
+            diags.iter().any(|d| d.code == "unknown-model-member"
+                && &src[d.span.start as usize..d.span.end as usize] == "Missing"),
+            "{diags:?}"
+        );
+
+        let missing = src.replace("AmericaJetA10Thunderbolt", "MissingTransport");
+        let diags = diagnose(&a, &a.parse(&missing), Some(&index), Some("ocl.ini"));
+        assert!(
+            diags.iter().any(|d| d.code == "unresolved-reference"),
+            "{diags:?}"
+        );
+        assert!(
+            !diags.iter().any(|d| d.code == "unknown-model-member"),
+            "{diags:?}"
+        );
+    }
+
+    #[test]
+    fn model_member_strictness_supports_off_compatible_and_strict() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        index.set_file_models(
+            "a.w3d",
+            vec![crate::index::ModelAsset {
+                name: "A".into(),
+                members: vec!["Bone01".into()],
+            }],
+        );
+        index.set_file_models(
+            "b.w3d",
+            vec![crate::index::ModelAsset {
+                name: "B".into(),
+                members: vec![],
+            }],
+        );
+        let src = "Object Tank\n  Draw = W3DModelDraw Tag\n    DefaultConditionState\n      Model = A\n      Model = B\n      HideSubObject = Bone\n    End\n  End\nEnd\n";
+        let parse = a.parse(src);
+        assert!(!diagnose(&a, &parse, Some(&index), None)
+            .iter()
+            .any(|d| d.code == "unknown-model-member"));
+        index.set_model_member_strictness(ModelMemberStrictness::Strict);
+        assert!(diagnose(&a, &parse, Some(&index), None)
+            .iter()
+            .any(|d| d.code == "unknown-model-member"));
+        index.set_model_member_strictness(ModelMemberStrictness::Off);
+        assert!(!diagnose(&a, &parse, Some(&index), None)
+            .iter()
+            .any(|d| d.code == "unknown-model-member"));
     }
 }

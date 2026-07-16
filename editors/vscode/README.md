@@ -36,6 +36,7 @@ checks.
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `zerosyntax.baseIniRoots` | `[]` | Base game/mod directories and `.big` archives used for map and model checks. |
+| `zerosyntax.analysis.modelMemberStrictness` | `compatible` | Disables member warnings, accepts any applicable model, or requires every model. |
 | `zerosyntax.format.enable` | `false` | Enables indentation formatting. Changing it restarts the server. |
 | `zerosyntax.server.path` | empty | Uses a custom `zerosyntax-lsp` binary instead of the bundled one. |
 | `zerosyntax.trace.server` | `off` | Logs LSP traffic for troubleshooting. |

@@ -157,6 +157,16 @@ pub struct Field {
     pub parse_fn: String,
     #[serde(default)]
     pub doc: Option<String>,
+    #[serde(default)]
+    pub model_source: Option<ModelSource>,
+}
+
+/// Selects the Object whose W3D models own a model-member field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ModelSource {
+    EnclosingObject,
+    ObjectReferenceField { field: String },
 }
 
 /// The type of a field's value, derived from its engine parse function.
@@ -394,6 +404,7 @@ mod tests {
                     value_type: ValueType::Real,
                     parse_fn: "parseReal".into(),
                     doc: None,
+                    model_source: None,
                 }],
                 module_slots: vec![],
                 sub_blocks: vec![],

@@ -61,6 +61,12 @@ impl Block {
             .nth(1)
     }
 
+    pub fn parent_name(&self) -> Option<SyntaxToken> {
+        header_tokens(&self.0)
+            .filter(|t| token_kind(t) == SyntaxKind::WORD)
+            .nth(2)
+    }
+
     pub fn fields(&self) -> impl Iterator<Item = Field> + '_ {
         self.0.children().filter_map(Field::cast)
     }

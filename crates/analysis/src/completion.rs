@@ -11,7 +11,8 @@ use zerosyntax_syntax::ast::{Block, Field, Module};
 use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode};
 
 use crate::model::{
-    is_model_asset_type, is_model_member_type, model_member_ini_name, models_in_scope, scope_schema,
+    is_model_asset_type, is_model_member_type, model_member_ini_name, models_for_source,
+    scope_schema,
 };
 use crate::{Analyzer, WorkspaceIndex};
 
@@ -325,9 +326,14 @@ fn field_value_completions(
     let mut base = {
         let scope = scope_schema(analyzer, scope_node);
         if let Some(f) = scope.field(key) {
-            if let Some(asset_completions) =
-                model_asset_completions(analyzer, scope_node, &f.value_type, value_index, index)
-            {
+            if let Some(asset_completions) = model_asset_completions(
+                analyzer,
+                scope_node,
+                &f.value_type,
+                value_index,
+                index,
+                f.model_source.as_ref(),
+            ) {
                 asset_completions
             } else {
                 completions_for_type(
@@ -362,6 +368,7 @@ fn model_asset_completions(
     ty: &ValueType,
     value_index: usize,
     index: Option<&WorkspaceIndex>,
+    source: Option<&zerosyntax_schema::ModelSource>,
 ) -> Option<Vec<Completion>> {
     let index = index?;
     if !index.has_model_assets() {
@@ -385,7 +392,7 @@ fn model_asset_completions(
         return None;
     }
     let mut seen = std::collections::HashSet::new();
-    let out = models_in_scope(analyzer, scope_node)
+    let out = models_for_source(analyzer, scope_node, source, index)
         .into_iter()
         .flat_map(|model| {
             index
@@ -902,6 +909,31 @@ End
             .map(|c| c.label)
             .collect();
         assert!(out.contains(&"Good".to_string()), "{out:?}");
+    }
+
+    #[test]
+    fn ocl_member_completions_use_transport_models() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        index.set_file_models(
+            "a10.w3d",
+            vec![crate::index::ModelAsset {
+                name: "A10".into(),
+                members: vec!["WeaponA01".into()],
+            }],
+        );
+        index.set_file_object_models(
+            "objects.ini",
+            vec![("AmericaJetA10Thunderbolt".into(), vec!["A10".into()])],
+        );
+        let src = "ObjectCreationList Strike\n  DeliverPayload\n    Transport = AmericaJetA10Thunderbolt\n    VisibleDropBoneBaseName = \n  End\nEnd\n";
+        let offset =
+            src.find("VisibleDropBoneBaseName = ").unwrap() + "VisibleDropBoneBaseName = ".len();
+        let out = complete(&a, &a.parse(src), offset as u32, Some(&index), None)
+            .into_iter()
+            .map(|item| item.label)
+            .collect::<Vec<_>>();
+        assert!(out.contains(&"WeaponA".to_string()), "{out:?}");
     }
 
     #[test]

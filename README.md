@@ -62,6 +62,10 @@ For complete `map.ini` and `solo.ini` diagnostics, set
 `.big` archives that load before the map. The same setting also enables W3D
 model and bone completion and validation.
 
+`zerosyntax.analysis.modelMemberStrictness` controls bone/subobject warnings:
+`off`, `compatible` (the default; present in any applicable model), or `strict`
+(present in every applicable model).
+
 ```json
 {
   "zerosyntax.baseIniRoots": [
