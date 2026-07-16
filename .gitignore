@@ -13,6 +13,7 @@ editors/vscode/out
 editors/vscode/out-test
 editors/vscode/*.vsix
 editors/vscode/server
+editors/vscode/icon/
 
 # Reference game source (large, external)
 /GeneralsCode
