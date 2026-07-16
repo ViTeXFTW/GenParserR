@@ -1,52 +1,79 @@
-# ZeroSyntax v2 — VS Code extension
+# ZeroSyntax v2 for VS Code
 
-Reference editor client for the ZeroSyntax v2 language server (see the project
-root README for the full architecture).
-Provides diagnostics, completions, hover, go-to-definition, and schema-aware
-semantic highlighting for C&C Generals: Zero Hour `.ini` files.
+ZeroSyntax adds diagnostics, completion, navigation, refactoring, semantic
+highlighting, and quick fixes for *Command & Conquer: Generals – Zero Hour* INI
+files. The platform-specific extension package includes the language server, so
+there is nothing else to install.
 
-The server itself is IDE-agnostic; this extension is just a thin client that
-launches it and speaks LSP.
+## Install
 
-## Build
+1. Download the `.vsix` for Windows x64 or Linux x64 from the
+   [latest release](https://github.com/ViTeXFTW/ZeroSyntaxV2/releases/latest).
+2. In VS Code, open **Extensions**, choose **Views and More Actions …**, then
+   select **Install from VSIX…**.
+3. Open the downloaded file and reload VS Code if prompted.
+4. Open your map or mod folder and start editing an `.ini` file.
 
-```sh
-cd editors/vscode
-npm install
-npm run compile
-```
-
-## Provide the server binary
-
-Build the server from the workspace root and make it discoverable in one of
-these ways (checked in order):
-
-1. Set `zerosyntax.server.path` to the absolute path of `zerosyntax-lsp`.
-2. Copy the binary to `editors/vscode/server/zerosyntax-lsp[.exe]` (bundled into
-   the `.vsix`).
-3. Put `zerosyntax-lsp` on your `PATH`.
+You can also install from a terminal:
 
 ```sh
-cargo build --release -p zerosyntax-server
-# option 2:
-mkdir -p editors/vscode/server
-cp target/release/zerosyntax-lsp* editors/vscode/server/
+code --install-extension zerosyntax-vscode-<platform>-<version>.vsix
 ```
 
-## Run / debug
+## Recommended setup
 
-Open this folder in VS Code and press <kbd>F5</kbd> to launch an Extension
-Development Host, then open any `.ini` file recognized as **Generals INI**.
+Open the folder containing your project rather than a single file. ZeroSyntax
+indexes the workspace so definitions, references, rename, and completion work
+across its INI files.
 
-## Package
+When editing `map.ini` or `solo.ini`, configure **ZeroSyntax v2: Base Ini Roots**
+with any game or mod folders and `.big` archives that load before the map. This
+prevents false unresolved-reference warnings and enables W3D model and bone
+checks.
 
-```sh
-npm run package   # produces zerosyntax-vscode-<version>.vsix (needs @vscode/vsce)
+## Settings
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `zerosyntax.baseIniRoots` | `[]` | Base game/mod directories and `.big` archives used for map and model checks. |
+| `zerosyntax.format.enable` | `false` | Enables indentation formatting. Changing it restarts the server. |
+| `zerosyntax.server.path` | empty | Uses a custom `zerosyntax-lsp` binary instead of the bundled one. |
+| `zerosyntax.trace.server` | `off` | Logs LSP traffic for troubleshooting. |
+
+Formatting is intentionally off by default. Enable it only when you want
+**Format Document** or format-on-save to normalize indentation.
+
+## INI file association
+
+The extension associates `.ini` files with **Generals INI**. If your workspace
+also contains unrelated INI files, keep those as plain text and override the
+association only for the folders you want ZeroSyntax to handle:
+
+```json
+{
+  "files.associations": {
+    "**/*.ini": "plaintext",
+    "Data/INI/**/*.ini": "generals-ini",
+    "Maps/**/*.ini": "generals-ini"
+  }
+}
 ```
 
-## Note on `.ini` association
+Use the language selector in VS Code's status bar to change an individual file.
 
-This extension claims the `.ini` extension under the `generals-ini` language id.
-If you also edit unrelated `.ini` files, scope it per workspace with
-`files.associations`, e.g. only treat files under your mod folder as
-`generals-ini`.
+## Troubleshooting
+
+- If the server cannot be found, reinstall the `.vsix` for your platform. A
+  source checkout does not contain a bundled server until it is built.
+- If map references are reported as missing, configure
+  `zerosyntax.baseIniRoots` and check that the paths point to the required INI
+  folders or `.big` archives.
+- For detailed logs, set `zerosyntax.trace.server` to `messages` or `verbose`,
+  reproduce the problem, then open **Output → ZeroSyntax v2 Language Server**.
+
+Report reproducible problems through
+[GitHub Issues](https://github.com/ViTeXFTW/ZeroSyntaxV2/issues) with a minimal
+INI sample, your OS, VS Code version, and ZeroSyntax version.
+
+Contributor build and packaging instructions are in the
+[VS Code development guide](https://github.com/ViTeXFTW/ZeroSyntaxV2/blob/dev/docs/vscode-development.md).

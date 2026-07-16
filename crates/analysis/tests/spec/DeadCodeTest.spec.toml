@@ -20,3 +20,26 @@ severity = "warning"
 code = "unreachable-set"
 on = "PLAYER_UPGRADE"
 nth = 3
+
+# DeadCodeBadLocomotor's upgraded set has no LocomotorSetUpgrade module.
+[[diag]]
+severity = "warning"
+code = "unreachable-set"
+on = "SET_NORMAL_UPGRADED"
+nth = 1
+
+# A matching upgrade module makes the upgraded locomotor reachable.
+[[diag]]
+severity = "warning"
+code = "unreachable-set"
+on = "SET_NORMAL_UPGRADED"
+nth = 2
+absent = true
+
+# Partial override definitions may inherit the module from their base object.
+[[diag]]
+severity = "warning"
+code = "unreachable-set"
+on = "SET_NORMAL_UPGRADED"
+nth = 3
+absent = true
