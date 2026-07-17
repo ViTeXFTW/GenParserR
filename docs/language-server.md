@@ -85,7 +85,10 @@ symbols.
 {
   "format": { "enable": false },
   "schemaPath": "C:/Mods/MyMod/schema.json",
-  "analysis": { "modelMemberStrictness": "compatible" },
+  "analysis": {
+    "modelMemberStrictness": "compatible",
+    "mapOrderingDiagnostics": true
+  },
   "baseIniRoots": [
     "C:/Games/Zero Hour",
     "C:/Mods/MyMod/Data/INI",
@@ -101,6 +104,8 @@ symbols.
 - `analysis.modelMemberStrictness` is `off`, `compatible` (member exists in any
   applicable model), or `strict` (member exists in every applicable model). It
   defaults to `compatible`.
+- `analysis.mapOrderingDiagnostics` controls source-backed forward-order
+  warnings in `map.ini` and `solo.ini`. It defaults to `true`.
 - `baseIniRoots` accepts directories and `.big` archives containing base game
   or mod INI files and W3D assets. Those INI definitions are treated as loaded
   before `map.ini` and `solo.ini`.

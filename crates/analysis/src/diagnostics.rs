@@ -16,7 +16,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use zerosyntax_schema::{RefKind, ValueType};
+use zerosyntax_schema::{Field as SchemaField, RefKind, ValueType};
 use zerosyntax_syntax::ast::{Block, Field, Module};
 use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode, SyntaxToken};
 
@@ -365,9 +365,10 @@ fn short_file(file: &str) -> &str {
     file.rsplit(['/', '\\']).next().unwrap_or(file)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct MapDef {
     order: usize,
+    header: String,
 }
 
 type MapDefs = HashMap<(RefKind, String), Vec<MapDef>>;
@@ -378,9 +379,9 @@ fn map_layer_diagnostics(
     index: Option<&WorkspaceIndex>,
     file: Option<&str>,
 ) -> Vec<Diagnostic> {
-    if !file.is_some_and(is_override_layer) {
+    let Some(file) = file.filter(|file| is_override_layer(file)) else {
         return Vec::new();
-    }
+    };
 
     let defs = map_top_level_defs(analyzer, parse);
     let mut out = Vec::new();
@@ -390,7 +391,26 @@ fn map_layer_diagnostics(
         .filter(|n| n.kind() == SyntaxKind::BLOCK)
         .enumerate()
     {
-        collect_map_reference_diags(analyzer, &node, order, &defs, index, &mut out);
+        let consumer = block_header(&Block(node.clone()));
+        collect_map_reference_diags(
+            analyzer,
+            &node,
+            order,
+            &defs,
+            index,
+            &consumer,
+            short_file(file),
+            &mut out,
+        );
+        collect_map_reskin_diag(
+            &node,
+            order,
+            &defs,
+            index,
+            &consumer,
+            short_file(file),
+            &mut out,
+        );
         collect_map_projectile_diags(&node, &defs, &mut out);
     }
     out
@@ -405,27 +425,60 @@ fn map_top_level_defs(analyzer: &Analyzer, parse: &Parse) -> MapDefs {
         .enumerate()
     {
         let block = Block(node);
-        let Some(kind) = block
-            .keyword()
-            .and_then(|k| analyzer.block(k.text()))
-            .and_then(|b| b.defines)
-        else {
+        let Some(keyword) = block.keyword() else {
+            continue;
+        };
+        let Some(kind) = analyzer.block(keyword.text()).and_then(|b| b.defines) else {
             continue;
         };
         let Some(name) = block.name() else { continue };
         out.entry((kind, name.text().to_ascii_lowercase()))
             .or_default()
-            .push(MapDef { order });
+            .push(MapDef {
+                order,
+                header: block_header(&block),
+            });
     }
     out
 }
 
+fn block_header(block: &Block) -> String {
+    [block.keyword(), block.name(), block.parent_name()]
+        .into_iter()
+        .flatten()
+        .map(|token| token.text().to_string())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn has_base_definition(index: Option<&WorkspaceIndex>, kind: RefKind, name: &str) -> bool {
+    index.is_some_and(|idx| {
+        idx.locations(kind, name)
+            .iter()
+            .any(|loc| !is_override_layer(&loc.file))
+    })
+}
+
+fn later_map_definition<'a>(
+    defs: &'a MapDefs,
+    kind: RefKind,
+    name: &str,
+    order: usize,
+) -> Option<&'a MapDef> {
+    defs.get(&(kind, name.to_ascii_lowercase()))?
+        .iter()
+        .find(|site| site.order > order)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn collect_map_reference_diags(
     analyzer: &Analyzer,
     node: &SyntaxNode,
     order: usize,
     defs: &MapDefs,
     index: Option<&WorkspaceIndex>,
+    consumer: &str,
+    file: &str,
     out: &mut Vec<Diagnostic>,
 ) {
     let scope = scope_schema(analyzer, node);
@@ -437,44 +490,110 @@ fn collect_map_reference_diags(
                 let Some(schema_field) = scope.field(key.text()) else {
                     continue;
                 };
-                for (kind, tok) in reference_tokens(&field, &schema_field.value_type) {
-                    let name = unquote(tok.text());
+                for reference in reference_tokens(&field, &schema_field.value_type) {
+                    if !eager_map_reference(&scope, schema_field, reference.kind) {
+                        continue;
+                    }
+                    let name = reference.name;
                     if name.eq_ignore_ascii_case("None") {
                         continue;
                     }
-                    if index.is_some_and(|idx| {
-                        idx.locations(kind, name)
-                            .iter()
-                            .any(|loc| !is_override_layer(&loc.file))
-                    }) {
+                    if has_base_definition(index, reference.kind, &name) {
                         continue;
                     }
-                    let later = defs
-                        .get(&(kind, name.to_ascii_lowercase()))
-                        .is_some_and(|sites| sites.iter().any(|site| site.order > order));
-                    if later {
+                    if let Some(site) = later_map_definition(defs, reference.kind, &name, order) {
+                        let field_kind = if key.text().chars().all(|c| c.is_ascii_digit()) {
+                            "slot"
+                        } else {
+                            "field"
+                        };
                         out.push(Diagnostic {
-                            span: tok.text_range().into(),
+                            span: reference.token.text_range().into(),
                             severity: Severity::Warning,
                             code: "map-forward-reference",
                             message: format!(
-                                "`{name}` is defined later in this map file; map.ini/solo.ini \
-                                 loads in order, so this reference binds before that definition \
-                                 and the later map entry will not take effect here"
+                                "`{}` is declared after `{consumer}`, but {field_kind} `{}` is \
+                                 resolved immediately while `{file}` loads. Move `{}` above \
+                                 `{consumer}`.",
+                                site.header,
+                                key.text(),
+                                site.header,
                             ),
                         });
                     }
                 }
             }
             SyntaxKind::MODULE | SyntaxKind::BLOCK => {
-                collect_map_reference_diags(analyzer, &child, order, defs, index, out);
+                collect_map_reference_diags(
+                    analyzer, &child, order, defs, index, consumer, file, out,
+                );
             }
             _ => {}
         }
     }
 }
 
-fn reference_tokens(field: &Field, ty: &ValueType) -> Vec<(RefKind, SyntaxToken)> {
+fn eager_map_reference(scope: &ScopeSchema<'_>, field: &SchemaField, kind: RefKind) -> bool {
+    if matches!(scope, ScopeSchema::Block(block) if block.name == "Object")
+        && matches!(field.name.as_str(), "SelectPortrait" | "ButtonImage")
+    {
+        return true;
+    }
+
+    if field.parse_fn == "parseFactionObjectCreationList" {
+        return kind == RefKind::ObjectCreationList;
+    }
+
+    matches!(
+        field.parse_fn.as_str(),
+        "AI::parseScience"
+            | "AIUpdateModuleData::parseLocomotorSet"
+            | "ArmorStore::parseArmorTemplate"
+            | "BoneFXUpdateModuleData::parseFXList"
+            | "BoneFXUpdateModuleData::parseObjectCreationList"
+            | "BoneFXUpdateModuleData::parseParticleSystem"
+            | "CommandSet::parseCommandButton"
+            | "DamageFX::parseMajorFXList"
+            | "DamageFX::parseMinorFXList"
+            | "DamageFXStore::parseDamageFX"
+            | "INI::parseFXList"
+            | "INI::parseMappedImage"
+            | "INI::parseObjectCreationList"
+            | "INI::parseParticleSystemTemplate"
+            | "INI::parseScience"
+            | "INI::parseScienceVector"
+            | "INI::parseSpecialPowerTemplate"
+            | "INI::parseThingTemplate"
+            | "INI::parseUpgradeTemplate"
+            | "INI::parseWeaponTemplate"
+            | "ProductionPrerequisite::parsePrerequisiteScience"
+            | "ProductionPrerequisite::parsePrerequisiteUnit"
+            | "TransitionDamageFXModuleData::parseFXList"
+            | "TransitionDamageFXModuleData::parseObjectCreationList"
+            | "TransitionDamageFXModuleData::parseParticleSystem"
+            | "WeaponTemplateSet::parseWeapon"
+            | "parseAllVetLevelsFXList"
+            | "parseAllVetLevelsPSys"
+            | "parseAngleFX"
+            | "parseBountyUpgradePair"
+            | "parseCashHackUpgradePair"
+            | "parseFX"
+            | "parseOCL"
+            | "parseOCLUpgradePair"
+            | "parseParticleSysBone"
+            | "parsePerVetLevelFXList"
+            | "parsePerVetLevelPSys"
+            | "parseWeapon"
+    )
+}
+
+struct MapReference {
+    kind: RefKind,
+    token: SyntaxToken,
+    name: String,
+}
+
+fn reference_tokens(field: &Field, ty: &ValueType) -> Vec<MapReference> {
     let tokens = field.value_tokens();
     match ty {
         ValueType::OneOf { .. } => ty
@@ -483,32 +602,133 @@ fn reference_tokens(field: &Field, ty: &ValueType) -> Vec<(RefKind, SyntaxToken)
             .unwrap_or_default(),
         ValueType::Reference { ref_kind } => tokens
             .first()
-            .map(|tok| vec![(*ref_kind, tok.clone())])
+            .map(|tok| vec![map_reference(*ref_kind, tok, unquote(tok.text()))])
             .unwrap_or_default(),
         ValueType::ReferenceList { ref_kind } => tokens
-            .into_iter()
-            .map(|tok| (*ref_kind, tok))
+            .iter()
+            .map(|tok| map_reference(*ref_kind, tok, unquote(tok.text())))
             .collect::<Vec<_>>(),
-        ValueType::TokenList { .. } | ValueType::Prefixed { .. } => {
-            let input = tokens
-                .iter()
-                .map(|token| unquote(token.text()))
-                .collect::<Vec<_>>();
-            tokens
-                .iter()
-                .cloned()
-                .enumerate()
-                .filter_map(
-                    |(index, tok)| match ty.token_type_at_input(&input, index)? {
-                        ValueType::Reference { ref_kind }
-                        | ValueType::ReferenceList { ref_kind } => Some((*ref_kind, tok)),
-                        _ => None,
-                    },
-                )
-                .collect()
+        ValueType::Prefixed { .. } => {
+            let mut out = Vec::new();
+            reference_value_tokens(ty, &tokens, 0, &mut out);
+            out
+        }
+        ValueType::TokenList { tokens: specs } => {
+            let mut out = Vec::new();
+            let mut raw = 0;
+            for (i, spec) in specs.iter().enumerate() {
+                if tokens.get(raw).is_none() {
+                    break;
+                }
+                if i + 1 == specs.len() {
+                    if let ValueType::ReferenceList { ref_kind } = spec {
+                        out.extend(
+                            tokens[raw..]
+                                .iter()
+                                .map(|tok| map_reference(*ref_kind, tok, unquote(tok.text()))),
+                        );
+                        break;
+                    }
+                }
+                raw += reference_value_tokens(spec, &tokens, raw, &mut out);
+            }
+            out
         }
         _ => Vec::new(),
     }
+}
+
+fn reference_value_tokens(
+    ty: &ValueType,
+    tokens: &[SyntaxToken],
+    index: usize,
+    out: &mut Vec<MapReference>,
+) -> usize {
+    let Some(tok) = tokens.get(index) else {
+        return 0;
+    };
+    if let Some(value_type) = ty.split_prefix_value_type(unquote(tok.text())) {
+        if let Some(value) = tokens.get(index + 1) {
+            reference_token(value_type, value, out);
+            return 2;
+        }
+    }
+    reference_token(ty, tok, out);
+    1
+}
+
+fn map_reference(kind: RefKind, token: &SyntaxToken, name: &str) -> MapReference {
+    MapReference {
+        kind,
+        token: token.clone(),
+        name: name.to_string(),
+    }
+}
+
+fn reference_token(ty: &ValueType, tok: &SyntaxToken, out: &mut Vec<MapReference>) {
+    match ty {
+        ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } => {
+            out.push(map_reference(*ref_kind, tok, unquote(tok.text())));
+        }
+        ValueType::Prefixed { prefix, value_type } => {
+            let raw = unquote(tok.text());
+            let Some((actual, name)) = raw.split_once(':') else {
+                return;
+            };
+            if !actual.eq_ignore_ascii_case(prefix) {
+                return;
+            }
+            if let ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } =
+                value_type.as_ref()
+            {
+                out.push(map_reference(*ref_kind, tok, name));
+            }
+        }
+        ValueType::OneOf { .. } => {
+            if let Some(variant) = ty.variant_for_first_token(Some(unquote(tok.text()))) {
+                reference_token(variant, tok, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_map_reskin_diag(
+    node: &SyntaxNode,
+    order: usize,
+    defs: &MapDefs,
+    index: Option<&WorkspaceIndex>,
+    consumer: &str,
+    file: &str,
+    out: &mut Vec<Diagnostic>,
+) {
+    let block = Block(node.clone());
+    if !block
+        .keyword()
+        .is_some_and(|keyword| keyword.text().eq_ignore_ascii_case("ObjectReskin"))
+    {
+        return;
+    }
+    let Some(parent) = block.parent_name() else {
+        return;
+    };
+    let name = unquote(parent.text());
+    if has_base_definition(index, RefKind::Object, name) {
+        return;
+    }
+    let Some(site) = later_map_definition(defs, RefKind::Object, name, order) else {
+        return;
+    };
+    out.push(Diagnostic {
+        span: parent.text_range().into(),
+        severity: Severity::Warning,
+        code: "map-forward-reference",
+        message: format!(
+            "`{}` is declared after `{consumer}`; `ObjectReskin` requires its parent to exist \
+             when parsed while `{file}` loads. Move `{}` above `{consumer}`.",
+            site.header, site.header,
+        ),
+    });
 }
 
 fn collect_map_projectile_diags(node: &SyntaxNode, defs: &MapDefs, out: &mut Vec<Diagnostic>) {
@@ -1982,6 +2202,227 @@ End
             !diags.iter().any(|d| d.code == "map-forward-reference"),
             "base-game definitions are already loaded before map.ini: {diags:?}"
         );
+    }
+
+    #[test]
+    fn map_ordering_classifies_only_source_proven_eager_references() {
+        let eager = [
+            "AI::parseScience",
+            "AIUpdateModuleData::parseLocomotorSet",
+            "ArmorStore::parseArmorTemplate",
+            "BoneFXUpdateModuleData::parseFXList",
+            "BoneFXUpdateModuleData::parseObjectCreationList",
+            "BoneFXUpdateModuleData::parseParticleSystem",
+            "CommandSet::parseCommandButton",
+            "DamageFX::parseMajorFXList",
+            "DamageFX::parseMinorFXList",
+            "DamageFXStore::parseDamageFX",
+            "INI::parseFXList",
+            "INI::parseMappedImage",
+            "INI::parseObjectCreationList",
+            "INI::parseParticleSystemTemplate",
+            "INI::parseScience",
+            "INI::parseScienceVector",
+            "INI::parseSpecialPowerTemplate",
+            "INI::parseThingTemplate",
+            "INI::parseUpgradeTemplate",
+            "INI::parseWeaponTemplate",
+            "ProductionPrerequisite::parsePrerequisiteScience",
+            "ProductionPrerequisite::parsePrerequisiteUnit",
+            "TransitionDamageFXModuleData::parseFXList",
+            "TransitionDamageFXModuleData::parseObjectCreationList",
+            "TransitionDamageFXModuleData::parseParticleSystem",
+            "WeaponTemplateSet::parseWeapon",
+            "parseAllVetLevelsFXList",
+            "parseAllVetLevelsPSys",
+            "parseAngleFX",
+            "parseBountyUpgradePair",
+            "parseCashHackUpgradePair",
+            "parseFX",
+            "parseOCL",
+            "parseOCLUpgradePair",
+            "parseParticleSysBone",
+            "parsePerVetLevelFXList",
+            "parsePerVetLevelPSys",
+            "parseWeapon",
+        ];
+        let mut field = SchemaField {
+            name: "Test".into(),
+            value_type: ValueType::Reference {
+                ref_kind: RefKind::Object,
+            },
+            parse_fn: String::new(),
+            doc: None,
+            model_source: None,
+        };
+        for parser in eager {
+            field.parse_fn = parser.into();
+            assert!(
+                eager_map_reference(&ScopeSchema::Unknown, &field, RefKind::Object),
+                "{parser}"
+            );
+        }
+        field.parse_fn = "INI::parseAsciiString".into();
+        assert!(!eager_map_reference(
+            &ScopeSchema::Unknown,
+            &field,
+            RefKind::Object
+        ));
+
+        let a = Analyzer::embedded();
+        let ocl_update = a.module("OCLUpdate").unwrap();
+        let faction_ocl = ocl_update
+            .fields
+            .iter()
+            .find(|field| field.name == "FactionOCL")
+            .unwrap();
+        assert!(eager_map_reference(
+            &ScopeSchema::Module(ocl_update),
+            faction_ocl,
+            RefKind::ObjectCreationList
+        ));
+        assert!(!eager_map_reference(
+            &ScopeSchema::Module(ocl_update),
+            faction_ocl,
+            RefKind::PlayerTemplate
+        ));
+
+        let object = a.block("Object").unwrap();
+        let object_image = object
+            .fields
+            .iter()
+            .find(|field| field.name == "ButtonImage")
+            .unwrap();
+        assert!(eager_map_reference(
+            &ScopeSchema::Block(object),
+            object_image,
+            RefKind::MappedImage
+        ));
+        for block_name in ["CommandButton", "Upgrade"] {
+            let block = a.block(block_name).unwrap();
+            let image = block
+                .fields
+                .iter()
+                .find(|field| field.name == "ButtonImage")
+                .unwrap();
+            assert!(!eager_map_reference(
+                &ScopeSchema::Block(block),
+                image,
+                RefKind::MappedImage
+            ));
+        }
+    }
+
+    #[test]
+    fn map_reference_extraction_handles_prefixed_and_trailing_lists() {
+        let a = Analyzer::embedded();
+        let parse =
+            a.parse("Object X\n  Test = Faction:LateFaction OCL:LateOCL ExtraA ExtraB\nEnd\n");
+        let field = Block(parse.syntax().children().next().unwrap())
+            .fields()
+            .next()
+            .unwrap();
+        let prefixed = ValueType::TokenList {
+            tokens: vec![
+                ValueType::Prefixed {
+                    prefix: "Faction".into(),
+                    value_type: Box::new(ValueType::Reference {
+                        ref_kind: RefKind::PlayerTemplate,
+                    }),
+                },
+                ValueType::Prefixed {
+                    prefix: "OCL".into(),
+                    value_type: Box::new(ValueType::Reference {
+                        ref_kind: RefKind::ObjectCreationList,
+                    }),
+                },
+            ],
+        };
+        let refs = reference_tokens(&field, &prefixed);
+        assert_eq!(
+            refs.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+            ["LateFaction", "LateOCL"]
+        );
+
+        let split_parse = a.parse("Object X\n  Test = Faction: LateFaction OCL: LateOCL\nEnd\n");
+        let split_field = Block(split_parse.syntax().children().next().unwrap())
+            .fields()
+            .next()
+            .unwrap();
+        let refs = reference_tokens(&split_field, &prefixed);
+        assert_eq!(
+            refs.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+            ["LateFaction", "LateOCL"]
+        );
+
+        let trailing = ValueType::TokenList {
+            tokens: vec![
+                ValueType::AsciiString,
+                ValueType::ReferenceList {
+                    ref_kind: RefKind::FxList,
+                },
+            ],
+        };
+        let refs = reference_tokens(&field, &trailing);
+        assert_eq!(
+            refs.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+            ["OCL:LateOCL", "ExtraA", "ExtraB"]
+        );
+    }
+
+    #[test]
+    fn map_forward_reference_message_is_actionable_and_suppressible() {
+        let a = Analyzer::embedded();
+        let body = "CommandSet MapSet\n  1 = LateButton\nEnd\n\nCommandButton LateButton\n  Command = UNIT_BUILD\nEnd\n";
+        let parse = a.parse(body);
+        let diag = diagnose(&a, &parse, None, Some("maps/map.ini"))
+            .into_iter()
+            .find(|diag| diag.code == "map-forward-reference")
+            .unwrap();
+        for expected in [
+            "CommandButton LateButton",
+            "CommandSet MapSet",
+            "slot `1`",
+            "`map.ini`",
+            "Move `CommandButton LateButton` above `CommandSet MapSet`",
+        ] {
+            assert!(diag.message.contains(expected), "{}", diag.message);
+        }
+
+        let suppressed = a.parse(&format!(
+            "; zerosyntax-disable: map-forward-reference\n{body}"
+        ));
+        assert!(!diagnose(&a, &suppressed, None, Some("maps/map.ini"))
+            .iter()
+            .any(|diag| diag.code == "map-forward-reference"));
+
+        let reskin = a.parse("ObjectReskin Child Parent\nEnd\n\nObject Parent\nEnd\n");
+        let message = diagnose(&a, &reskin, None, Some("maps/map.ini"))
+            .into_iter()
+            .find(|diag| diag.code == "map-forward-reference")
+            .unwrap()
+            .message;
+        assert!(message.contains("`ObjectReskin` requires its parent"));
+        assert!(message.contains("Move `Object Parent` above `ObjectReskin Child Parent`"));
+    }
+
+    #[test]
+    fn map_reskin_parent_allows_base_game_definition() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        let base = a.parse("Object Parent\nEnd\n");
+        index.set_file(
+            "Data/INI/Object.ini",
+            crate::index::definitions_in(&a, &base, "Data/INI/Object.ini"),
+        );
+        let map = a.parse("ObjectReskin Child Parent\nEnd\n\nObject Parent\nEnd\n");
+        index.set_file(
+            "maps/map.ini",
+            crate::index::definitions_in(&a, &map, "maps/map.ini"),
+        );
+        assert!(!diagnose(&a, &map, Some(&index), Some("maps/map.ini"))
+            .iter()
+            .any(|diag| diag.code == "map-forward-reference"));
     }
 
     #[test]

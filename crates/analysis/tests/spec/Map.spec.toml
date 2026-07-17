@@ -29,6 +29,7 @@ severity = "warning"
 code = "map-forward-reference"
 on = "MapLateSet"
 nth = 1
+absent = true
 
 [[diag]]
 severity = "warning"
@@ -48,3 +49,56 @@ severity = "warning"
 code = "map-projectile-object"
 on = "MapProjectile"
 nth = 2
+
+[[diag]]
+severity = "warning"
+code = "map-forward-reference"
+on = "LatePrereq"
+nth = 1
+
+[[diag]]
+severity = "warning"
+code = "map-forward-reference"
+on = "LatePortrait"
+nth = 1
+
+[[diag]]
+severity = "warning"
+code = "map-forward-reference"
+on = "ReskinParent"
+nth = 1
+
+[[diag]]
+severity = "warning"
+code = "map-forward-reference"
+on = "LatePlayerSet"
+nth = 1
+absent = true
+
+[[diag]]
+severity = "warning"
+code = "map-forward-reference"
+on = "LateOCLObject"
+nth = 1
+absent = true
+
+[[diag]]
+severity = "warning"
+code = "map-forward-reference"
+on = "LateSlaveParticle"
+nth = 1
+absent = true
+
+[[diag]]
+severity = "warning"
+code = "map-forward-reference"
+on = "LateAudioEvent"
+nth = 1
+absent = true
+
+[[diag]]
+severity = "warning"
+code = "map-forward-reference"
+on = "LateStoredUpgrade"
+nth = 1
+absent = true
