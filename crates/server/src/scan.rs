@@ -7,7 +7,8 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use tower_lsp::lsp_types::Url;
 use zerosyntax_analysis::index::{
-    definitions_in, module_tags_in, references_in, Definition, ModelAsset, ReferenceSite,
+    definitions_in, module_tags_in, object_models_in, object_parents_in, references_in, Definition,
+    ModelAsset, ReferenceSite,
 };
 use zerosyntax_analysis::Analyzer;
 
@@ -15,6 +16,8 @@ pub(crate) type ScanEntry = (
     String,
     Vec<Definition>,
     Vec<ReferenceSite>,
+    Vec<(String, String)>,
+    Vec<(String, Vec<String>)>,
     Vec<(String, String)>,
     Vec<ModelAsset>,
     Option<Arc<str>>,
@@ -260,6 +263,8 @@ pub(crate) fn scan_big(analyzer: &Analyzer, path: &Path) -> Result<Vec<ScanEntry
                 definitions_in(analyzer, &parse, &file),
                 references_in(analyzer, &parse),
                 module_tags_in(analyzer, &parse),
+                object_models_in(analyzer, &parse),
+                object_parents_in(&parse),
                 Vec::new(),
                 Some(Arc::from(text)),
             ));
@@ -269,7 +274,16 @@ pub(crate) fn scan_big(analyzer: &Analyzer, path: &Path) -> Result<Vec<ScanEntry
             })?;
             let models = parse_w3d_models(&bytes, &file_stem_str(&entry.name));
             if !models.is_empty() {
-                out.push((file, Vec::new(), Vec::new(), Vec::new(), models, None));
+                out.push((
+                    file,
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    models,
+                    None,
+                ));
             }
         }
     }
@@ -360,6 +374,8 @@ fn scan_path(analyzer: &Analyzer, path: &Path) -> Result<Vec<ScanEntry>> {
             definitions_in(analyzer, &parse, uri.as_str()),
             references_in(analyzer, &parse),
             module_tags_in(analyzer, &parse),
+            object_models_in(analyzer, &parse),
+            object_parents_in(&parse),
             Vec::new(),
             None,
         )])
@@ -374,6 +390,8 @@ fn scan_path(analyzer: &Analyzer, path: &Path) -> Result<Vec<ScanEntry>> {
         Ok((!models.is_empty())
             .then_some((
                 uri.to_string(),
+                Vec::new(),
+                Vec::new(),
                 Vec::new(),
                 Vec::new(),
                 Vec::new(),

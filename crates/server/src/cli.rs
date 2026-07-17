@@ -10,7 +10,9 @@ use clap::{value_parser, Arg, ArgAction, Command};
 use serde::Serialize;
 use tower_lsp::lsp_types::Url;
 use zerosyntax_analysis::diagnostics;
-use zerosyntax_analysis::index::{definitions_in, module_tags_in, references_in};
+use zerosyntax_analysis::index::{
+    definitions_in, module_tags_in, object_models_in, object_parents_in, references_in,
+};
 use zerosyntax_analysis::{Analyzer, Diagnostic, Severity, WorkspaceIndex};
 use zerosyntax_syntax::Parse;
 
@@ -268,10 +270,12 @@ fn has_extension(path: &Path, extension: &str) -> bool {
 }
 
 fn apply_entries(index: &mut WorkspaceIndex, entries: Vec<ScanEntry>) {
-    for (file, definitions, references, tags, models, _) in entries {
+    for (file, definitions, references, tags, object_models, object_parents, models, _) in entries {
         index.set_file(&file, definitions);
         index.set_file_refs(&file, references);
         index.set_file_tags(&file, tags);
+        index.set_file_object_models(&file, object_models);
+        index.set_file_object_parents(&file, object_parents);
         index.set_file_models(&file, models);
     }
 }
@@ -280,6 +284,8 @@ fn index_document(index: &mut WorkspaceIndex, analyzer: &Analyzer, parse: &Parse
     index.set_file(file, definitions_in(analyzer, parse, file));
     index.set_file_refs(file, references_in(analyzer, parse));
     index.set_file_tags(file, module_tags_in(analyzer, parse));
+    index.set_file_object_models(file, object_models_in(analyzer, parse));
+    index.set_file_object_parents(file, object_parents_in(parse));
 }
 
 struct TargetDocument {

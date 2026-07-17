@@ -44,6 +44,14 @@ pub struct ReferenceSite {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ModelMemberStrictness {
+    Off,
+    #[default]
+    Compatible,
+    Strict,
+}
+
 /// A definition name's entry: display casing plus all its locations.
 struct NameEntry {
     /// The name as first written (for completion display).
@@ -87,6 +95,11 @@ pub struct WorkspaceIndex {
     model_assets: HashMap<String, Vec<(String, ModelAsset)>>,
     /// Reverse map for removing/replacing models contributed by one asset file.
     file_models: HashMap<String, Vec<ModelAsset>>,
+    object_models: HashMap<String, Vec<(String, Vec<String>)>>,
+    file_object_models: HashMap<String, Vec<(String, Vec<String>)>>,
+    object_parents: HashMap<String, Vec<(String, String)>>,
+    file_object_parents: HashMap<String, Vec<(String, String)>>,
+    model_member_strictness: ModelMemberStrictness,
 }
 
 impl WorkspaceIndex {
@@ -99,6 +112,17 @@ impl WorkspaceIndex {
     /// so a keystroke that doesn't touch a block header keeps caches warm.
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    pub fn model_member_strictness(&self) -> ModelMemberStrictness {
+        self.model_member_strictness
+    }
+
+    pub fn set_model_member_strictness(&mut self, value: ModelMemberStrictness) {
+        if self.model_member_strictness != value {
+            self.model_member_strictness = value;
+            self.generation += 1;
+        }
     }
 
     /// Replace all definitions contributed by `file` with `defs`.
@@ -156,12 +180,22 @@ impl WorkspaceIndex {
     pub fn remove_file(&mut self, file: &str) {
         if self.files.get(file).is_some_and(|v| !v.is_empty())
             || self.file_models.get(file).is_some_and(|v| !v.is_empty())
+            || self
+                .file_object_models
+                .get(file)
+                .is_some_and(|v| !v.is_empty())
+            || self
+                .file_object_parents
+                .get(file)
+                .is_some_and(|v| !v.is_empty())
         {
             self.generation += 1;
         }
         self.remove_entries(file);
         self.remove_site_entries(file);
         self.remove_model_entries(file);
+        self.remove_object_model_entries(file);
+        self.remove_object_parent_entries(file);
     }
 
     fn remove_site_entries(&mut self, file: &str) {
@@ -229,6 +263,97 @@ impl WorkspaceIndex {
                 }
             }
         }
+    }
+
+    pub fn set_file_object_models(&mut self, file: &str, objects: Vec<(String, Vec<String>)>) {
+        let normalized = normalize_object_models(&objects);
+        let changed = self.file_object_models.get(file) != Some(&normalized);
+        if changed {
+            self.generation += 1;
+        }
+        self.remove_object_model_entries(file);
+        for (name, models) in &objects {
+            self.object_models
+                .entry(name.to_ascii_lowercase())
+                .or_default()
+                .push((file.to_string(), models.clone()));
+        }
+        if !normalized.is_empty() {
+            self.file_object_models.insert(file.to_string(), normalized);
+        }
+    }
+
+    fn remove_object_model_entries(&mut self, file: &str) {
+        if let Some(objects) = self.file_object_models.remove(file) {
+            for (name, _) in objects {
+                if let Some(entries) = self.object_models.get_mut(&name) {
+                    entries.retain(|(source, _)| source != file);
+                    if entries.is_empty() {
+                        self.object_models.remove(&name);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn set_file_object_parents(&mut self, file: &str, parents: Vec<(String, String)>) {
+        let normalized = parents
+            .iter()
+            .map(|(child, parent)| (child.to_ascii_lowercase(), parent.to_ascii_lowercase()))
+            .collect::<Vec<_>>();
+        if self.file_object_parents.get(file) != Some(&normalized) {
+            self.generation += 1;
+        }
+        self.remove_object_parent_entries(file);
+        for (child, parent) in &parents {
+            self.object_parents
+                .entry(child.to_ascii_lowercase())
+                .or_default()
+                .push((file.to_string(), parent.clone()));
+        }
+        if !normalized.is_empty() {
+            self.file_object_parents
+                .insert(file.to_string(), normalized);
+        }
+    }
+
+    fn remove_object_parent_entries(&mut self, file: &str) {
+        if let Some(parents) = self.file_object_parents.remove(file) {
+            for (child, _) in parents {
+                if let Some(entries) = self.object_parents.get_mut(&child) {
+                    entries.retain(|(source, _)| source != file);
+                    if entries.is_empty() {
+                        self.object_parents.remove(&child);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn models_for_object<'a>(&'a self, name: &str) -> Vec<&'a str> {
+        let mut out = Vec::new();
+        let mut pending = vec![name.to_ascii_lowercase()];
+        let mut seen = std::collections::HashSet::new();
+        while let Some(object) = pending.pop() {
+            if !seen.insert(object.clone()) {
+                continue;
+            }
+            if let Some(entries) = self.object_models.get(&object) {
+                out.extend(
+                    entries
+                        .iter()
+                        .flat_map(|(_, models)| models.iter().map(String::as_str)),
+                );
+            }
+            if let Some(parents) = self.object_parents.get(&object) {
+                pending.extend(
+                    parents
+                        .iter()
+                        .map(|(_, parent)| parent.to_ascii_lowercase()),
+                );
+            }
+        }
+        out
     }
 
     /// Replace module-tag entries contributed by `file`.
@@ -397,6 +522,80 @@ fn normalized_model_assets(models: &[ModelAsset]) -> Vec<(String, Vec<String>)> 
         .collect::<Vec<_>>();
     out.sort();
     out
+}
+
+fn normalize_object_models(objects: &[(String, Vec<String>)]) -> Vec<(String, Vec<String>)> {
+    let mut out = objects
+        .iter()
+        .map(|(name, models)| {
+            let mut models = models
+                .iter()
+                .map(|m| m.to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            models.sort();
+            models.dedup();
+            (name.to_ascii_lowercase(), models)
+        })
+        .collect::<Vec<_>>();
+    out.sort();
+    out
+}
+
+/// Collect the W3D models declared below every Object definition.
+pub fn object_models_in(analyzer: &Analyzer, parse: &Parse) -> Vec<(String, Vec<String>)> {
+    parse
+        .syntax()
+        .children()
+        .filter_map(|node| {
+            let block = Block(node.clone());
+            if !block.keyword()?.text().eq_ignore_ascii_case("Object") {
+                return None;
+            }
+            let name = block.name()?.text().to_string();
+            let mut models = Vec::new();
+            collect_object_models(analyzer, &node, &mut models);
+            dedup_case_insensitive(&mut models);
+            Some((name, models))
+        })
+        .collect()
+}
+
+pub fn object_parents_in(parse: &Parse) -> Vec<(String, String)> {
+    parse
+        .syntax()
+        .children()
+        .filter_map(|node| {
+            let block = Block(node);
+            if !block.keyword()?.text().eq_ignore_ascii_case("Object") {
+                return None;
+            }
+            Some((
+                block.name()?.text().to_string(),
+                block.parent_name()?.text().to_string(),
+            ))
+        })
+        .collect()
+}
+
+fn collect_object_models(analyzer: &Analyzer, node: &SyntaxNode, out: &mut Vec<String>) {
+    let scope = scope_schema(analyzer, node);
+    for child in node.children() {
+        match child.kind() {
+            SyntaxKind::FIELD => {
+                let field = Field(child);
+                let Some(schema_field) = field.key().and_then(|key| scope.field(key.text())) else {
+                    continue;
+                };
+                if matches!(schema_field.value_type, ValueType::W3dModel) {
+                    if let Some(value) = field.value_tokens().first() {
+                        out.push(value.text().trim_matches('"').to_string());
+                    }
+                }
+            }
+            SyntaxKind::BLOCK | SyntaxKind::MODULE => collect_object_models(analyzer, &child, out),
+            _ => {}
+        }
+    }
 }
 
 /// Collect every reference site in a parsed document: each value token of a
@@ -653,6 +852,16 @@ mod tests {
         assert_eq!(idx.reference_sites(RefKind::Upgrade, "Upgrade_B").len(), 1);
         idx.set_file_refs("f.ini", Vec::new());
         assert!(!idx.is_referenced(RefKind::Upgrade, "Upgrade_A"));
+    }
+
+    #[test]
+    fn object_models_follow_inheritance() {
+        let a = Analyzer::embedded();
+        let parse = a.parse("Object Parent\n  Draw = W3DModelDraw Tag\n    DefaultConditionState\n      Model = ParentModel\n    End\n  End\nEnd\nObject Child Parent\nEnd\n");
+        let mut idx = WorkspaceIndex::new();
+        idx.set_file_object_models("objects.ini", object_models_in(&a, &parse));
+        idx.set_file_object_parents("objects.ini", object_parents_in(&parse));
+        assert_eq!(idx.models_for_object("child"), vec!["ParentModel"]);
     }
 
     #[test]

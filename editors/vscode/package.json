@@ -75,6 +75,12 @@
           "default": "",
           "markdownDescription": "Path to a custom ZeroSyntax schema JSON file. Use **ZeroSyntax: Select Custom Schema** to choose one. Invalid or unreadable files fall back to the built-in schema. Changing this restarts the language server."
         },
+        "zerosyntax.analysis.modelMemberStrictness": {
+          "type": "string",
+          "enum": ["off", "compatible", "strict"],
+          "default": "compatible",
+          "markdownDescription": "Model-member diagnostics: off disables warnings, compatible accepts a bone/subobject present in any applicable model, and strict requires it in every applicable model. Changing this restarts the language server."
+        },
         "zerosyntax.trace.server": {
           "type": "string",
           "enum": [

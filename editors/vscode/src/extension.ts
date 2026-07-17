@@ -40,6 +40,9 @@ export function activate(context: vscode.ExtensionContext) {
       },
       baseIniRoots: setting<string[]>("baseIniRoots", []),
       schemaPath: setting<string>("schema.path", ""),
+      analysis: {
+        modelMemberStrictness: setting<string>("analysis.modelMemberStrictness", "compatible"),
+      },
       clientBaseIniHint: true,
     }),
   };

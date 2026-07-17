@@ -1,8 +1,10 @@
 //! Bridges the syntax tree to the schema: given a scope node (a `BLOCK` or
 //! `MODULE`), determine which schema entity it is and look up fields / slots.
 
-use zerosyntax_schema::{BlockType, Field, ModuleSlot, ModuleType, SubBlock, ValueType};
-use zerosyntax_syntax::ast::Field as AstField;
+use zerosyntax_schema::{
+    BlockType, Field, ModelSource, ModuleSlot, ModuleType, SubBlock, ValueType,
+};
+use zerosyntax_syntax::ast::{Block as AstBlock, Field as AstField};
 
 /// Returns true when `module` implements at least one of the interfaces the
 /// `slot` accepts. Used to filter completions and validate module placement.
@@ -182,6 +184,56 @@ pub(crate) fn models_in_scope(analyzer: &Analyzer, scope_node: &SyntaxNode) -> V
         {
             Some(parent) => node = parent,
             None => return out,
+        }
+    }
+}
+
+pub(crate) fn models_for_source(
+    analyzer: &Analyzer,
+    scope_node: &SyntaxNode,
+    source: Option<&ModelSource>,
+    index: &crate::WorkspaceIndex,
+) -> Vec<String> {
+    match source {
+        None | Some(ModelSource::EnclosingObject) => {
+            let local = models_in_scope(analyzer, scope_node);
+            if !local.is_empty() {
+                return local;
+            }
+            scope_node
+                .ancestors()
+                .find_map(|node| {
+                    let block = AstBlock(node);
+                    block
+                        .keyword()
+                        .filter(|keyword| keyword.text().eq_ignore_ascii_case("Object"))?;
+                    block.name().map(|name| name.text().to_string())
+                })
+                .map(|object| {
+                    index
+                        .models_for_object(&object)
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+        Some(ModelSource::ObjectReferenceField { field }) => {
+            let Some(object) = scope_node.children().find_map(|child| {
+                let ini = AstField(child);
+                ini.key()
+                    .filter(|key| key.text().eq_ignore_ascii_case(field))?;
+                ini.value_tokens()
+                    .first()
+                    .map(|value| value.text().trim_matches('"').to_string())
+            }) else {
+                return Vec::new();
+            };
+            index
+                .models_for_object(&object)
+                .into_iter()
+                .map(str::to_string)
+                .collect()
         }
     }
 }

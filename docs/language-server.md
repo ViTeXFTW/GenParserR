@@ -85,6 +85,7 @@ symbols.
 {
   "format": { "enable": false },
   "schemaPath": "C:/Mods/MyMod/schema.json",
+  "analysis": { "modelMemberStrictness": "compatible" },
   "baseIniRoots": [
     "C:/Games/Zero Hour",
     "C:/Mods/MyMod/Data/INI",
@@ -97,6 +98,9 @@ symbols.
   It defaults to `false`.
 - `schemaPath` points to a custom schema JSON file. Unreadable or invalid files
   produce a warning and fall back to the built-in schema.
+- `analysis.modelMemberStrictness` is `off`, `compatible` (member exists in any
+  applicable model), or `strict` (member exists in every applicable model). It
+  defaults to `compatible`.
 - `baseIniRoots` accepts directories and `.big` archives containing base game
   or mod INI files and W3D assets. Those INI definitions are treated as loaded
   before `map.ini` and `solo.ini`.

@@ -16,7 +16,10 @@ use serde::Deserialize;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{jsonrpc::Result, Client, LanguageServer};
 use zerosyntax_analysis::diagnostics::DiagnosticsCache;
-use zerosyntax_analysis::index::{definitions_in, module_tags_in, references_in, WorkspaceIndex};
+use zerosyntax_analysis::index::{
+    definitions_in, module_tags_in, object_models_in, object_parents_in, references_in,
+    ModelMemberStrictness, WorkspaceIndex,
+};
 use zerosyntax_analysis::nav::{definition_at, hover_at, reference_at, HoverInfo};
 use zerosyntax_analysis::{actions, completion, diagnostics, format, outline, semantic, Analyzer};
 use zerosyntax_syntax::{Edit, Parse};
@@ -196,11 +199,15 @@ impl Backend {
         let defs = definitions_in(&analyzer, &parse, uri.as_str());
         let refs = references_in(&analyzer, &parse);
         let tags = module_tags_in(&analyzer, &parse);
+        let object_models = object_models_in(&analyzer, &parse);
+        let object_parents = object_parents_in(&parse);
         let str_keys = load_sibling_str_keys(uri);
         if let Ok(mut idx) = self.index.write() {
             idx.set_file(uri.as_str(), defs);
             idx.set_file_refs(uri.as_str(), refs);
             idx.set_file_tags(uri.as_str(), tags);
+            idx.set_file_object_models(uri.as_str(), object_models);
+            idx.set_file_object_parents(uri.as_str(), object_parents);
             idx.set_ini_string_keys(uri.as_str(), str_keys);
         }
 
@@ -312,7 +319,7 @@ impl Backend {
         let (scanned, base_scanned) = handle.await.unwrap_or_default();
         let base_ini_count = base_scanned
             .iter()
-            .filter(|(_, _, _, _, models, _)| models.is_empty())
+            .filter(|(_, _, _, _, _, _, models, _)| models.is_empty())
             .count();
         self.base_indexed_count
             .store(base_ini_count, Ordering::Relaxed);
@@ -320,12 +327,12 @@ impl Backend {
         let ini_total = base_ini_count
             + scanned
                 .iter()
-                .filter(|(_, _, _, _, models, _)| models.is_empty())
+                .filter(|(_, _, _, _, _, _, models, _)| models.is_empty())
                 .count();
         let model_total: usize = base_scanned
             .iter()
             .chain(scanned.iter())
-            .map(|(_, _, _, _, models, _)| models.len())
+            .map(|(_, _, _, _, _, _, models, _)| models.len())
             .sum();
         // Don't overwrite index entries for already-open documents with stale
         // disk content; `initialized` calls `refresh` for each open doc right
@@ -339,7 +346,9 @@ impl Backend {
             let Ok(mut idx) = self.index.write() else {
                 return;
             };
-            for (uri, defs, refs, tags, models, text) in base_scanned.into_iter().chain(scanned) {
+            for (uri, defs, refs, tags, object_models, object_parents, models, text) in
+                base_scanned.into_iter().chain(scanned)
+            {
                 if let Some(text) = text {
                     self.virtual_files.insert(uri.clone(), text);
                 }
@@ -347,6 +356,8 @@ impl Backend {
                     idx.set_file(&uri, defs);
                     idx.set_file_refs(&uri, refs);
                     idx.set_file_tags(&uri, tags);
+                    idx.set_file_object_models(&uri, object_models);
+                    idx.set_file_object_parents(&uri, object_parents);
                     idx.set_file_models(&uri, models);
                 }
             }
@@ -515,6 +526,7 @@ impl LanguageServer for Backend {
         // requires a client restart (the VS Code extension does this
         // automatically). Shape:
         // `{ "format": {"enable": bool}, "schemaPath": "schema.json",
+        //    "analysis": {"modelMemberStrictness": "compatible"},
         //    "baseIniRoots": ["dir-or-big", ...],
         //    "clientBaseIniHint": bool }`.
         let format_enabled = params
@@ -525,6 +537,22 @@ impl LanguageServer for Backend {
             .and_then(|e| e.as_bool())
             .unwrap_or(false);
         let _ = self.format_enabled.set(format_enabled);
+
+        let model_member_strictness = params
+            .initialization_options
+            .as_ref()
+            .and_then(|v| v.get("analysis"))
+            .and_then(|v| v.get("modelMemberStrictness"))
+            .and_then(|v| v.as_str())
+            .map(|value| match value {
+                "off" => ModelMemberStrictness::Off,
+                "strict" => ModelMemberStrictness::Strict,
+                _ => ModelMemberStrictness::Compatible,
+            })
+            .unwrap_or_default();
+        if let Ok(mut index) = self.index.write() {
+            index.set_model_member_strictness(model_member_strictness);
+        }
 
         if let Some(path) = params
             .initialization_options
@@ -1423,7 +1451,7 @@ mod tests {
         assert!(Url::parse(&scanned[0].0).is_ok());
         assert!(scanned[0].1.iter().any(|d| d.name == "BigArchiveObject"));
         assert_eq!(
-            scanned[0].5.as_deref(),
+            scanned[0].7.as_deref(),
             Some("Object BigArchiveObject\nEnd\n")
         );
     }
@@ -1449,10 +1477,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
 
         let mut idx = WorkspaceIndex::new();
-        for (uri, defs, refs, tags, models, _) in scanned {
+        for (uri, defs, refs, tags, object_models, object_parents, models, _) in scanned {
             idx.set_file(&uri, defs);
             idx.set_file_refs(&uri, refs);
             idx.set_file_tags(&uri, tags);
+            idx.set_file_object_models(&uri, object_models);
+            idx.set_file_object_parents(&uri, object_parents);
             idx.set_file_models(&uri, models);
         }
         assert!(idx.is_model_asset("Good"), "model name from file stem");
