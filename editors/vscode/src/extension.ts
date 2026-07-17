@@ -42,6 +42,7 @@ export function activate(context: vscode.ExtensionContext) {
       schemaPath: setting<string>("schema.path", ""),
       analysis: {
         modelMemberStrictness: setting<string>("analysis.modelMemberStrictness", "compatible"),
+        mapOrderingDiagnostics: setting<boolean>("analysis.mapOrderingDiagnostics", true),
       },
       clientBaseIniHint: true,
     }),

@@ -75,6 +75,9 @@ pub struct Backend {
     /// default: format-on-save rewriting a whole hand-indented game file is
     /// surprising, so formatting is opt-in per editor.
     format_enabled: OnceLock<bool>,
+    /// Whether source-backed map/solo.ini forward-order warnings are emitted.
+    /// Defaults on; clients can set `analysis.mapOrderingDiagnostics` to false.
+    map_ordering_diagnostics: OnceLock<bool>,
     /// Whether the client supports snippet insertText (tab-stops, placeholders).
     /// Captured at `initialize` from the client's completion-item capabilities.
     snippet_support: OnceLock<bool>,
@@ -132,6 +135,23 @@ fn is_map_layer_file(file: &str) -> bool {
     })
 }
 
+fn map_ordering_diagnostics_option(options: Option<&serde_json::Value>) -> bool {
+    options
+        .and_then(|value| value.get("analysis"))
+        .and_then(|analysis| analysis.get("mapOrderingDiagnostics"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true)
+}
+
+fn filter_map_ordering_diagnostics(
+    diagnostics: &mut Vec<zerosyntax_analysis::Diagnostic>,
+    enabled: bool,
+) {
+    if !enabled {
+        diagnostics.retain(|diagnostic| diagnostic.code != "map-forward-reference");
+    }
+}
+
 impl Backend {
     pub fn new(client: Client) -> Self {
         Backend {
@@ -144,6 +164,7 @@ impl Backend {
             roots: Mutex::new(Vec::new()),
             encoding: OnceLock::new(),
             format_enabled: OnceLock::new(),
+            map_ordering_diagnostics: OnceLock::new(),
             base_roots: Mutex::new(Vec::new()),
             base_indexed_count: AtomicUsize::new(0),
             scan_finished: AtomicBool::new(false),
@@ -168,6 +189,10 @@ impl Backend {
 
     fn format_enabled(&self) -> bool {
         self.format_enabled.get().copied().unwrap_or(false)
+    }
+
+    fn map_ordering_diagnostics_enabled(&self) -> bool {
+        self.map_ordering_diagnostics.get().copied().unwrap_or(true)
     }
 
     fn next_semantic_id(&self) -> u64 {
@@ -214,13 +239,14 @@ impl Backend {
         let enc = self.enc();
         let lsp_diags: Vec<Diagnostic> = {
             let idx = self.index.read().ok();
-            let diags = diagnostics::diagnose_with_cache(
+            let mut diags = diagnostics::diagnose_with_cache(
                 &analyzer,
                 &parse,
                 idx.as_deref(),
                 Some(uri.as_str()),
                 &mut cache,
             );
+            filter_map_ordering_diagnostics(&mut diags, self.map_ordering_diagnostics_enabled());
             diags
                 .iter()
                 .map(|d| convert::to_lsp_diagnostic(&rope, d, enc))
@@ -526,7 +552,8 @@ impl LanguageServer for Backend {
         // requires a client restart (the VS Code extension does this
         // automatically). Shape:
         // `{ "format": {"enable": bool}, "schemaPath": "schema.json",
-        //    "analysis": {"modelMemberStrictness": "compatible"},
+        //    "analysis": {"modelMemberStrictness": "compatible",
+        //                 "mapOrderingDiagnostics": true},
         //    "baseIniRoots": ["dir-or-big", ...],
         //    "clientBaseIniHint": bool }`.
         let format_enabled = params
@@ -537,6 +564,10 @@ impl LanguageServer for Backend {
             .and_then(|e| e.as_bool())
             .unwrap_or(false);
         let _ = self.format_enabled.set(format_enabled);
+
+        let map_ordering_diagnostics =
+            map_ordering_diagnostics_option(params.initialization_options.as_ref());
+        let _ = self.map_ordering_diagnostics.set(map_ordering_diagnostics);
 
         let model_member_strictness = params
             .initialization_options
@@ -923,13 +954,14 @@ impl LanguageServer for Backend {
         let range_span = zerosyntax_analysis::Span::new(start, end);
         let fixes = {
             let idx = self.index.read().ok();
-            let diags = diagnostics::diagnose_with_cache(
+            let mut diags = diagnostics::diagnose_with_cache(
                 &self.analyzer(),
                 &parse,
                 idx.as_deref(),
                 Some(uri.as_str()),
                 &mut cache,
             );
+            filter_map_ordering_diagnostics(&mut diags, self.map_ordering_diagnostics_enabled());
             let mut f = actions::fixes(
                 &self.analyzer(),
                 &parse,
@@ -1377,6 +1409,35 @@ fn origin_copy_fixes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn map_ordering_diagnostics_can_be_disabled() {
+        assert!(map_ordering_diagnostics_option(None));
+        assert!(map_ordering_diagnostics_option(Some(
+            &serde_json::json!({})
+        )));
+        assert!(!map_ordering_diagnostics_option(Some(
+            &serde_json::json!({"analysis": {"mapOrderingDiagnostics": false}})
+        )));
+
+        let mut diagnostics = vec![
+            zerosyntax_analysis::Diagnostic {
+                span: zerosyntax_analysis::Span::new(0, 1),
+                severity: zerosyntax_analysis::Severity::Warning,
+                code: "map-forward-reference",
+                message: String::new(),
+            },
+            zerosyntax_analysis::Diagnostic {
+                span: zerosyntax_analysis::Span::new(0, 1),
+                severity: zerosyntax_analysis::Severity::Warning,
+                code: "map-projectile-object",
+                message: String::new(),
+            },
+        ];
+        filter_map_ordering_diagnostics(&mut diagnostics, false);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "map-projectile-object");
+    }
 
     #[test]
     fn custom_schema_changes_analysis() {
