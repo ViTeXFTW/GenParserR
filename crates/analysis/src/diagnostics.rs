@@ -781,17 +781,24 @@ impl<'a> Ctx<'a> {
         let tokens = field.value_tokens();
         match &schema_field.value_type {
             ValueType::TokenList { tokens: specs } => {
-                for (spec, tok) in specs.iter().zip(tokens.iter()) {
+                let mut i = 0;
+                for spec in specs {
+                    let Some(tok) = tokens.get(i) else { break };
+                    let (ty, tok, consumed) = split_prefixed_token(&tokens[i..], spec)
+                        .map(|(ty, tok)| (ty, tok, 2))
+                        .unwrap_or((spec, tok, 1));
                     self.validate_model_asset_token(
-                        spec,
+                        ty,
                         tok,
                         scope_node,
                         schema_field.model_source.as_ref(),
                     );
+                    i += consumed;
                 }
             }
             ty => {
                 if let Some(tok) = tokens.first() {
+                    let (ty, tok) = split_prefixed_token(&tokens, ty).unwrap_or((ty, tok));
                     self.validate_model_asset_token(
                         ty,
                         tok,
@@ -811,7 +818,19 @@ impl<'a> Ctx<'a> {
         source: Option<&zerosyntax_schema::ModelSource>,
     ) {
         let Some(index) = self.index else { return };
-        let value = unquote(tok.text());
+        let raw = unquote(tok.text());
+        let (ty, value) = match ty {
+            ValueType::Prefixed { prefix, value_type } => {
+                let Some((actual, value)) = raw.split_once(':') else {
+                    return;
+                };
+                if !actual.eq_ignore_ascii_case(prefix) {
+                    return;
+                }
+                (value_type.as_ref(), value)
+            }
+            _ => (ty, raw),
+        };
         if value.is_empty() || value.eq_ignore_ascii_case("None") {
             return;
         }
@@ -1122,21 +1141,16 @@ impl<'a> Ctx<'a> {
     /// after a prefix colon (`Loc:X:0` and `Loc: X:0`).
     fn check_value_tokens(&mut self, tokens: &[SyntaxToken], ty: &ValueType) -> usize {
         let tok = &tokens[0];
-        if let ValueType::Prefixed { prefix, value_type } = ty {
-            let text = unquote(tok.text());
-            if text
-                .strip_suffix(':')
-                .is_some_and(|actual| actual.eq_ignore_ascii_case(prefix))
+        if let Some((value_type, value)) = split_prefixed_token(tokens, ty) {
+            if ty
+                .first_prefix()
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("Loc"))
             {
-                if let Some(value) = tokens.get(1) {
-                    if prefix.eq_ignore_ascii_case("Loc") {
-                        self.check_loc_value(value, unquote(value.text()));
-                    } else {
-                        self.check_token(value, value_type);
-                    }
-                    return 2;
-                }
+                self.check_loc_value(value, unquote(value.text()));
+            } else {
+                self.check_token(value, value_type);
             }
+            return 2;
         }
         self.check_token(tok, ty);
         1
@@ -1555,6 +1569,20 @@ fn unquote(s: &str) -> &str {
     s.strip_prefix('"')
         .map(|s| s.strip_suffix('"').unwrap_or(s))
         .unwrap_or(s)
+}
+
+fn split_prefixed_token<'t, 'v>(
+    tokens: &'t [SyntaxToken],
+    ty: &'v ValueType,
+) -> Option<(&'v ValueType, &'t SyntaxToken)> {
+    let ValueType::Prefixed { prefix, value_type } = ty else {
+        return None;
+    };
+    let value = tokens.get(1)?;
+    unquote(tokens.first()?.text())
+        .strip_suffix(':')
+        .is_some_and(|actual| actual.eq_ignore_ascii_case(prefix))
+        .then(|| (value_type.as_ref(), value))
 }
 
 #[cfg(test)]
@@ -2006,6 +2034,9 @@ Object Tank
       WeaponRecoilBone = PRIMARY MissingMuzzle
     End
   End
+  Behavior = BoneFXUpdate ModuleTag_02
+    PristineFXList1 = Bone: SplitMissing OnlyOnce: No 0 0 FXList: None
+  End
 End
 ";
         let parse = a.parse(src);
@@ -2034,6 +2065,13 @@ End
             diags.iter().any(|d| {
                 d.code == "unknown-model-member"
                     && &src[d.span.start as usize..d.span.end as usize] == "MissingMuzzle"
+            }),
+            "{diags:?}"
+        );
+        assert!(
+            diags.iter().any(|d| {
+                d.code == "unknown-model-member"
+                    && &src[d.span.start as usize..d.span.end as usize] == "SplitMissing"
             }),
             "{diags:?}"
         );
