@@ -119,17 +119,48 @@ fn classify_position(analyzer: &Analyzer, root: &SyntaxNode, offset: u32) -> Pos
                 .map(|k| k.text().to_string())
                 .unwrap_or_default();
             let value_tokens = field.value_tokens();
-            let value_index = value_tokens
+            let raw_value_index = value_tokens
                 .iter()
                 .filter(|t| u32::from(t.text_range().end()) < offset)
                 .count();
+            let input = value_tokens
+                .iter()
+                .map(|token| token.text().trim_matches('"'))
+                .collect::<Vec<_>>();
+            let value_index = scope_node
+                .as_ref()
+                .and_then(|scope_node| scope_schema(analyzer, scope_node).field(&key))
+                .and_then(|field| {
+                    field
+                        .value_type
+                        .token_index_at_input(&input, raw_value_index)
+                })
+                .unwrap_or(raw_value_index);
             let current_token = value_tokens
                 .iter()
-                .find(|t| {
+                .position(|t| {
                     let range = t.text_range();
                     u32::from(range.start()) <= offset && offset <= u32::from(range.end())
                 })
-                .map(|t| t.text().trim_matches('"').to_string());
+                .map(|index| {
+                    let current = value_tokens[index].text().trim_matches('"');
+                    index
+                        .checked_sub(1)
+                        .and_then(|index| value_tokens.get(index))
+                        .map(|previous| previous.text().trim_matches('"'))
+                        .filter(|previous| previous.ends_with(':'))
+                        .map_or_else(
+                            || current.to_string(),
+                            |previous| format!("{previous}{current}"),
+                        )
+                })
+                .or_else(|| {
+                    raw_value_index
+                        .checked_sub(1)
+                        .and_then(|index| input.get(index))
+                        .filter(|previous| previous.ends_with(':'))
+                        .map(|previous| (*previous).to_string())
+                });
             let first_token = value_tokens
                 .first()
                 .map(|t| t.text().trim_matches('"').to_string());
@@ -1023,8 +1054,8 @@ End
 
     #[test]
     fn loc_variant_reference_suggests_while_typing() {
-        let src = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    DamagedFXList1 = Loc:X:0.0 Y:0.0 Z:0.0 FXList:FX_\n  End\nEnd\n";
-        let offset = src.find("FXList:FX_").unwrap() + "FXList:FX_".len();
+        let src = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    ReallyDamagedFXList1 = Loc: X:0 Y:0 Z:0 FXList: FX_\n  End\nEnd\n";
+        let offset = src.find("FXList: FX_").unwrap() + "FXList: FX_".len();
         let got = item_with_defs(
             src,
             offset as u32,

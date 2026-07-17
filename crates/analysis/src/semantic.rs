@@ -182,9 +182,13 @@ impl<'a> Sem<'a> {
         let active_ty = ty.as_ref().and_then(|ty| {
             ty.variant_for_first_token(value_tokens.first().map(|t| t.text().trim_matches('"')))
         });
+        let input = value_tokens
+            .iter()
+            .map(|token| token.text().trim_matches('"'))
+            .collect::<Vec<_>>();
         for (i, tok) in value_tokens.iter().enumerate() {
             // Token lists classify each position by its own element type.
-            let elem = active_ty.and_then(|ty| ty.token_type_at(i));
+            let elem = active_ty.and_then(|ty| ty.token_type_at_input(&input, i));
             self.set(tok, value_token_kind(tok, elem));
         }
     }

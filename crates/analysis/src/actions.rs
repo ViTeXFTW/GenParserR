@@ -152,8 +152,15 @@ fn suggest_in_field(analyzer: &Analyzer, node: &SyntaxNode, range: Span, out: &m
                 check(tok, value_set, true);
             }
         }
-        ValueType::TokenList { tokens: specs } => {
-            for (spec, tok) in specs.iter().zip(tokens.iter()) {
+        ValueType::TokenList { .. } | ValueType::OneOf { .. } | ValueType::Prefixed { .. } => {
+            let input = tokens
+                .iter()
+                .map(|token| token.text().trim_matches('"'))
+                .collect::<Vec<_>>();
+            for (index, tok) in tokens.iter().enumerate() {
+                let Some(spec) = schema_field.value_type.token_type_at_input(&input, index) else {
+                    continue;
+                };
                 match spec {
                     ValueType::Enum { value_set } => check(tok, value_set, false),
                     ValueType::BitFlags { value_set } => check(tok, value_set, true),
