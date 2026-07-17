@@ -57,51 +57,42 @@ pub fn reference_at(analyzer: &Analyzer, parse: &Parse, offset: u32) -> Option<R
     let value_type = &schema.field(key.text())?.value_type;
     let active_type = value_type
         .variant_for_first_token(value_tokens.first().map(|t| t.text().trim_matches('"')))?;
-    let ref_kind = match active_type {
-        ValueType::Reference { ref_kind } if pos == 0 => *ref_kind,
-        ValueType::ReferenceList { ref_kind } => *ref_kind,
-        ValueType::TokenList { tokens } => match tokens.get(pos)? {
+    let input = value_tokens
+        .iter()
+        .map(|token| token.text().trim_matches('"'))
+        .collect::<Vec<_>>();
+    let element_type = active_type.token_type_at_input(&input, pos)?;
+    let ref_kind = match element_type {
+        ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } => *ref_kind,
+        ValueType::Prefixed { value_type, .. } => match value_type.as_ref() {
             ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } => *ref_kind,
-            ValueType::Prefixed { value_type, .. } => match value_type.as_ref() {
-                ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } => {
-                    *ref_kind
-                }
-                _ => return None,
-            },
             _ => return None,
         },
         _ => return None,
     };
-    let (name, span) = if let ValueType::TokenList { tokens } = active_type {
-        match tokens.get(pos) {
-            Some(ValueType::Prefixed { prefix, .. }) => {
-                let text = tok.text().trim_matches('"');
-                let (actual, name) = text.split_once(':')?;
-                if !actual.eq_ignore_ascii_case(prefix) {
-                    return None;
-                }
-                let start = u32::from(tok.text_range().start())
-                    + u32::from(tok.text().starts_with('"'))
-                    + actual.len() as u32
-                    + 1;
-                (
-                    name.to_string(),
-                    crate::Span {
-                        start,
-                        end: start + name.len() as u32,
-                    },
-                )
+    let (name, span) = match element_type {
+        ValueType::Prefixed { prefix, .. } => {
+            let text = tok.text().trim_matches('"');
+            let (actual, name) = text.split_once(':')?;
+            if !actual.eq_ignore_ascii_case(prefix) || name.is_empty() {
+                return None;
             }
-            _ => (
-                tok.text().trim_matches('"').to_string(),
-                tok.text_range().into(),
-            ),
+            let start = u32::from(tok.text_range().start())
+                + u32::from(tok.text().starts_with('"'))
+                + actual.len() as u32
+                + 1;
+            (
+                name.to_string(),
+                crate::Span {
+                    start,
+                    end: start + name.len() as u32,
+                },
+            )
         }
-    } else {
-        (
+        _ => (
             tok.text().trim_matches('"').to_string(),
             tok.text_range().into(),
-        )
+        ),
     };
     Some(ReferenceAt {
         kind: ref_kind,
@@ -189,9 +180,9 @@ mod tests {
     }
 
     #[test]
-    fn quoted_prefixed_reference_span_excludes_quotes_and_prefix() {
+    fn split_prefixed_reference_span_excludes_prefix() {
         let a = Analyzer::embedded();
-        let src = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    DamagedParticleSystem1 = Bone:NONE RandomBone:No \"PSys:MissingParticle\"\n  End\nEnd\n";
+        let src = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    DamagedParticleSystem1 = Bone: NONE RandomBone: No PSys: MissingParticle\n  End\nEnd\n";
         let offset = src.find("MissingParticle").unwrap() as u32;
         let reference = reference_at(&a, &a.parse(src), offset).unwrap();
         assert_eq!(reference.kind, RefKind::ParticleSystem);
