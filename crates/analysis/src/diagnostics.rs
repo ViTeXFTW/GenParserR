@@ -1076,9 +1076,10 @@ impl<'a> Ctx<'a> {
             // A fixed sequence of typed tokens; each listed token is required
             // (the engine's parse function calls getNextToken for each).
             ValueType::TokenList { tokens: specs } => {
-                for (i, spec) in specs.iter().enumerate() {
+                let mut i = 0;
+                for spec in specs {
                     match tokens.get(i) {
-                        Some(tok) => self.check_token(tok, spec),
+                        Some(_) => i += self.check_value_tokens(&tokens[i..], spec),
                         None => {
                             if let Some(key) = field.key() {
                                 self.warning(
@@ -1100,7 +1101,7 @@ impl<'a> Ctx<'a> {
                     .last()
                     .filter(|spec| matches!(spec, ValueType::BitFlags { .. }))
                 {
-                    for tok in tokens.iter().skip(specs.len()) {
+                    for tok in tokens.iter().skip(i) {
                         self.check_token(tok, spec);
                     }
                 }
@@ -1111,8 +1112,34 @@ impl<'a> Ctx<'a> {
             // `X:0 Y:0 [Z:0]` — reals (INI.cpp parseCoord2D / parseCoord3D).
             ValueType::Coord2D => self.check_axes(field, &tokens, &["X", "Y"], None, false),
             ValueType::Coord3D => self.check_axes(field, &tokens, &["X", "Y", "Z"], None, false),
-            single => self.check_token(&tokens[0], single),
+            single => {
+                self.check_value_tokens(&tokens, single);
+            }
         }
+    }
+
+    /// Validate one logical value, accepting the engine's optional whitespace
+    /// after a prefix colon (`Loc:X:0` and `Loc: X:0`).
+    fn check_value_tokens(&mut self, tokens: &[SyntaxToken], ty: &ValueType) -> usize {
+        let tok = &tokens[0];
+        if let ValueType::Prefixed { prefix, value_type } = ty {
+            let text = unquote(tok.text());
+            if text
+                .strip_suffix(':')
+                .is_some_and(|actual| actual.eq_ignore_ascii_case(prefix))
+            {
+                if let Some(value) = tokens.get(1) {
+                    if prefix.eq_ignore_ascii_case("Loc") {
+                        self.check_loc_value(value, unquote(value.text()));
+                    } else {
+                        self.check_token(value, value_type);
+                    }
+                    return 2;
+                }
+            }
+        }
+        self.check_token(tok, ty);
+        1
     }
 
     /// Validate one value token against a single-token type.
@@ -1209,29 +1236,7 @@ impl<'a> Ctx<'a> {
             return;
         }
         if prefix.eq_ignore_ascii_case("Loc") {
-            let Some((axis, n)) = value.split_once(':') else {
-                self.error(
-                    tok,
-                    "bad-prefixed",
-                    format!("expected `Loc:X:<n>`, found `{text}`"),
-                );
-                return;
-            };
-            if !axis.eq_ignore_ascii_case("X") {
-                self.error(
-                    tok,
-                    "bad-prefixed",
-                    format!("expected `Loc:X:<n>`, found `{text}`"),
-                );
-                return;
-            }
-            if n.parse::<f64>().is_err() {
-                self.error(
-                    tok,
-                    "bad-number",
-                    format!("expected a number for `Loc:X:`, found `{n}`"),
-                );
-            }
+            self.check_loc_value(tok, value);
             return;
         }
         match ty {
@@ -1265,6 +1270,32 @@ impl<'a> Ctx<'a> {
             }
             ValueType::AsciiString | ValueType::AsciiStringList | ValueType::QuotedString => {}
             _ => {}
+        }
+    }
+
+    fn check_loc_value(&mut self, tok: &SyntaxToken, value: &str) {
+        let Some((axis, n)) = value.split_once(':') else {
+            self.error(
+                tok,
+                "bad-prefixed",
+                format!("expected `X:<n>` after `Loc:`, found `{value}`"),
+            );
+            return;
+        };
+        if !axis.eq_ignore_ascii_case("X") {
+            self.error(
+                tok,
+                "bad-prefixed",
+                format!("expected `X:<n>` after `Loc:`, found `{value}`"),
+            );
+            return;
+        }
+        if n.parse::<f64>().is_err() {
+            self.error(
+                tok,
+                "bad-number",
+                format!("expected a number for `Loc:X:`, found `{n}`"),
+            );
         }
     }
 
