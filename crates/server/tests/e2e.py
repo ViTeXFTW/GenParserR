@@ -60,8 +60,10 @@ def main() -> int:
     (workspace / "Images.INI").write_text("MappedImage TestScanImage\nEnd\n")
     root_uri = workspace.as_uri()
 
+    # vscode-languageclient appends this conventional transport flag. The
+    # second server below remains a bare invocation so both entry paths stay pinned.
     proc = subprocess.Popen(
-        [exe],
+        [exe, "--stdio"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
