@@ -22,6 +22,12 @@
     "onLanguage:generals-ini"
   ],
   "contributes": {
+    "commands": [
+      {
+        "command": "zerosyntax.selectSchema",
+        "title": "ZeroSyntax: Select Custom Schema"
+      }
+    ],
     "languages": [
       {
         "id": "generals-ini",
@@ -63,6 +69,11 @@
             "type": "string"
           },
           "markdownDescription": "Directories or `.big` archives containing base game/mod INI files and W3D assets. INI definitions are treated as already loaded before `map.ini`/`solo.ini`; W3D assets power model and bone completions/diagnostics. Changing this restarts the language server."
+        },
+        "zerosyntax.schema.path": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to a custom ZeroSyntax schema JSON file. Use **ZeroSyntax: Select Custom Schema** to choose one. Invalid or unreadable files fall back to the built-in schema. Changing this restarts the language server."
         },
         "zerosyntax.analysis.modelMemberStrictness": {
           "type": "string",

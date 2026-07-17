@@ -34,6 +34,7 @@ dashmap = "6"
 
 # server (workspace indexing)
 walkdir = "2"
+clap = { version = "4", default-features = false, features = ["std", "help", "usage", "error-context"] }
 
 # benches
 criterion = "0.8"
