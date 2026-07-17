@@ -470,6 +470,7 @@ fn later_map_definition<'a>(
         .find(|site| site.order > order)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_map_reference_diags(
     analyzer: &Analyzer,
     node: &SyntaxNode,
