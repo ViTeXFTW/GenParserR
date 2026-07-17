@@ -45,7 +45,8 @@ struct DocumentState {
 
 pub struct Backend {
     client: Client,
-    analyzer: Arc<Analyzer>,
+    analyzer: RwLock<Arc<Analyzer>>,
+    schema_error: Mutex<Option<String>>,
     /// Open documents, keyed by URI.
     docs: DashMap<Url, DocumentState>,
     /// Read-only documents synthesized from configured `.big` archives.
@@ -81,6 +82,24 @@ pub struct Backend {
     semantic_result_id: std::sync::atomic::AtomicU64,
 }
 
+fn load_schema(path: &str) -> std::result::Result<Analyzer, String> {
+    let text =
+        std::fs::read_to_string(path).map_err(|e| format!("could not read `{path}`: {e}"))?;
+    let schema = zerosyntax_schema::Schema::from_json(&text)
+        .map_err(|e| format!("could not parse `{path}`: {e}"))?;
+    Ok(Analyzer::new(schema))
+}
+
+fn load_schema_or_embedded(path: &str) -> (Analyzer, Option<String>) {
+    match load_schema(path) {
+        Ok(analyzer) => (analyzer, None),
+        Err(error) => (
+            Analyzer::embedded(),
+            Some(format!("ZeroSyntax: {error}; using the built-in schema.")),
+        ),
+    }
+}
+
 #[derive(Deserialize)]
 pub struct VirtualFileParams {
     uri: String,
@@ -114,7 +133,8 @@ impl Backend {
     pub fn new(client: Client) -> Self {
         Backend {
             client,
-            analyzer: Arc::new(Analyzer::embedded()),
+            analyzer: RwLock::new(Arc::new(Analyzer::embedded())),
+            schema_error: Mutex::new(None),
             docs: DashMap::new(),
             virtual_files: DashMap::new(),
             index: RwLock::new(WorkspaceIndex::new()),
@@ -134,6 +154,13 @@ impl Backend {
 
     fn enc(&self) -> PositionEnc {
         self.encoding.get().copied().unwrap_or_default()
+    }
+
+    fn analyzer(&self) -> Arc<Analyzer> {
+        self.analyzer
+            .read()
+            .expect("analyzer lock poisoned")
+            .clone()
     }
 
     fn format_enabled(&self) -> bool {
@@ -165,9 +192,10 @@ impl Backend {
         // `set_file` bumps the index generation only when definition *names*
         // changed, so ordinary keystrokes keep diagnostics caches warm.
         // Reference sites never bump it.
-        let defs = definitions_in(&self.analyzer, &parse, uri.as_str());
-        let refs = references_in(&self.analyzer, &parse);
-        let tags = module_tags_in(&self.analyzer, &parse);
+        let analyzer = self.analyzer();
+        let defs = definitions_in(&analyzer, &parse, uri.as_str());
+        let refs = references_in(&analyzer, &parse);
+        let tags = module_tags_in(&analyzer, &parse);
         let str_keys = load_sibling_str_keys(uri);
         if let Ok(mut idx) = self.index.write() {
             idx.set_file(uri.as_str(), defs);
@@ -180,7 +208,7 @@ impl Backend {
         let lsp_diags: Vec<Diagnostic> = {
             let idx = self.index.read().ok();
             let diags = diagnostics::diagnose_with_cache(
-                &self.analyzer,
+                &analyzer,
                 &parse,
                 idx.as_deref(),
                 Some(uri.as_str()),
@@ -253,7 +281,7 @@ impl Backend {
             .lock()
             .map(|r| r.clone())
             .unwrap_or_default();
-        let analyzer = self.analyzer.clone();
+        let analyzer = self.analyzer();
         // The blocking scan streams (done, total) over a channel; forward
         // each update as a progress report while waiting for the results.
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(usize, usize)>();
@@ -434,8 +462,8 @@ impl Backend {
     fn symbol_at(&self, uri: &Url, pos: Position) -> Option<zerosyntax_analysis::nav::ReferenceAt> {
         let (rope, parse) = self.doc(uri)?;
         let offset = convert::position_to_offset(&rope, pos, self.enc());
-        reference_at(&self.analyzer, &parse, offset)
-            .or_else(|| definition_at(&self.analyzer, &parse, offset))
+        let analyzer = self.analyzer();
+        reference_at(&analyzer, &parse, offset).or_else(|| definition_at(&analyzer, &parse, offset))
     }
 
     /// Convert `(file uri, span)` pairs to LSP locations, reading each file's
@@ -486,7 +514,8 @@ impl LanguageServer for Backend {
         // Editor-facing settings arrive as `initializationOptions`; a change
         // requires a client restart (the VS Code extension does this
         // automatically). Shape:
-        // `{ "format": {"enable": bool}, "baseIniRoots": ["dir-or-big", ...],
+        // `{ "format": {"enable": bool}, "schemaPath": "schema.json",
+        //    "baseIniRoots": ["dir-or-big", ...],
         //    "clientBaseIniHint": bool }`.
         let format_enabled = params
             .initialization_options
@@ -496,6 +525,22 @@ impl LanguageServer for Backend {
             .and_then(|e| e.as_bool())
             .unwrap_or(false);
         let _ = self.format_enabled.set(format_enabled);
+
+        if let Some(path) = params
+            .initialization_options
+            .as_ref()
+            .and_then(|v| v.get("schemaPath"))
+            .and_then(|v| v.as_str())
+            .filter(|path| !path.trim().is_empty())
+        {
+            let (analyzer, error) = load_schema_or_embedded(path);
+            if let Ok(mut current) = self.analyzer.write() {
+                *current = Arc::new(analyzer);
+            }
+            if let Ok(mut current) = self.schema_error.lock() {
+                *current = error;
+            }
+        }
 
         let base_roots = params
             .initialization_options
@@ -589,6 +634,9 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
+        if let Some(error) = self.schema_error.lock().ok().and_then(|mut e| e.take()) {
+            self.client.show_message(MessageType::WARNING, error).await;
+        }
         self.scan_workspace().await;
         // Re-publish diagnostics for any already-open docs now that the index
         // is populated (so cross-file references resolve). The cached parse is
@@ -623,7 +671,7 @@ impl LanguageServer for Backend {
         let uri = canonical_uri(params.text_document.uri);
         let text: Arc<str> = params.text_document.text.into();
         let rope = Rope::from_str(&text);
-        let parse = Arc::new(self.analyzer.parse(&text));
+        let parse = Arc::new(self.analyzer().parse(&text));
         let version = params.text_document.version;
         self.docs.insert(
             uri.clone(),
@@ -671,7 +719,7 @@ impl LanguageServer for Backend {
                     convert::apply_change(&mut entry.rope, change.range, &change.text, enc);
                 }
                 entry.text = entry.rope.to_string().into();
-                entry.parse = Arc::new(self.analyzer.parse(&entry.text));
+                entry.parse = Arc::new(self.analyzer().parse(&entry.text));
                 entry.version = version;
             } else {
                 // Each change applies to the text produced by the previous
@@ -691,7 +739,7 @@ impl LanguageServer for Backend {
                                 new_len: change.text.len(),
                             };
                             let (parse, _strategy) =
-                                self.analyzer
+                                self.analyzer()
                                     .reparse(&entry.parse, &entry.text, &new_text, edit);
                             entry.parse = Arc::new(parse);
                             entry.text = new_text;
@@ -700,7 +748,7 @@ impl LanguageServer for Backend {
                             // Full-document replacement.
                             entry.rope = Rope::from_str(&change.text);
                             entry.text = change.text.into();
-                            entry.parse = Arc::new(self.analyzer.parse(&entry.text));
+                            entry.parse = Arc::new(self.analyzer().parse(&entry.text));
                         }
                     }
                 }
@@ -726,7 +774,7 @@ impl LanguageServer for Backend {
         let idx = self.index.read().ok();
         let snippets = self.snippet_support.get().copied().unwrap_or(false);
         let items: Vec<CompletionItem> = completion::complete(
-            &self.analyzer,
+            &self.analyzer(),
             &parse,
             offset,
             idx.as_deref(),
@@ -746,7 +794,7 @@ impl LanguageServer for Backend {
         let Some((rope, parse)) = self.doc(&uri) else {
             return Ok(None);
         };
-        let tokens = semantic::semantic_tokens(&self.analyzer, &parse);
+        let tokens = semantic::semantic_tokens(&self.analyzer(), &parse);
         let data = convert::to_lsp_semantic_tokens(&rope, &tokens, self.enc());
         let id = self.next_semantic_id();
         if let Some(mut doc) = self.docs.get_mut(&uri) {
@@ -766,7 +814,7 @@ impl LanguageServer for Backend {
         let Some((rope, parse)) = self.doc(&uri) else {
             return Ok(None);
         };
-        let tokens = semantic::semantic_tokens(&self.analyzer, &parse);
+        let tokens = semantic::semantic_tokens(&self.analyzer(), &parse);
         let data = convert::to_lsp_semantic_tokens(&rope, &tokens, self.enc());
         let id = self.next_semantic_id();
         let previous = self
@@ -848,14 +896,14 @@ impl LanguageServer for Backend {
         let fixes = {
             let idx = self.index.read().ok();
             let diags = diagnostics::diagnose_with_cache(
-                &self.analyzer,
+                &self.analyzer(),
                 &parse,
                 idx.as_deref(),
                 Some(uri.as_str()),
                 &mut cache,
             );
             let mut f = actions::fixes(
-                &self.analyzer,
+                &self.analyzer(),
                 &parse,
                 &text,
                 range_span,
@@ -865,7 +913,7 @@ impl LanguageServer for Backend {
             // Origin-copy fix: requires file I/O, so computed here in the server.
             if let Some(idx) = idx.as_deref() {
                 f.extend(origin_copy_fixes(
-                    &self.analyzer,
+                    &self.analyzer(),
                     &parse,
                     &text,
                     range_span,
@@ -917,7 +965,7 @@ impl LanguageServer for Backend {
         let start = convert::position_to_offset(&rope, params.range.start, enc);
         let end = convert::position_to_offset(&rope, params.range.end, enc);
         let tokens = semantic::semantic_tokens_range(
-            &self.analyzer,
+            &self.analyzer(),
             &parse,
             zerosyntax_analysis::Span::new(start, end),
         );
@@ -939,7 +987,7 @@ impl LanguageServer for Backend {
         };
         let enc = self.enc();
         let offset = convert::position_to_offset(&rope, pos, enc);
-        let Some(reference) = reference_at(&self.analyzer, &parse, offset) else {
+        let Some(reference) = reference_at(&self.analyzer(), &parse, offset) else {
             return Ok(None);
         };
 
@@ -1159,13 +1207,13 @@ impl LanguageServer for Backend {
         };
         let enc = self.enc();
         let offset = convert::position_to_offset(&rope, pos, enc);
-        let Some(info) = hover_at(&self.analyzer, &parse, offset) else {
+        let analyzer = self.analyzer();
+        let Some(info) = hover_at(&analyzer, &parse, offset) else {
             return Ok(None);
         };
         let (markdown, span) = match info {
             HoverInfo::Block { name, span } => {
-                let doc = self
-                    .analyzer
+                let doc = analyzer
                     .block(&name)
                     .and_then(|b| b.doc.clone())
                     .unwrap_or_else(|| format!("Top-level block `{name}`."));
@@ -1301,6 +1349,38 @@ fn origin_copy_fixes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_schema_changes_analysis() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/custom-schema.json");
+        let analyzer = load_schema(path.to_str().unwrap()).unwrap();
+        let parse = analyzer.parse("TestBlock Test\n  CustomOnly = Yes\nEnd\n");
+        let codes: Vec<_> = diagnostics::diagnose(&analyzer, &parse, None, None)
+            .into_iter()
+            .map(|diagnostic| diagnostic.code)
+            .collect();
+        assert!(codes.is_empty(), "{codes:?}");
+
+        let embedded = Analyzer::embedded();
+        let parse = embedded.parse("TestBlock Test\n  CustomOnly = Yes\nEnd\n");
+        assert!(diagnostics::diagnose(&embedded, &parse, None, None)
+            .iter()
+            .any(|diagnostic| diagnostic.code == "unknown-block"));
+    }
+
+    #[test]
+    fn invalid_custom_schema_falls_back_to_embedded() {
+        let path = std::env::temp_dir().join(format!(
+            "zerosyntax-invalid-schema-{}.json",
+            std::process::id()
+        ));
+        std::fs::write(&path, "not json").unwrap();
+        let (analyzer, warning) = load_schema_or_embedded(path.to_str().unwrap());
+        assert!(analyzer.block("Object").is_some());
+        assert!(warning.is_some_and(|warning| warning.contains("using the built-in schema")));
+        let _ = std::fs::remove_file(path);
+    }
 
     #[test]
     fn canonical_uri_pass_through_non_file() {
