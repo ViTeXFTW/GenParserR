@@ -477,6 +477,10 @@ fn collect_map_reference_diags(
 fn reference_tokens(field: &Field, ty: &ValueType) -> Vec<(RefKind, SyntaxToken)> {
     let tokens = field.value_tokens();
     match ty {
+        ValueType::OneOf { .. } => ty
+            .variant_for_first_token(tokens.first().map(|token| unquote(token.text())))
+            .map(|variant| reference_tokens(field, variant))
+            .unwrap_or_default(),
         ValueType::Reference { ref_kind } => tokens
             .first()
             .map(|tok| vec![(*ref_kind, tok.clone())])
@@ -485,16 +489,24 @@ fn reference_tokens(field: &Field, ty: &ValueType) -> Vec<(RefKind, SyntaxToken)
             .into_iter()
             .map(|tok| (*ref_kind, tok))
             .collect::<Vec<_>>(),
-        ValueType::TokenList { tokens: specs } => specs
-            .iter()
-            .zip(tokens)
-            .filter_map(|(spec, tok)| match spec {
-                ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } => {
-                    Some((*ref_kind, tok))
-                }
-                _ => None,
-            })
-            .collect(),
+        ValueType::TokenList { .. } | ValueType::Prefixed { .. } => {
+            let input = tokens
+                .iter()
+                .map(|token| unquote(token.text()))
+                .collect::<Vec<_>>();
+            tokens
+                .iter()
+                .cloned()
+                .enumerate()
+                .filter_map(
+                    |(index, tok)| match ty.token_type_at_input(&input, index)? {
+                        ValueType::Reference { ref_kind }
+                        | ValueType::ReferenceList { ref_kind } => Some((*ref_kind, tok)),
+                        _ => None,
+                    },
+                )
+                .collect()
+        }
         _ => Vec::new(),
     }
 }
@@ -781,17 +793,24 @@ impl<'a> Ctx<'a> {
         let tokens = field.value_tokens();
         match &schema_field.value_type {
             ValueType::TokenList { tokens: specs } => {
-                for (spec, tok) in specs.iter().zip(tokens.iter()) {
+                let mut i = 0;
+                for spec in specs {
+                    let Some(tok) = tokens.get(i) else { break };
+                    let (ty, tok, consumed) = split_prefixed_token(&tokens[i..], spec)
+                        .map(|(ty, tok)| (ty, tok, 2))
+                        .unwrap_or((spec, tok, 1));
                     self.validate_model_asset_token(
-                        spec,
+                        ty,
                         tok,
                         scope_node,
                         schema_field.model_source.as_ref(),
                     );
+                    i += consumed;
                 }
             }
             ty => {
                 if let Some(tok) = tokens.first() {
+                    let (ty, tok) = split_prefixed_token(&tokens, ty).unwrap_or((ty, tok));
                     self.validate_model_asset_token(
                         ty,
                         tok,
@@ -811,7 +830,19 @@ impl<'a> Ctx<'a> {
         source: Option<&zerosyntax_schema::ModelSource>,
     ) {
         let Some(index) = self.index else { return };
-        let value = unquote(tok.text());
+        let raw = unquote(tok.text());
+        let (ty, value) = match ty {
+            ValueType::Prefixed { prefix, value_type } => {
+                let Some((actual, value)) = raw.split_once(':') else {
+                    return;
+                };
+                if !actual.eq_ignore_ascii_case(prefix) {
+                    return;
+                }
+                (value_type.as_ref(), value)
+            }
+            _ => (ty, raw),
+        };
         if value.is_empty() || value.eq_ignore_ascii_case("None") {
             return;
         }
@@ -1012,6 +1043,9 @@ impl<'a> Ctx<'a> {
         if tokens.is_empty() {
             return;
         }
+        let ty = ty
+            .variant_for_first_token(tokens.first().map(|token| unquote(token.text())))
+            .unwrap_or(ty);
         match ty {
             ValueType::BitFlags { .. } | ValueType::ReferenceList { .. } => {
                 for token in &tokens {
@@ -1019,18 +1053,17 @@ impl<'a> Ctx<'a> {
                 }
             }
             ValueType::TokenList { tokens: specs } => {
-                for (token, spec) in tokens.iter().zip(specs) {
-                    self.check_token(token, spec);
+                let mut index = 0;
+                for spec in specs {
+                    if tokens.get(index).is_none() {
+                        break;
+                    }
+                    index += self.check_value_tokens(&tokens[index..], spec);
                 }
             }
-            ValueType::OneOf { .. } => {
-                if let Some(variant) =
-                    ty.variant_for_first_token(tokens.first().map(|t| unquote(t.text())))
-                {
-                    self.check_token(&tokens[0], variant);
-                }
+            single => {
+                self.check_value_tokens(&tokens, single);
             }
-            single => self.check_token(&tokens[0], single),
         }
     }
 
@@ -1076,9 +1109,10 @@ impl<'a> Ctx<'a> {
             // A fixed sequence of typed tokens; each listed token is required
             // (the engine's parse function calls getNextToken for each).
             ValueType::TokenList { tokens: specs } => {
-                for (i, spec) in specs.iter().enumerate() {
+                let mut i = 0;
+                for spec in specs {
                     match tokens.get(i) {
-                        Some(tok) => self.check_token(tok, spec),
+                        Some(_) => i += self.check_value_tokens(&tokens[i..], spec),
                         None => {
                             if let Some(key) = field.key() {
                                 self.warning(
@@ -1100,7 +1134,7 @@ impl<'a> Ctx<'a> {
                     .last()
                     .filter(|spec| matches!(spec, ValueType::BitFlags { .. }))
                 {
-                    for tok in tokens.iter().skip(specs.len()) {
+                    for tok in tokens.iter().skip(i) {
                         self.check_token(tok, spec);
                     }
                 }
@@ -1111,8 +1145,29 @@ impl<'a> Ctx<'a> {
             // `X:0 Y:0 [Z:0]` — reals (INI.cpp parseCoord2D / parseCoord3D).
             ValueType::Coord2D => self.check_axes(field, &tokens, &["X", "Y"], None, false),
             ValueType::Coord3D => self.check_axes(field, &tokens, &["X", "Y", "Z"], None, false),
-            single => self.check_token(&tokens[0], single),
+            single => {
+                self.check_value_tokens(&tokens, single);
+            }
         }
+    }
+
+    /// Validate one logical value, accepting the engine's optional whitespace
+    /// after a prefix colon (`Loc:X:0` and `Loc: X:0`).
+    fn check_value_tokens(&mut self, tokens: &[SyntaxToken], ty: &ValueType) -> usize {
+        let tok = &tokens[0];
+        if let Some((value_type, value)) = split_prefixed_token(tokens, ty) {
+            if ty
+                .first_prefix()
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("Loc"))
+            {
+                self.check_loc_value(value, unquote(value.text()));
+            } else {
+                self.check_token(value, value_type);
+            }
+            return 2;
+        }
+        self.check_token(tok, ty);
+        1
     }
 
     /// Validate one value token against a single-token type.
@@ -1209,29 +1264,7 @@ impl<'a> Ctx<'a> {
             return;
         }
         if prefix.eq_ignore_ascii_case("Loc") {
-            let Some((axis, n)) = value.split_once(':') else {
-                self.error(
-                    tok,
-                    "bad-prefixed",
-                    format!("expected `Loc:X:<n>`, found `{text}`"),
-                );
-                return;
-            };
-            if !axis.eq_ignore_ascii_case("X") {
-                self.error(
-                    tok,
-                    "bad-prefixed",
-                    format!("expected `Loc:X:<n>`, found `{text}`"),
-                );
-                return;
-            }
-            if n.parse::<f64>().is_err() {
-                self.error(
-                    tok,
-                    "bad-number",
-                    format!("expected a number for `Loc:X:`, found `{n}`"),
-                );
-            }
+            self.check_loc_value(tok, value);
             return;
         }
         match ty {
@@ -1265,6 +1298,32 @@ impl<'a> Ctx<'a> {
             }
             ValueType::AsciiString | ValueType::AsciiStringList | ValueType::QuotedString => {}
             _ => {}
+        }
+    }
+
+    fn check_loc_value(&mut self, tok: &SyntaxToken, value: &str) {
+        let Some((axis, n)) = value.split_once(':') else {
+            self.error(
+                tok,
+                "bad-prefixed",
+                format!("expected `X:<n>` after `Loc:`, found `{value}`"),
+            );
+            return;
+        };
+        if !axis.eq_ignore_ascii_case("X") {
+            self.error(
+                tok,
+                "bad-prefixed",
+                format!("expected `X:<n>` after `Loc:`, found `{value}`"),
+            );
+            return;
+        }
+        if n.parse::<f64>().is_err() {
+            self.error(
+                tok,
+                "bad-number",
+                format!("expected a number for `Loc:X:`, found `{n}`"),
+            );
         }
     }
 
@@ -1524,6 +1583,15 @@ fn unquote(s: &str) -> &str {
     s.strip_prefix('"')
         .map(|s| s.strip_suffix('"').unwrap_or(s))
         .unwrap_or(s)
+}
+
+fn split_prefixed_token<'t, 'v>(
+    tokens: &'t [SyntaxToken],
+    ty: &'v ValueType,
+) -> Option<(&'v ValueType, &'t SyntaxToken)> {
+    let value = tokens.get(1)?;
+    ty.split_prefix_value_type(unquote(tokens.first()?.text()))
+        .map(|value_type| (value_type, value))
 }
 
 #[cfg(test)]
@@ -1975,6 +2043,9 @@ Object Tank
       WeaponRecoilBone = PRIMARY MissingMuzzle
     End
   End
+  Behavior = BoneFXUpdate ModuleTag_02
+    PristineFXList1 = Bone: SplitMissing OnlyOnce: No 0 0 FXList: None
+  End
 End
 ";
         let parse = a.parse(src);
@@ -2003,6 +2074,13 @@ End
             diags.iter().any(|d| {
                 d.code == "unknown-model-member"
                     && &src[d.span.start as usize..d.span.end as usize] == "MissingMuzzle"
+            }),
+            "{diags:?}"
+        );
+        assert!(
+            diags.iter().any(|d| {
+                d.code == "unknown-model-member"
+                    && &src[d.span.start as usize..d.span.end as usize] == "SplitMissing"
             }),
             "{diags:?}"
         );

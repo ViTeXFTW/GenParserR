@@ -243,6 +243,17 @@ pub enum ValueType {
 }
 
 impl ValueType {
+    pub fn split_prefix_value_type(&self, token: &str) -> Option<&ValueType> {
+        let ValueType::Prefixed { prefix, value_type } = self else {
+            return None;
+        };
+        token
+            .trim_matches('"')
+            .strip_suffix(':')
+            .is_some_and(|actual| actual.eq_ignore_ascii_case(prefix))
+            .then_some(value_type.as_ref())
+    }
+
     pub fn first_prefix(&self) -> Option<&str> {
         match self {
             ValueType::Prefixed { prefix, .. } => Some(prefix),
@@ -278,6 +289,84 @@ impl ValueType {
                 .last()
                 .filter(|ty| matches!(ty, ValueType::BitFlags { .. }))
         })
+    }
+
+    /// The value type at a raw syntax-token position, accounting for the
+    /// engine-valid split form `Prefix: Value`.
+    pub fn token_type_at_input(&self, input: &[&str], index: usize) -> Option<&ValueType> {
+        let active = self.variant_for_first_token(input.first().copied())?;
+        if !std::ptr::eq(active, self) {
+            return active.token_type_at_input(input, index);
+        }
+        let ValueType::TokenList { tokens } = active else {
+            if let Some(value_type) =
+                active.split_prefix_value_type(input.first().copied().unwrap_or_default())
+            {
+                return match index {
+                    0 => Some(active),
+                    1 => Some(value_type),
+                    _ => None,
+                };
+            }
+            return match active {
+                ValueType::BitFlags { .. } | ValueType::ReferenceList { .. } => Some(active),
+                _ if index == 0 => Some(active),
+                _ => None,
+            };
+        };
+        let mut raw = 0;
+        for ty in tokens {
+            if let Some(value_type) =
+                ty.split_prefix_value_type(input.get(raw).copied().unwrap_or_default())
+            {
+                if index == raw {
+                    return Some(ty);
+                }
+                if index == raw + 1 {
+                    return Some(value_type);
+                }
+                raw += 2;
+            } else {
+                if index == raw {
+                    return Some(ty);
+                }
+                raw += 1;
+            }
+        }
+        tokens
+            .last()
+            .filter(|ty| index >= raw && matches!(ty, ValueType::BitFlags { .. }))
+    }
+
+    /// The schema token position corresponding to a raw syntax-token position.
+    /// A split `Prefix: Value` pair occupies one schema position.
+    pub fn token_index_at_input(&self, input: &[&str], index: usize) -> Option<usize> {
+        let active = self.variant_for_first_token(input.first().copied())?;
+        if !std::ptr::eq(active, self) {
+            return active.token_index_at_input(input, index);
+        }
+        let ValueType::TokenList { tokens } = active else {
+            return Some(0);
+        };
+        let mut raw = 0;
+        for (logical, ty) in tokens.iter().enumerate() {
+            let width = if ty
+                .split_prefix_value_type(input.get(raw).copied().unwrap_or_default())
+                .is_some()
+            {
+                2
+            } else {
+                1
+            };
+            if index < raw + width {
+                return Some(logical);
+            }
+            raw += width;
+        }
+        tokens
+            .last()
+            .filter(|ty| index >= raw && matches!(ty, ValueType::BitFlags { .. }))
+            .map(|_| tokens.len() - 1)
     }
 }
 
@@ -436,6 +525,30 @@ mod tests {
             schema.modules.iter().any(|m| m.name == "ActiveBody"),
             "ActiveBody module missing"
         );
+    }
+
+    #[test]
+    fn split_prefixes_keep_raw_tokens_on_their_schema_positions() {
+        let ty = token_list(vec![
+            prefixed("Loc", ValueType::AsciiString),
+            prefixed("Y", ValueType::Real),
+            prefixed("Z", ValueType::Real),
+            prefixed("FXList", reference(RefKind::FxList)),
+        ]);
+        let input = ["Loc:", "X:0", "Y:", "0", "Z:", "0", "FXList:", "Effect"];
+
+        assert_eq!(
+            (0..input.len())
+                .map(|index| ty.token_index_at_input(&input, index).unwrap())
+                .collect::<Vec<_>>(),
+            [0, 0, 1, 1, 2, 2, 3, 3]
+        );
+        assert!(matches!(
+            ty.token_type_at_input(&input, 7),
+            Some(ValueType::Reference {
+                ref_kind: RefKind::FxList
+            })
+        ));
     }
 
     fn contains(ty: &ValueType, predicate: fn(&ValueType) -> bool) -> bool {

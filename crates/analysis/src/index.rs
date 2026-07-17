@@ -683,8 +683,15 @@ fn collect_refs_from_type(
                 );
             }
         }
-        ValueType::TokenList { tokens: specs } => {
-            for (spec, tok) in specs.iter().zip(tokens.iter()) {
+        ValueType::TokenList { .. } | ValueType::Prefixed { .. } => {
+            let input = tokens
+                .iter()
+                .map(|token| token.text().trim_matches('"'))
+                .collect::<Vec<_>>();
+            for (index, tok) in tokens.iter().enumerate() {
+                let Some(spec) = ty.token_type_at_input(&input, index) else {
+                    continue;
+                };
                 match spec {
                     ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } => {
                         push(
@@ -702,6 +709,9 @@ fn collect_refs_from_type(
                                 continue;
                             };
                             if !actual.eq_ignore_ascii_case(prefix) {
+                                continue;
+                            }
+                            if name.is_empty() {
                                 continue;
                             }
                             let start = u32::from(tok.text_range().start())
@@ -865,9 +875,9 @@ mod tests {
     }
 
     #[test]
-    fn quoted_prefixed_reference_site_span_excludes_quotes_and_prefix() {
+    fn split_prefixed_reference_site_span_excludes_prefix() {
         let a = Analyzer::embedded();
-        let src = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    DamagedParticleSystem1 = Bone:NONE RandomBone:No \"PSys:MissingParticle\"\n  End\nEnd\n";
+        let src = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    DamagedParticleSystem1 = Bone: NONE RandomBone: No PSys: MissingParticle\n  End\nEnd\n";
         let refs = references_in(&a, &a.parse(src));
         let reference = refs
             .iter()
