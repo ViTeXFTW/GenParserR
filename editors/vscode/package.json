@@ -81,6 +81,11 @@
           "default": "compatible",
           "markdownDescription": "Model-member diagnostics: off disables warnings, compatible accepts a bone/subobject present in any applicable model, and strict requires it in every applicable model. Changing this restarts the language server."
         },
+        "zerosyntax.analysis.allowPercentagesWithoutSign": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Allow engine-compatible percentage values without a trailing `%` sign. Changing this restarts the language server."
+        },
         "zerosyntax.trace.server": {
           "type": "string",
           "enum": [

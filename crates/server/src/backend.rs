@@ -526,7 +526,8 @@ impl LanguageServer for Backend {
         // requires a client restart (the VS Code extension does this
         // automatically). Shape:
         // `{ "format": {"enable": bool}, "schemaPath": "schema.json",
-        //    "analysis": {"modelMemberStrictness": "compatible"},
+        //    "analysis": {"modelMemberStrictness": "compatible",
+        //                 "allowPercentagesWithoutSign": false},
         //    "baseIniRoots": ["dir-or-big", ...],
         //    "clientBaseIniHint": bool }`.
         let format_enabled = params
@@ -554,6 +555,14 @@ impl LanguageServer for Backend {
             index.set_model_member_strictness(model_member_strictness);
         }
 
+        let allow_bare_percentages = params
+            .initialization_options
+            .as_ref()
+            .and_then(|v| v.get("analysis"))
+            .and_then(|v| v.get("allowPercentagesWithoutSign"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
         if let Some(path) = params
             .initialization_options
             .as_ref()
@@ -567,6 +576,13 @@ impl LanguageServer for Backend {
             }
             if let Ok(mut current) = self.schema_error.lock() {
                 *current = error;
+            }
+        }
+        if allow_bare_percentages {
+            if let Ok(mut current) = self.analyzer.write() {
+                Arc::get_mut(&mut current)
+                    .expect("analyzer shared before initialization completed")
+                    .set_allow_bare_percentages(true);
             }
         }
 

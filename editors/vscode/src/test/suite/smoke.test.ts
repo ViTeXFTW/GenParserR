@@ -14,7 +14,10 @@ suite("ZeroSyntax VS Code extension", () => {
     const uri = vscode.Uri.file(path.join(dir, "Smoke.ini"));
     await vscode.workspace.fs.writeFile(
       uri,
-      Buffer.from("Weapon SmokeGun\n  ScaleWeaponSpeed = Maybe\n  \nEnd\n")
+      Buffer.from(
+        "Weapon SmokeGun\n  ScaleWeaponSpeed = Maybe\n  \nEnd\n" +
+          "Armor SmokeArmor\n  Armor = ARMOR_PIERCING 2\nEnd\n"
+      )
     );
 
     const document = await vscode.workspace.openTextDocument(uri);
@@ -45,6 +48,19 @@ suite("ZeroSyntax VS Code extension", () => {
     assert.ok(
       labels.includes("PrimaryDamage"),
       `expected PrimaryDamage completion, got ${labels.slice(0, 10).join(", ")}`
+    );
+
+    const percentDiagnostic = diagnostics.find((diag) => diag.code === "bad-percent");
+    assert.ok(percentDiagnostic, "expected a bad-percent diagnostic");
+    const actions = await vscode.commands.executeCommand<(vscode.CodeAction | vscode.Command)[]>(
+      "vscode.executeCodeActionProvider",
+      uri,
+      percentDiagnostic.range,
+      vscode.CodeActionKind.QuickFix.value
+    );
+    assert.ok(
+      actions.some((action) => action.title === "Allow percentages without `%`"),
+      "expected the bare-percentage settings quick fix"
     );
   });
 });

@@ -10,6 +10,7 @@ import {
 
 let client: LanguageClient | undefined;
 let baseIniRootsHintShown = false;
+const allowBarePercentagesSetting = "analysis.allowPercentagesWithoutSign";
 
 export function activate(context: vscode.ExtensionContext) {
   const serverPath = resolveServerPath(context);
@@ -42,6 +43,7 @@ export function activate(context: vscode.ExtensionContext) {
       schemaPath: setting<string>("schema.path", ""),
       analysis: {
         modelMemberStrictness: setting<string>("analysis.modelMemberStrictness", "compatible"),
+        allowPercentagesWithoutSign: setting<boolean>(allowBarePercentagesSetting, false),
       },
       clientBaseIniHint: true,
     }),
@@ -81,6 +83,35 @@ export function activate(context: vscode.ExtensionContext) {
           .update("schema.path", selected[0].fsPath, vscode.ConfigurationTarget.Workspace);
       }
     }),
+    vscode.commands.registerCommand("zerosyntax.allowBarePercentages", async () => {
+      await vscode.workspace
+        .getConfiguration("zerosyntax")
+        .update(allowBarePercentagesSetting, true, vscode.ConfigurationTarget.Global);
+    }),
+    vscode.languages.registerCodeActionsProvider(
+      { scheme: "file", language: "generals-ini" },
+      {
+        provideCodeActions(_document, _range, actionContext) {
+          const diagnostics = actionContext.diagnostics.filter(
+            (diagnostic) => diagnostic.code === "bad-percent"
+          );
+          if (diagnostics.length === 0) {
+            return [];
+          }
+          const action = new vscode.CodeAction(
+            "Allow percentages without `%`",
+            vscode.CodeActionKind.QuickFix
+          );
+          action.diagnostics = diagnostics;
+          action.command = {
+            command: "zerosyntax.allowBarePercentages",
+            title: action.title,
+          };
+          return [action];
+        },
+      },
+      { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }
+    ),
     vscode.workspace.onDidOpenTextDocument((document) => {
       void maybeShowBaseIniRootsHint(document);
     })
