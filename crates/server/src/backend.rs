@@ -133,14 +133,13 @@ impl RuntimeSettings {
 }
 
 fn normalized_debounce_ms(value: Option<&serde_json::Value>) -> u64 {
-    let millis = value
+    value
         .and_then(|v| {
             v.as_i64()
                 .map(|n| n.clamp(0, MAX_ANALYSIS_DEBOUNCE_MS as i64) as u64)
                 .or_else(|| v.as_u64().map(|n| n.min(MAX_ANALYSIS_DEBOUNCE_MS)))
         })
-        .unwrap_or(DEFAULT_ANALYSIS_DEBOUNCE_MS);
-    millis
+        .unwrap_or(DEFAULT_ANALYSIS_DEBOUNCE_MS)
 }
 
 pub struct Backend {
