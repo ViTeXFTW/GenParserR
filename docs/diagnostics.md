@@ -15,8 +15,8 @@ Separate multiple codes with spaces or commas. Multiple file-scope pragma lines
 accumulate. A misspelled code produces `unknown-suppression` instead of silently
 hiding nothing.
 
-Suppressions are intended for warnings and hints that are valid for a specific
-file. Fix error-level syntax and schema problems rather than suppressing them.
+Suppressions can hide any diagnostic code for a specific file. Prefer fixing
+error-level syntax and schema problems when possible.
 
 ## Diagnostic codes
 
@@ -64,4 +64,4 @@ available fix.
 | Create a stub definition | A reference points to a missing definition that can be scaffolded safely. |
 | Remove an unreachable `WeaponSet` or `ArmorSet` | An upgrade-conditioned set can never activate. |
 | Insert a matching upgrade module or set | An object has only one side of an upgrade-conditioned weapon or armor setup. |
-| Suppress a code in this file | A warning or hint is intentional for the current file. |
+| Suppress a code in this file | A diagnostic is intentional for the current file. |
