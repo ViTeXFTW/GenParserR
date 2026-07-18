@@ -32,9 +32,9 @@ export function activate(context: vscode.ExtensionContext) {
     synchronize: {
       // Re-index when any .ini in the workspace changes on disk.
       fileEvents: vscode.workspace.createFileSystemWatcher("**/*.ini"),
+      configurationSection: "zerosyntax",
     },
-    // Evaluated on every (re)start, so a settings-triggered restart picks up
-    // the current values. The server reads these once at `initialize`.
+    // Keep startup compatibility for clients that do not synchronize settings.
     initializationOptions: () => ({
       format: {
         enable: setting<boolean>("format.enable", false),
@@ -122,11 +122,11 @@ export function activate(context: vscode.ExtensionContext) {
     void maybeShowBaseIniRootsHint(editor.document);
   }
 
-  // Server settings (initializationOptions, server path) are read once at
-  // startup, so any zerosyntax.* change needs a clean restart to apply.
+  // Only another executable requires another process; synchronized runtime
+  // settings are applied by the existing client configuration notification.
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("zerosyntax")) {
+      if (e.affectsConfiguration("zerosyntax.server.path")) {
         void client?.restart();
       }
     })

@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import queue
+import struct
 
 
 def frame(obj: dict) -> bytes:
@@ -58,6 +59,17 @@ def main() -> int:
 
     workspace = pathlib.Path(tempfile.mkdtemp(prefix="zerosyntax-e2e-"))
     (workspace / "Images.INI").write_text("MappedImage TestScanImage\nEnd\n")
+    base = pathlib.Path(tempfile.mkdtemp(prefix="zerosyntax-e2e-base-"))
+    (base / "Base.ini").write_text("MappedImage HotBaseImage\nEnd\n")
+    (base / "HotSound.wav").write_bytes(b"")
+    (base / "HotTexture.dds").write_bytes(b"")
+
+    def w3d_pivot(name):
+        payload = name.encode("ascii") + b"\0" * (60 - len(name))
+        return struct.pack("<II", 0x00000102, len(payload)) + payload
+
+    (base / "A.w3d").write_bytes(w3d_pivot("Bone01"))
+    (base / "B.w3d").write_bytes(w3d_pivot("Other"))
     root_uri = workspace.as_uri()
 
     # vscode-languageclient appends this conventional transport flag. The
@@ -71,6 +83,8 @@ def main() -> int:
     )
     q: "queue.Queue" = queue.Queue()
     threading.Thread(target=reader, args=(proc.stdout, q), daemon=True).start()
+    server_requests = []
+    indexing_begins = []
 
     def send(obj):
         proc.stdin.write(frame(obj))
@@ -87,18 +101,45 @@ def main() -> int:
                 break
             if msg is None:
                 break
+            if msg.get("method") in {
+                "client/registerCapability",
+                "client/unregisterCapability",
+                "window/workDoneProgress/create",
+            } and "id" in msg:
+                server_requests.append(msg)
+                send({"jsonrpc": "2.0", "id": msg["id"], "result": None})
+            if (msg.get("method") == "$/progress"
+                    and msg.get("params", {}).get("value", {}).get("kind") == "begin"):
+                indexing_begins.append(msg)
             if pred(msg):
                 return msg
         print(f"TIMEOUT waiting for {what}", file=sys.stderr)
         return None
 
-    # 1) initialize (with a workspace root so scan_workspace runs). Formatting
-    #    is opt-in via initializationOptions; this session opts in so the
-    #    formatting checks below run, and step 10 verifies the default is off.
+    runtime_settings = {
+        "format": {"enable": False},
+        "baseIniRoots": [],
+        "schema": {"path": ""},
+        "analysis": {
+            "modelMemberStrictness": "compatible",
+            "allowPercentagesWithoutSign": False,
+            "mapOrderingDiagnostics": True,
+            "debounceMs": 50,
+        },
+    }
+
+    def configure():
+        send({"jsonrpc": "2.0", "method": "workspace/didChangeConfiguration",
+              "params": {"settings": {"zerosyntax": runtime_settings}}})
+
+    # 1) initialize with dynamic formatting and progress support.
     send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
-          "params": {"capabilities": {}, "workspaceFolders": None, "rootUri": root_uri,
+          "params": {"capabilities": {
+                         "textDocument": {"formatting": {"dynamicRegistration": True}},
+                         "window": {"workDoneProgress": True},
+                     }, "workspaceFolders": None, "rootUri": root_uri,
                      "initializationOptions": {
-                         "format": {"enable": True},
+                         "format": {"enable": False},
                          "analysis": {"debounceMs": 50},
                      }}})
     init = wait_for(lambda m: m.get("id") == 1 and "result" in m, "initialize result")
@@ -110,6 +151,8 @@ def main() -> int:
     assert sync == 2, f"expected INCREMENTAL sync (2), got {sync!r}"
     # We offered no positionEncodings, so the server must stay on the baseline.
     assert caps.get("positionEncoding", "utf-16") == "utf-16", caps.get("positionEncoding")
+    assert "documentFormattingProvider" not in caps, \
+        "dynamic clients must not receive a static formatting capability"
     print("OK: initialize advertised capabilities (incremental sync, utf-16)")
 
     send({"jsonrpc": "2.0", "method": "initialized", "params": {}})
@@ -402,10 +445,210 @@ def main() -> int:
     assert "error" in bad, f"expected error for invalid name, got {bad}"
     print("OK: rename edits definition + references; invalid names rejected")
 
-    # 8) Phase-6 batch 2: semanticTokens delta, formatting, code actions.
+    # 8) Every runtime option hot-reloads without reopening documents.
+    percent_uri = "file:///test/percent.ini"
+    percent = open_doc(percent_uri, "Armor HotArmor\n  Armor = ARMOR_PIERCING 2\nEnd\n")
+    assert "bad-percent" in [d.get("code") for d in percent["diagnostics"]]
+    runtime_settings["analysis"]["debounceMs"] = 300
+    configure()
+    send({"jsonrpc": "2.0", "method": "textDocument/didChange",
+          "params": {"textDocument": {"uri": percent_uri, "version": 2},
+                     "contentChanges": [{"text":
+                         "Armor HotArmor2\n  Armor = ARMOR_PIERCING 2\nEnd\n"}]}})
+    runtime_settings["analysis"]["allowPercentagesWithoutSign"] = True
+    configure()
+    percent = wait_for(
+        lambda m: m.get("method") == "textDocument/publishDiagnostics"
+        and m["params"]["uri"] == percent_uri,
+        "bare-percentage enable diagnostics",
+    )
+    assert "bad-percent" not in [d.get("code") for d in percent["params"]["diagnostics"]]
+    delayed = wait_for(
+        lambda m: m.get("method") == "textDocument/publishDiagnostics"
+        and m["params"]["uri"] == percent_uri
+        and m["params"].get("version") == 2,
+        "pre-reload delayed diagnostics",
+        timeout=2.0,
+    )
+    assert "bad-percent" not in [d.get("code") for d in delayed["params"]["diagnostics"]]
+    runtime_settings["analysis"]["allowPercentagesWithoutSign"] = False
+    configure()
+    percent = wait_for(
+        lambda m: m.get("method") == "textDocument/publishDiagnostics"
+        and m["params"]["uri"] == percent_uri,
+        "bare-percentage disable diagnostics",
+    )
+    assert "bad-percent" in [d.get("code") for d in percent["params"]["diagnostics"]]
+
+    map_uri = "file:///test/map.ini"
+    map_text = ("CommandSet HotSet\n  1 = Command_HotLate\nEnd\n"
+                "CommandButton Command_HotLate\n  Command = UNIT_BUILD\nEnd\n")
+    map_diag = open_doc(map_uri, map_text)
+    assert "map-forward-reference" in [d.get("code") for d in map_diag["diagnostics"]]
+    runtime_settings["analysis"]["mapOrderingDiagnostics"] = False
+    configure()
+    map_diag = wait_for(
+        lambda m: m.get("method") == "textDocument/publishDiagnostics"
+        and m["params"]["uri"] == map_uri,
+        "map-ordering disable diagnostics",
+    )
+    assert "map-forward-reference" not in [d.get("code") for d in map_diag["params"]["diagnostics"]]
+    runtime_settings["analysis"]["mapOrderingDiagnostics"] = True
+    configure()
+    map_diag = wait_for(
+        lambda m: m.get("method") == "textDocument/publishDiagnostics"
+        and m["params"]["uri"] == map_uri,
+        "map-ordering enable diagnostics",
+    )
+    assert "map-forward-reference" in [d.get("code") for d in map_diag["params"]["diagnostics"]]
+    print("OK: percentage and map-ordering diagnostics hot-toggle")
+
+    runtime_settings["analysis"]["debounceMs"] = 0
+    configure()
+    percent = change_doc(percent_uri, 3, [{"text":
+        "Armor HotArmor3\n  Armor = ARMOR_PIERCING 2\nEnd\n"}])
+    assert percent.get("version") == 3
+    print("OK: debounce hot-reloads and publishes the current document version")
+
+    progress_before = len(indexing_begins)
+    runtime_settings["baseIniRoots"] = [str(base)]
+    configure()
+    wait_for(
+        lambda m: m.get("method") == "$/progress"
+        and m.get("params", {}).get("value", {}).get("kind") == "end",
+        "base-root indexing",
+    )
+    assert len(indexing_begins) == progress_before + 1
+
+    asset_uri = "file:///test/hot-assets.ini"
+    open_doc(asset_uri, ("Object HotAssetObject\n  ButtonImage = \nEnd\n"
+                         "DialogEvent HotDialog\n  Filename = \nEnd\n"
+                         "MappedImage HotMapped\n  Texture = \nEnd\n"))
+    request_id = 30
+
+    def completion_labels(doc_uri, line, character):
+        nonlocal request_id
+        request_id += 1
+        send({"jsonrpc": "2.0", "id": request_id,
+              "method": "textDocument/completion",
+              "params": {"textDocument": {"uri": doc_uri},
+                         "position": {"line": line, "character": character}}})
+        result = wait_for(lambda m: m.get("id") == request_id and "result" in m,
+                          f"completion {request_id}")
+        items = result["result"]
+        if isinstance(items, dict):
+            items = items.get("items", [])
+        return [item["label"] for item in items]
+
+    assert "HotBaseImage" in completion_labels(asset_uri, 1, 16)
+    assert "HotSound.wav" in completion_labels(asset_uri, 4, 13)
+    assert "HotTexture.tga" in completion_labels(asset_uri, 7, 12)
+
+    model_uri = "file:///test/hot-model.ini"
+    model_text = ("Object HotModelObject\n"
+                  "  Draw = W3DModelDraw ModuleTag_Draw\n"
+                  "    DefaultConditionState\n"
+                  "      Model = A\n"
+                  "      Model = B\n"
+                  "      HideSubObject = Bone01\n"
+                  "    End\n  End\nEnd\n")
+    model_diag = open_doc(model_uri, model_text)
+    assert "unknown-model-member" not in [d.get("code") for d in model_diag["diagnostics"]]
+    runtime_settings["analysis"]["modelMemberStrictness"] = "strict"
+    configure()
+    model_diag = wait_for(
+        lambda m: m.get("method") == "textDocument/publishDiagnostics"
+        and m["params"]["uri"] == model_uri,
+        "strict model-member diagnostics",
+    )
+    assert "unknown-model-member" in [d.get("code") for d in model_diag["params"]["diagnostics"]]
+    runtime_settings["analysis"]["modelMemberStrictness"] = "compatible"
+    configure()
+    model_diag = wait_for(
+        lambda m: m.get("method") == "textDocument/publishDiagnostics"
+        and m["params"]["uri"] == model_uri,
+        "compatible model-member diagnostics",
+    )
+    assert "unknown-model-member" not in [d.get("code") for d in model_diag["params"]["diagnostics"]]
+    print("OK: base roots add definitions/assets/models; strictness republishes")
+
+    runtime_settings["baseIniRoots"] = []
+    configure()
+    wait_for(
+        lambda m: m.get("method") == "$/progress"
+        and m.get("params", {}).get("value", {}).get("kind") == "end",
+        "base-root removal indexing",
+    )
+    assert "HotBaseImage" not in completion_labels(asset_uri, 1, 16)
+    assert "HotSound.wav" not in completion_labels(asset_uri, 4, 13)
+    assert "HotTexture.tga" not in completion_labels(asset_uri, 7, 12)
+    print("OK: removing a base root removes definitions, audio, and textures")
+
+    custom_uri = "file:///test/custom-open.ini"
+    custom = open_doc(custom_uri, "TestBlock HotCustom\n  CustomOnly = Yes\nEnd\n")
+    assert "unknown-block" in [d.get("code") for d in custom["diagnostics"]]
+    custom_schema = pathlib.Path(__file__).parent / "fixtures" / "custom-schema.json"
+    runtime_settings["schema"]["path"] = str(custom_schema.resolve())
+    configure()
+    custom = wait_for(
+        lambda m: m.get("method") == "textDocument/publishDiagnostics"
+        and m["params"]["uri"] == custom_uri,
+        "custom-schema diagnostics",
+    )
+    assert "unknown-block" not in [d.get("code") for d in custom["params"]["diagnostics"]]
+    runtime_settings["schema"]["path"] = ""
+    configure()
+    custom = wait_for(
+        lambda m: m.get("method") == "textDocument/publishDiagnostics"
+        and m["params"]["uri"] == custom_uri,
+        "embedded-schema diagnostics",
+    )
+    assert "unknown-block" in [d.get("code") for d in custom["params"]["diagnostics"]]
+    print("OK: schema hot-reload reparses already-open documents")
+
+    runtime_settings["format"]["enable"] = True
+    configure()
+    registered = wait_for(
+        lambda m: m.get("method") == "client/registerCapability",
+        "dynamic formatting registration",
+    )
+    assert registered["params"]["registrations"][0]["id"] == "zerosyntax-formatting"
+    runtime_settings["format"]["enable"] = False
+    configure()
+    unregistered = wait_for(
+        lambda m: m.get("method") == "client/unregisterCapability",
+        "dynamic formatting unregistration",
+    )
+    assert unregistered["params"]["unregisterations"][0]["id"] == "zerosyntax-formatting"
+    send({"jsonrpc": "2.0", "id": 29, "method": "textDocument/formatting",
+          "params": {"textDocument": {"uri": percent_uri},
+                     "options": {"tabSize": 2, "insertSpaces": True}}})
+    disabled = wait_for(lambda m: m.get("id") == 29, "disabled dynamic formatting")
+    assert disabled.get("result") is None
+    runtime_settings["format"]["enable"] = True
+    configure()
+    wait_for(lambda m: m.get("method") == "client/registerCapability",
+             "dynamic formatting re-registration")
+
+    requests_before = len(server_requests)
+    progress_before = len(indexing_begins)
+    configure()
+    import time
+    time.sleep(0.25)
+    while not q.empty():
+        pending = q.get_nowait()
+        assert pending.get("method") not in {
+            "client/registerCapability", "client/unregisterCapability"
+        }, pending
+        assert not (pending.get("method") == "$/progress"
+                    and pending.get("params", {}).get("value", {}).get("kind") == "begin"), pending
+    assert len(server_requests) == requests_before
+    assert len(indexing_begins) == progress_before
+    print("OK: formatting hot-registers; identical settings are a no-op")
+
+    # 9) Phase-6 batch 2: semanticTokens delta, formatting, code actions.
     assert caps["semanticTokensProvider"]["full"] == {"delta": True}, \
         caps["semanticTokensProvider"]["full"]
-    assert caps.get("documentFormattingProvider"), "missing documentFormattingProvider"
     assert caps.get("codeActionProvider"), "missing codeActionProvider"
 
     # full (grab the resultId) -> edit -> delta must splice, not resend all.
