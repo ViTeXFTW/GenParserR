@@ -11,7 +11,8 @@ use zerosyntax_syntax::ast::{Block, Field, Module};
 use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode};
 
 use crate::model::{
-    is_model_asset_type, is_model_member_type, model_member_ini_name, models_in_scope, scope_schema,
+    is_model_asset_type, is_model_member_type, model_member_ini_name, models_for_source,
+    scope_schema,
 };
 use crate::{Analyzer, WorkspaceIndex};
 
@@ -118,17 +119,48 @@ fn classify_position(analyzer: &Analyzer, root: &SyntaxNode, offset: u32) -> Pos
                 .map(|k| k.text().to_string())
                 .unwrap_or_default();
             let value_tokens = field.value_tokens();
-            let value_index = value_tokens
+            let raw_value_index = value_tokens
                 .iter()
                 .filter(|t| u32::from(t.text_range().end()) < offset)
                 .count();
+            let input = value_tokens
+                .iter()
+                .map(|token| token.text().trim_matches('"'))
+                .collect::<Vec<_>>();
+            let value_index = scope_node
+                .as_ref()
+                .and_then(|scope_node| scope_schema(analyzer, scope_node).field(&key))
+                .and_then(|field| {
+                    field
+                        .value_type
+                        .token_index_at_input(&input, raw_value_index)
+                })
+                .unwrap_or(raw_value_index);
             let current_token = value_tokens
                 .iter()
-                .find(|t| {
+                .position(|t| {
                     let range = t.text_range();
                     u32::from(range.start()) <= offset && offset <= u32::from(range.end())
                 })
-                .map(|t| t.text().trim_matches('"').to_string());
+                .map(|index| {
+                    let current = value_tokens[index].text().trim_matches('"');
+                    index
+                        .checked_sub(1)
+                        .and_then(|index| value_tokens.get(index))
+                        .map(|previous| previous.text().trim_matches('"'))
+                        .filter(|previous| previous.ends_with(':'))
+                        .map_or_else(
+                            || current.to_string(),
+                            |previous| format!("{previous}{current}"),
+                        )
+                })
+                .or_else(|| {
+                    raw_value_index
+                        .checked_sub(1)
+                        .and_then(|index| input.get(index))
+                        .filter(|previous| previous.ends_with(':'))
+                        .map(|previous| (*previous).to_string())
+                });
             let first_token = value_tokens
                 .first()
                 .map(|t| t.text().trim_matches('"').to_string());
@@ -325,9 +357,14 @@ fn field_value_completions(
     let mut base = {
         let scope = scope_schema(analyzer, scope_node);
         if let Some(f) = scope.field(key) {
-            if let Some(asset_completions) =
-                model_asset_completions(analyzer, scope_node, &f.value_type, value_index, index)
-            {
+            if let Some(asset_completions) = model_asset_completions(
+                analyzer,
+                scope_node,
+                &f.value_type,
+                value_index,
+                index,
+                f.model_source.as_ref(),
+            ) {
                 asset_completions
             } else {
                 completions_for_type(
@@ -362,6 +399,7 @@ fn model_asset_completions(
     ty: &ValueType,
     value_index: usize,
     index: Option<&WorkspaceIndex>,
+    source: Option<&zerosyntax_schema::ModelSource>,
 ) -> Option<Vec<Completion>> {
     let index = index?;
     if !index.has_model_assets() {
@@ -385,7 +423,7 @@ fn model_asset_completions(
         return None;
     }
     let mut seen = std::collections::HashSet::new();
-    let out = models_in_scope(analyzer, scope_node)
+    let out = models_for_source(analyzer, scope_node, source, index)
         .into_iter()
         .flat_map(|model| {
             index
@@ -905,6 +943,31 @@ End
     }
 
     #[test]
+    fn ocl_member_completions_use_transport_models() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        index.set_file_models(
+            "a10.w3d",
+            vec![crate::index::ModelAsset {
+                name: "A10".into(),
+                members: vec!["WeaponA01".into()],
+            }],
+        );
+        index.set_file_object_models(
+            "objects.ini",
+            vec![("AmericaJetA10Thunderbolt".into(), vec!["A10".into()])],
+        );
+        let src = "ObjectCreationList Strike\n  DeliverPayload\n    Transport = AmericaJetA10Thunderbolt\n    VisibleDropBoneBaseName = \n  End\nEnd\n";
+        let offset =
+            src.find("VisibleDropBoneBaseName = ").unwrap() + "VisibleDropBoneBaseName = ".len();
+        let out = complete(&a, &a.parse(src), offset as u32, Some(&index), None)
+            .into_iter()
+            .map(|item| item.label)
+            .collect::<Vec<_>>();
+        assert!(out.contains(&"WeaponA".to_string()), "{out:?}");
+    }
+
+    #[test]
     fn weapon_bone_completions_use_token_positions() {
         let a = Analyzer::embedded();
         let mut index = WorkspaceIndex::new();
@@ -991,8 +1054,8 @@ End
 
     #[test]
     fn loc_variant_reference_suggests_while_typing() {
-        let src = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    DamagedFXList1 = Loc:X:0.0 Y:0.0 Z:0.0 FXList:FX_\n  End\nEnd\n";
-        let offset = src.find("FXList:FX_").unwrap() + "FXList:FX_".len();
+        let src = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    ReallyDamagedFXList1 = Loc: X:0 Y:0 Z:0 FXList: FX_\n  End\nEnd\n";
+        let offset = src.find("FXList: FX_").unwrap() + "FXList: FX_".len();
         let got = item_with_defs(
             src,
             offset as u32,

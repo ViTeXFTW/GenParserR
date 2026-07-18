@@ -36,6 +36,9 @@ checks.
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `zerosyntax.baseIniRoots` | `[]` | Base game/mod directories and `.big` archives used for map and model checks. |
+| `zerosyntax.schema.path` | empty | Custom schema JSON; invalid files fall back to the built-in schema. |
+| `zerosyntax.analysis.modelMemberStrictness` | `compatible` | Disables member warnings, accepts any applicable model, or requires every model. |
+| `zerosyntax.analysis.mapOrderingDiagnostics` | `true` | Warns about source-proven forward-order problems in `map.ini` and `solo.ini`. |
 | `zerosyntax.format.enable` | `false` | Enables indentation formatting. Changing it restarts the server. |
 | `zerosyntax.server.path` | empty | Uses a custom `zerosyntax-lsp` binary instead of the bundled one. |
 | `zerosyntax.trace.server` | `off` | Logs LSP traffic for troubleshooting. |

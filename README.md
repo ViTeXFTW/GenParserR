@@ -55,12 +55,31 @@ extract it, and configure your editor to run the binary over stdio.
 See the [language server guide](docs/language-server.md) for initialization
 options and editor integration details.
 
+## Check files from the command line
+
+The same binary can run diagnostics without an editor:
+
+```sh
+zerosyntax-lsp check Data/INI
+zerosyntax-lsp check map.ini --base-root "C:/Games/Zero Hour"
+zerosyntax-lsp check --json --stdin-filename map.ini - < generated.ini
+```
+
+This is intended for CI, pre-commit checks, and LLM edit/check loops. Errors
+produce exit code 1 by default; add `--fail-on warning` for a stricter gate.
+See the [standalone guide](docs/language-server.md#command-line-diagnostics) for
+the complete output and exit-code contract.
+
 ## Configure map and model checks
 
 For complete `map.ini` and `solo.ini` diagnostics, set
 `zerosyntax.baseIniRoots` in VS Code to the base game or mod directories and/or
 `.big` archives that load before the map. The same setting also enables W3D
 model and bone completion and validation.
+
+`zerosyntax.analysis.modelMemberStrictness` controls bone/subobject warnings:
+`off`, `compatible` (the default; present in any applicable model), or `strict`
+(present in every applicable model).
 
 ```json
 {

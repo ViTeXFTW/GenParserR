@@ -13221,7 +13221,8 @@
             {
               "name": "Transport",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "reference",
+                "ref_kind": "object"
               },
               "parse_fn": "INI::parseAsciiString"
             },
@@ -13277,15 +13278,16 @@
             {
               "name": "Payload",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parsePayload"
+                "kind": "reference",
+                "ref_kind": "object"
               },
               "parse_fn": "parsePayload"
             },
             {
               "name": "PutInContainer",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "reference",
+                "ref_kind": "object"
               },
               "parse_fn": "INI::parseAsciiString"
             },
@@ -13362,16 +13364,24 @@
             {
               "name": "VisibleDropBoneBaseName",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
-              "parse_fn": "INI::parseAsciiString"
+              "parse_fn": "INI::parseAsciiString",
+              "model_source": {
+                "kind": "object_reference_field",
+                "field": "Transport"
+              }
             },
             {
               "name": "VisibleSubObjectBaseName",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "w3d_model_member"
               },
-              "parse_fn": "INI::parseAsciiString"
+              "parse_fn": "INI::parseAsciiString",
+              "model_source": {
+                "kind": "object_reference_field",
+                "field": "Transport"
+              }
             },
             {
               "name": "VisibleNumBones",
@@ -13383,7 +13393,8 @@
             {
               "name": "VisiblePayloadTemplateName",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "reference",
+                "ref_kind": "object"
               },
               "parse_fn": "INI::parseAsciiString"
             },
