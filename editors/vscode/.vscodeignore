@@ -1,12 +1,12 @@
-# Shipped in the .vsix: out/ (compiled extension), server/ (bundled binary,
+# Shipped in the .vsix: out/ (bundled extension), server/ (bundled binary,
 # placed by the release workflow), syntaxes/, language-configuration.json,
-# README, LICENSE, and production node_modules (vscode-languageclient).
+# README, LICENSE, and the icon.
 .vscode/**
+.vscode-test/**
 src/**
 out-test/**
 tsconfig.json
 tsconfig.test.json
 **/*.map
 **/*.ts
-node_modules/@types/**
-node_modules/typescript/**
+node_modules/**
