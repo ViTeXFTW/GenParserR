@@ -187,6 +187,17 @@ impl<'a> Sem<'a> {
             .map(|token| token.text().trim_matches('"'))
             .collect::<Vec<_>>();
         for (i, tok) in value_tokens.iter().enumerate() {
+            if matches!(active_ty, Some(ValueType::RandomVariable { .. })) {
+                self.set(
+                    tok,
+                    if i == 2 {
+                        SemKind::EnumMember
+                    } else {
+                        SemKind::Number
+                    },
+                );
+                continue;
+            }
             // Token lists classify each position by its own element type.
             let elem = active_ty.and_then(|ty| ty.token_type_at_input(&input, i));
             self.set(tok, value_token_kind(tok, elem));
@@ -230,6 +241,9 @@ fn value_token_kind(tok: &SyntaxToken, ty: Option<&ValueType>) -> SemKind {
         | Some(ValueType::Velocity)
         | Some(ValueType::Acceleration)
         | Some(ValueType::Color)
+        | Some(ValueType::RandomVariable { .. })
+        | Some(ValueType::RandomKeyframe)
+        | Some(ValueType::ColorKeyframe)
         | Some(ValueType::Coord2D)
         | Some(ValueType::Coord3D) => SemKind::Number,
         Some(ValueType::Reference { .. })

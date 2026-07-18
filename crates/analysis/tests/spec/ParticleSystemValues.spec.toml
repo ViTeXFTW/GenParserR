@@ -1,0 +1,27 @@
+[[complete]]
+at = "$1"
+includes = ["CONSTANT", "UNIFORM", "GAUSSIAN", "TRIANGULAR", "LOW_BIAS", "HIGH_BIAS"]
+
+[[diag]]
+severity = "error"
+code = "bad-enum"
+on = "invalid"
+nth = 1
+
+[[diag]]
+severity = "error"
+code = "bad-number"
+on = "invalid"
+nth = 2
+
+[[diag]]
+severity = "error"
+code = "bad-number"
+on = "invalid"
+nth = 3
+
+[[diag]]
+severity = "error"
+code = "bad-number"
+on = "invalid"
+nth = 4
