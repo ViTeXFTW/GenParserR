@@ -12544,7 +12544,8 @@
             {
               "name": "ParticleSystem",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "reference",
+                "ref_kind": "particle_system"
               },
               "parse_fn": "INI::parseAsciiString"
             },
@@ -12756,8 +12757,8 @@
             {
               "name": "ObjectNames",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseDebrisObjectNames"
+                "kind": "reference_list",
+                "ref_kind": "object"
               },
               "parse_fn": "parseDebrisObjectNames"
             },
@@ -12825,7 +12826,8 @@
             {
               "name": "ParticleSystem",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "reference",
+                "ref_kind": "particle_system"
               },
               "parse_fn": "INI::parseAsciiString"
             },
@@ -13030,8 +13032,7 @@
             {
               "name": "ModelNames",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseDebrisObjectNames"
+                "kind": "w3d_model_list"
               },
               "parse_fn": "parseDebrisObjectNames"
             },
@@ -13084,8 +13085,8 @@
             {
               "name": "BounceSound",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "INI::parseAudioEventRTS"
+                "kind": "reference",
+                "ref_kind": "audio_event"
               },
               "parse_fn": "INI::parseAudioEventRTS"
             }

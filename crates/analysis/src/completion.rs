@@ -494,7 +494,7 @@ fn type_snippet_placeholder(ty: &ValueType, n: usize) -> String {
         ValueType::AsciiString | ValueType::AsciiStringList | ValueType::QuotedString => {
             format!("${{{n}:Value}}")
         }
-        ValueType::W3dModel => format!("${{{n}:Model}}"),
+        ValueType::W3dModel | ValueType::W3dModelList => format!("${{{n}:Model}}"),
         ValueType::W3dModelMember => format!("${{{n}:Bone}}"),
         _ => format!("${{{n}:?}}"),
     }
@@ -678,7 +678,7 @@ fn completions_for_type(
             }));
             out
         }
-        ValueType::W3dModel | ValueType::W3dModelMember => Vec::new(),
+        ValueType::W3dModel | ValueType::W3dModelList | ValueType::W3dModelMember => Vec::new(),
         _ => Vec::new(),
     }
 }
@@ -791,6 +791,7 @@ fn type_label(ty: &ValueType) -> String {
         ValueType::BitFlags { value_set } => format!("flags {value_set}"),
         ValueType::Reference { ref_kind } => format!("ref {ref_kind:?}"),
         ValueType::W3dModel => "w3d model".into(),
+        ValueType::W3dModelList => "w3d models".into(),
         ValueType::W3dModelMember => "w3d model member".into(),
         ValueType::RandomVariable { .. } => "real real [distribution]".into(),
         ValueType::RandomKeyframe => "real real frame".into(),
@@ -984,6 +985,27 @@ End
             .map(|item| item.label)
             .collect::<Vec<_>>();
         assert!(out.contains(&"WeaponA".to_string()), "{out:?}");
+    }
+
+    #[test]
+    fn ocl_model_list_completes_every_position() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        index.set_file_models(
+            "models/Good.w3d",
+            vec![crate::index::ModelAsset {
+                name: "Good".into(),
+                members: vec![],
+            }],
+        );
+        let src =
+            "ObjectCreationList Debris\n  CreateDebris\n    ModelNames = First \n  End\nEnd\n";
+        let offset = src.find("First ").unwrap() + "First ".len();
+        let out = complete(&a, &a.parse(src), offset as u32, Some(&index), None)
+            .into_iter()
+            .map(|item| item.label)
+            .collect::<Vec<_>>();
+        assert!(out.contains(&"Good".to_string()), "{out:?}");
     }
 
     #[test]

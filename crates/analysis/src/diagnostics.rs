@@ -1012,6 +1012,16 @@ impl<'a> Ctx<'a> {
         }
         let tokens = field.value_tokens();
         match &schema_field.value_type {
+            ValueType::W3dModelList => {
+                for tok in &tokens {
+                    self.validate_model_asset_token(
+                        &schema_field.value_type,
+                        tok,
+                        scope_node,
+                        schema_field.model_source.as_ref(),
+                    );
+                }
+            }
             ValueType::TokenList { tokens: specs } => {
                 let mut i = 0;
                 for spec in specs {
@@ -1499,6 +1509,7 @@ impl<'a> Ctx<'a> {
             | ValueType::QuotedString
             | ValueType::AsciiStringList
             | ValueType::W3dModel
+            | ValueType::W3dModelList
             | ValueType::W3dModelMember
             | ValueType::Color
             | ValueType::Coord2D
@@ -2668,6 +2679,30 @@ End
             !diags.iter().any(|d| d.code == "unknown-model-member"),
             "{diags:?}"
         );
+    }
+
+    #[test]
+    fn ocl_object_and_model_lists_validate_every_reference() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        let objects = a.parse("Object KnownObject\nEnd\n");
+        index.set_file(
+            "objects.ini",
+            crate::index::definitions_in(&a, &objects, "objects.ini"),
+        );
+        index.set_file_models(
+            "models/Good.w3d",
+            vec![crate::index::ModelAsset {
+                name: "Good".into(),
+                members: vec![],
+            }],
+        );
+        let src = "ObjectCreationList Test\n  CreateObject\n    ObjectNames = KnownObject MissingObject\n  End\n  CreateDebris\n    ModelNames = Good MissingModel\n  End\nEnd\n";
+        let diags = diagnose(&a, &a.parse(src), Some(&index), Some("ocl.ini"));
+        assert!(diags.iter().any(|d| d.code == "unresolved-reference"
+            && &src[d.span.start as usize..d.span.end as usize] == "MissingObject"));
+        assert!(diags.iter().any(|d| d.code == "unknown-model"
+            && &src[d.span.start as usize..d.span.end as usize] == "MissingModel"));
     }
 
     #[test]
