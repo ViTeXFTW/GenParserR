@@ -32,12 +32,7 @@ export function activate(context: vscode.ExtensionContext) {
     synchronize: {
       // Re-index when any .ini in the workspace changes on disk.
       fileEvents: vscode.workspace.createFileSystemWatcher("**/*.ini"),
-      configurationSection: [
-        "zerosyntax.format",
-        "zerosyntax.baseIniRoots",
-        "zerosyntax.schema",
-        "zerosyntax.analysis",
-      ],
+      configurationSection: "zerosyntax",
     },
     // Keep startup compatibility for clients that do not synchronize settings.
     initializationOptions: () => ({
