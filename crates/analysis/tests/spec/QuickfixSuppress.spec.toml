@@ -1,4 +1,4 @@
-# "Maybe" fires bad-bool (Error) → no Suppress quickfix
+# "Maybe" fires bad-bool (Error) → Suppress quickfix offered
 [[diag]]
 severity = "error"
 code = "bad-bool"
@@ -6,7 +6,7 @@ on = "Maybe"
 
 [[action]]
 on = "Maybe"
-not_offers = ["Suppress"]
+offers = ["Suppress"]
 
 # UnknownFXRef fires unresolved-reference (Warning) → Suppress quickfix offered
 [[diag]]
