@@ -16030,10 +16030,10 @@
         {
           "name": "LaserBoneName",
           "value_type": {
-            "kind": "w3d_model_member"
+            "kind": "ascii_string"
           },
           "parse_fn": "INI::parseAsciiString",
-          "doc": null
+          "doc": "Bone on the firing object's model; a shared Weapon template does not identify that object statically."
         },
         {
           "name": "LeechRangeWeapon",
