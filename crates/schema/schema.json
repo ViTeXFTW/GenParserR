@@ -642,7 +642,8 @@
         {
           "name": "Filename",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "audio_file",
+            "extension": "any"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -735,7 +736,7 @@
         {
           "name": "Sounds",
           "value_type": {
-            "kind": "ascii_string_list"
+            "kind": "audio_stem_list"
           },
           "parse_fn": "INI::parseSoundsList",
           "doc": null
@@ -743,7 +744,7 @@
         {
           "name": "SoundsNight",
           "value_type": {
-            "kind": "ascii_string_list"
+            "kind": "audio_stem_list"
           },
           "parse_fn": "INI::parseSoundsList",
           "doc": null
@@ -751,7 +752,7 @@
         {
           "name": "SoundsEvening",
           "value_type": {
-            "kind": "ascii_string_list"
+            "kind": "audio_stem_list"
           },
           "parse_fn": "INI::parseSoundsList",
           "doc": null
@@ -759,7 +760,7 @@
         {
           "name": "SoundsMorning",
           "value_type": {
-            "kind": "ascii_string_list"
+            "kind": "audio_stem_list"
           },
           "parse_fn": "INI::parseSoundsList",
           "doc": null
@@ -767,7 +768,7 @@
         {
           "name": "Attack",
           "value_type": {
-            "kind": "ascii_string_list"
+            "kind": "audio_stem_list"
           },
           "parse_fn": "INI::parseSoundsList",
           "doc": null
@@ -775,7 +776,7 @@
         {
           "name": "Decay",
           "value_type": {
-            "kind": "ascii_string_list"
+            "kind": "audio_stem_list"
           },
           "parse_fn": "INI::parseSoundsList",
           "doc": null
@@ -1206,7 +1207,7 @@
         {
           "name": "Texture",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -1222,7 +1223,7 @@
         {
           "name": "TextureDamaged",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -1238,7 +1239,7 @@
         {
           "name": "TextureReallyDamaged",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -1254,7 +1255,7 @@
         {
           "name": "TextureBroken",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -5151,7 +5152,8 @@
         {
           "name": "Filename",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "audio_file",
+            "extension": "wav"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -5244,7 +5246,7 @@
         {
           "name": "Sounds",
           "value_type": {
-            "kind": "ascii_string_list"
+            "kind": "audio_stem_list"
           },
           "parse_fn": "INI::parseSoundsList",
           "doc": null
@@ -5252,7 +5254,7 @@
         {
           "name": "SoundsNight",
           "value_type": {
-            "kind": "ascii_string_list"
+            "kind": "audio_stem_list"
           },
           "parse_fn": "INI::parseSoundsList",
           "doc": null
@@ -5260,7 +5262,7 @@
         {
           "name": "SoundsEvening",
           "value_type": {
-            "kind": "ascii_string_list"
+            "kind": "audio_stem_list"
           },
           "parse_fn": "INI::parseSoundsList",
           "doc": null
@@ -5268,7 +5270,7 @@
         {
           "name": "SoundsMorning",
           "value_type": {
-            "kind": "ascii_string_list"
+            "kind": "audio_stem_list"
           },
           "parse_fn": "INI::parseSoundsList",
           "doc": null
@@ -5276,7 +5278,7 @@
         {
           "name": "Attack",
           "value_type": {
-            "kind": "ascii_string_list"
+            "kind": "audio_stem_list"
           },
           "parse_fn": "INI::parseSoundsList",
           "doc": null
@@ -5284,7 +5286,7 @@
         {
           "name": "Decay",
           "value_type": {
-            "kind": "ascii_string_list"
+            "kind": "audio_stem_list"
           },
           "parse_fn": "INI::parseSoundsList",
           "doc": null
@@ -5513,7 +5515,25 @@
       ],
       "sub_blocks": [
         {
-          "keyword": "SideSounds"
+          "keyword": "SideSounds",
+          "fields": [
+            {
+              "name": "Side",
+              "value_type": {
+                "kind": "ascii_string"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Sounds",
+              "value_type": {
+                "kind": "audio_stem_list"
+              },
+              "parse_fn": "INI::parseSoundsList",
+              "doc": null
+            }
+          ]
         }
       ]
     },
@@ -9499,91 +9519,1802 @@
       ],
       "sub_blocks": [
         {
-          "keyword": "A10StrikeRadiusCursor"
+          "keyword": "A10StrikeRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "AmbulanceRadiusCursor"
+          "keyword": "AmbulanceRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "AmbushRadiusCursor"
+          "keyword": "AmbushRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "AnthraxBombRadiusCursor"
+          "keyword": "AnthraxBombRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "ArtilleryRadiusCursor"
+          "keyword": "ArtilleryRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "AttackContinueAreaRadiusCursor"
+          "keyword": "AttackContinueAreaRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "AttackDamageAreaRadiusCursor"
+          "keyword": "AttackDamageAreaRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "AttackScatterAreaRadiusCursor"
+          "keyword": "AttackScatterAreaRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "CarpetBombRadiusCursor"
+          "keyword": "CarpetBombRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "ClearMinesRadiusCursor"
+          "keyword": "ClearMinesRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "ClusterMinesRadiusCursor"
+          "keyword": "ClusterMinesRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "DaisyCutterRadiusCursor"
+          "keyword": "DaisyCutterRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "EMPPulseRadiusCursor"
+          "keyword": "EMPPulseRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "EmergencyRepairRadiusCursor"
+          "keyword": "EmergencyRepairRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "FrenzyRadiusCursor"
+          "keyword": "FrenzyRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "FriendlySpecialPowerRadiusCursor"
+          "keyword": "FriendlySpecialPowerRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "GuardAreaRadiusCursor"
+          "keyword": "GuardAreaRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "HelixNapalmBombRadiusCursor"
+          "keyword": "HelixNapalmBombRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "NapalmStrikeRadiusCursor"
+          "keyword": "NapalmStrikeRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "NuclearMissileRadiusCursor"
+          "keyword": "NuclearMissileRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "OffensiveSpecialPowerRadiusCursor"
+          "keyword": "OffensiveSpecialPowerRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "ParadropRadiusCursor"
+          "keyword": "ParadropRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "ParticleCannonRadiusCursor"
+          "keyword": "ParticleCannonRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "RadarRadiusCursor"
+          "keyword": "RadarRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "ScudStormRadiusCursor"
+          "keyword": "ScudStormRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "SpectreGunshipRadiusCursor"
+          "keyword": "SpectreGunshipRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "SpyDroneRadiusCursor"
+          "keyword": "SpyDroneRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "SpySatelliteRadiusCursor"
+          "keyword": "SpySatelliteRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         },
         {
-          "keyword": "SuperweaponScatterAreaRadiusCursor"
+          "keyword": "SuperweaponScatterAreaRadiusCursor",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
+              },
+              "parse_fn": "INI::parseAsciiString",
+              "doc": null
+            },
+            {
+              "name": "Style",
+              "value_type": {
+                "kind": "bit_flags",
+                "value_set": "shadow_type"
+              },
+              "parse_fn": "INI::parseBitString32",
+              "doc": null
+            },
+            {
+              "name": "OpacityMin",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityMax",
+              "value_type": {
+                "kind": "percent"
+              },
+              "parse_fn": "INI::parsePercentToReal",
+              "doc": null
+            },
+            {
+              "name": "OpacityThrobTime",
+              "value_type": {
+                "kind": "duration"
+              },
+              "parse_fn": "INI::parseDurationUnsignedInt",
+              "doc": null
+            },
+            {
+              "name": "Color",
+              "value_type": {
+                "kind": "color"
+              },
+              "parse_fn": "INI::parseColorInt",
+              "doc": null
+            },
+            {
+              "name": "OnlyVisibleToOwningPlayer",
+              "value_type": {
+                "kind": "bool"
+              },
+              "parse_fn": "INI::parseBool",
+              "doc": null
+            }
+          ]
         }
       ]
     },
@@ -10514,7 +12245,7 @@
         {
           "name": "Texture",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": "Texture page filename (.tga), not a MappedImage reference"
@@ -11139,7 +12870,7 @@
         {
           "name": "Texture",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_sequence_stem"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -11304,7 +13035,8 @@
         {
           "name": "Filename",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "audio_file",
+            "extension": "mp3"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -11397,7 +13129,7 @@
         {
           "name": "Sounds",
           "value_type": {
-            "kind": "ascii_string_list"
+            "kind": "audio_stem_list"
           },
           "parse_fn": "INI::parseSoundsList",
           "doc": null
@@ -11405,7 +13137,7 @@
         {
           "name": "SoundsNight",
           "value_type": {
-            "kind": "ascii_string_list"
+            "kind": "audio_stem_list"
           },
           "parse_fn": "INI::parseSoundsList",
           "doc": null
@@ -11413,7 +13145,7 @@
         {
           "name": "SoundsEvening",
           "value_type": {
-            "kind": "ascii_string_list"
+            "kind": "audio_stem_list"
           },
           "parse_fn": "INI::parseSoundsList",
           "doc": null
@@ -11421,7 +13153,7 @@
         {
           "name": "SoundsMorning",
           "value_type": {
-            "kind": "ascii_string_list"
+            "kind": "audio_stem_list"
           },
           "parse_fn": "INI::parseSoundsList",
           "doc": null
@@ -11429,7 +13161,7 @@
         {
           "name": "Attack",
           "value_type": {
-            "kind": "ascii_string_list"
+            "kind": "audio_stem_list"
           },
           "parse_fn": "INI::parseSoundsList",
           "doc": null
@@ -11437,7 +13169,7 @@
         {
           "name": "Decay",
           "value_type": {
-            "kind": "ascii_string_list"
+            "kind": "audio_stem_list"
           },
           "parse_fn": "INI::parseSoundsList",
           "doc": null
@@ -11784,7 +13516,7 @@
         {
           "name": "ShadowTexture",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_stem"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -13135,12 +14867,12 @@
           "keyword": "DeliverPayload",
           "sub_blocks": [
             {
-              "keyword": "DeliveryDecal",
-              "fields": [
-                {
-                  "name": "Texture",
-                  "value_type": {
-                    "kind": "ascii_string"
+         "keyword": "DeliveryDecal",
+         "fields": [
+           {
+             "name": "Texture",
+             "value_type": {
+                "kind": "texture_stem"
                   },
                   "parse_fn": "INI::parseAsciiString"
                 },
@@ -13878,7 +15610,7 @@
         {
           "name": "ParticleName",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": "particle texture image name"
@@ -14929,7 +16661,7 @@
         {
           "name": "Texture",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -15389,7 +17121,7 @@
         {
           "name": "Texture",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -15535,7 +17267,7 @@
         {
           "name": "SkyTexture",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -15543,7 +17275,7 @@
         {
           "name": "WaterTexture",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -15664,7 +17396,7 @@
         {
           "name": "StandingWaterTexture",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -15688,7 +17420,7 @@
         {
           "name": "SkyboxTextureN",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -15696,7 +17428,7 @@
         {
           "name": "SkyboxTextureE",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -15704,7 +17436,7 @@
         {
           "name": "SkyboxTextureS",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -15712,7 +17444,7 @@
         {
           "name": "SkyboxTextureW",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -15720,7 +17452,7 @@
         {
           "name": "SkyboxTextureT",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -16430,7 +18162,7 @@
         {
           "name": "SnowTexture",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -16658,7 +18390,7 @@
         {
           "name": "TrackMarks",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "parseAsciiStringLC",
           "doc": null
@@ -25409,12 +27141,12 @@
       ],
       "sub_blocks": [
         {
-          "keyword": "DeliveryDecal",
-          "fields": [
-            {
-              "name": "Texture",
-              "value_type": {
-                "kind": "ascii_string"
+         "keyword": "DeliveryDecal",
+         "fields": [
+           {
+             "name": "Texture",
+             "value_type": {
+                "kind": "texture_stem"
               },
               "parse_fn": "INI::parseAsciiString",
               "doc": null
@@ -27233,12 +28965,12 @@
       ],
       "sub_blocks": [
         {
-          "keyword": "GridDecalTemplate",
-          "fields": [
-            {
-              "name": "Texture",
-              "value_type": {
-                "kind": "ascii_string"
+         "keyword": "GridDecalTemplate",
+         "fields": [
+           {
+             "name": "Texture",
+             "value_type": {
+                "kind": "texture_stem"
               },
               "parse_fn": "INI::parseAsciiString",
               "doc": null
@@ -35057,12 +36789,12 @@
       ],
       "sub_blocks": [
         {
-          "keyword": "DeliveryDecal",
-          "fields": [
-            {
-              "name": "Texture",
-              "value_type": {
-                "kind": "ascii_string"
+             "keyword": "DeliveryDecal",
+             "fields": [
+               {
+                 "name": "Texture",
+                 "value_type": {
+                    "kind": "texture_stem"
               },
               "parse_fn": "INI::parseAsciiString",
               "doc": null
@@ -42415,12 +44147,12 @@
       ],
       "sub_blocks": [
         {
-          "keyword": "AttackAreaDecal",
-          "fields": [
-            {
-              "name": "Texture",
-              "value_type": {
-                "kind": "ascii_string"
+         "keyword": "AttackAreaDecal",
+         "fields": [
+           {
+             "name": "Texture",
+             "value_type": {
+                "kind": "texture_stem"
               },
               "parse_fn": "INI::parseAsciiString",
               "doc": null
@@ -42479,12 +44211,12 @@
           "doc": "RadiusDecalTemplate nested field table."
         },
         {
-          "keyword": "TargetingReticleDecal",
-          "fields": [
-            {
-              "name": "Texture",
-              "value_type": {
-                "kind": "ascii_string"
+         "keyword": "TargetingReticleDecal",
+         "fields": [
+           {
+             "name": "Texture",
+             "value_type": {
+                "kind": "texture_stem"
               },
               "parse_fn": "INI::parseAsciiString",
               "doc": null
@@ -53595,7 +55327,7 @@
         {
           "name": "TrackMarks",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "parseAsciiStringLC",
           "doc": null
@@ -54518,7 +56250,7 @@
         {
           "name": "Texture",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -54658,7 +56390,7 @@
         {
           "name": "TrackMarks",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "parseAsciiStringLC",
           "doc": null
@@ -55591,7 +57323,7 @@
         {
           "name": "TrackMarks",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "parseAsciiStringLC",
           "doc": null
@@ -56566,7 +58298,7 @@
         {
           "name": "TrackMarks",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "parseAsciiStringLC",
           "doc": null
@@ -57662,7 +59394,7 @@
         {
           "name": "TrackMarks",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "parseAsciiStringLC",
           "doc": null
@@ -58684,7 +60416,7 @@
         {
           "name": "Texture",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -58835,7 +60567,7 @@
         {
           "name": "TrackMarks",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "parseAsciiStringLC",
           "doc": null
@@ -59777,7 +61509,7 @@
         {
           "name": "TrackMarks",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "parseAsciiStringLC",
           "doc": null
@@ -60718,7 +62450,7 @@
         {
           "name": "TrackMarks",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "parseAsciiStringLC",
           "doc": null
@@ -61693,7 +63425,7 @@
         {
           "name": "TrackMarks",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "parseAsciiStringLC",
           "doc": null
@@ -62718,7 +64450,7 @@
         {
           "name": "TextureName",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -62940,7 +64672,7 @@
         {
           "name": "TrackMarks",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "texture_file"
           },
           "parse_fn": "parseAsciiStringLC",
           "doc": null

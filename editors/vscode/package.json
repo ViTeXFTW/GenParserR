@@ -68,7 +68,7 @@
           "items": {
             "type": "string"
           },
-          "markdownDescription": "Directories or `.big` archives containing base game/mod INI files and W3D assets. INI definitions are treated as already loaded before `map.ini`/`solo.ini`; W3D assets power model and bone completions/diagnostics. Changing this restarts the language server."
+          "markdownDescription": "Directories or `.big` archives containing base game/mod INI files and game assets. INI definitions are treated as already loaded before `map.ini`/`solo.ini`; W3D, WAV/MP3, and TGA/DDS assets power completions and diagnostics. Configure all loaded roots to avoid partial-index warnings. Changing this restarts the language server."
         },
         "zerosyntax.schema.path": {
           "type": "string",

@@ -14,6 +14,18 @@ use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode, SyntaxToken};
 use crate::model::{scope_schema, ScopeSchema};
 use crate::{Analyzer, Span};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AssetKind {
+    Audio,
+    Texture,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileAsset {
+    pub kind: AssetKind,
+    pub name: String,
+}
+
 /// Model data discovered from a W3D asset.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelAsset {
@@ -95,6 +107,8 @@ pub struct WorkspaceIndex {
     model_assets: HashMap<String, Vec<(String, ModelAsset)>>,
     /// Reverse map for removing/replacing models contributed by one asset file.
     file_models: HashMap<String, Vec<ModelAsset>>,
+    asset_names: HashMap<AssetKind, HashMap<String, Vec<(String, String)>>>,
+    file_assets: HashMap<String, Vec<FileAsset>>,
     object_models: HashMap<String, Vec<(String, Vec<String>)>>,
     file_object_models: HashMap<String, Vec<(String, Vec<String>)>>,
     object_parents: HashMap<String, Vec<(String, String)>>,
@@ -194,6 +208,7 @@ impl WorkspaceIndex {
         self.remove_entries(file);
         self.remove_site_entries(file);
         self.remove_model_entries(file);
+        self.set_file_assets(file, Vec::new());
         self.remove_object_model_entries(file);
         self.remove_object_parent_entries(file);
     }
@@ -263,6 +278,83 @@ impl WorkspaceIndex {
                 }
             }
         }
+    }
+
+    /// Replace raw audio/texture assets contributed by a file, directory entry,
+    /// or synthetic archive contribution.
+    pub fn set_file_assets(&mut self, file: &str, assets: Vec<FileAsset>) {
+        let affected = self
+            .file_assets
+            .get(file)
+            .into_iter()
+            .flatten()
+            .chain(&assets)
+            .map(|asset| (asset.kind, asset.name.to_ascii_lowercase()))
+            .collect::<std::collections::HashSet<_>>();
+        let before = affected
+            .iter()
+            .map(|(kind, name)| ((*kind, name.clone()), self.is_asset(*kind, name)))
+            .collect::<Vec<_>>();
+        self.remove_asset_entries(file);
+        for asset in &assets {
+            self.asset_names
+                .entry(asset.kind)
+                .or_default()
+                .entry(asset.name.to_ascii_lowercase())
+                .or_default()
+                .push((file.to_string(), asset.name.clone()));
+        }
+        if assets.is_empty() {
+            self.file_assets.remove(file);
+        } else {
+            self.file_assets.insert(file.to_string(), assets);
+        }
+        if before
+            .into_iter()
+            .any(|((kind, name), existed)| existed != self.is_asset(kind, &name))
+        {
+            self.generation += 1;
+        }
+    }
+
+    fn remove_asset_entries(&mut self, file: &str) {
+        let Some(assets) = self.file_assets.remove(file) else {
+            return;
+        };
+        for asset in assets {
+            let lower = asset.name.to_ascii_lowercase();
+            if let Some(names) = self.asset_names.get_mut(&asset.kind) {
+                if let Some(contribs) = names.get_mut(&lower) {
+                    contribs.retain(|(source, _)| source != file);
+                    if contribs.is_empty() {
+                        names.remove(&lower);
+                    }
+                }
+                if names.is_empty() {
+                    self.asset_names.remove(&asset.kind);
+                }
+            }
+        }
+    }
+
+    pub fn has_assets(&self, kind: AssetKind) -> bool {
+        self.asset_names
+            .get(&kind)
+            .is_some_and(|names| !names.is_empty())
+    }
+
+    pub fn is_asset(&self, kind: AssetKind, name: &str) -> bool {
+        self.asset_names
+            .get(&kind)
+            .is_some_and(|names| names.contains_key(&name.to_ascii_lowercase()))
+    }
+
+    pub fn asset_names(&self, kind: AssetKind) -> impl Iterator<Item = &str> {
+        self.asset_names
+            .get(&kind)
+            .into_iter()
+            .flat_map(|names| names.values().filter_map(|sources| sources.first()))
+            .map(|(_, display)| display.as_str())
     }
 
     pub fn set_file_object_models(&mut self, file: &str, objects: Vec<(String, Vec<String>)>) {
@@ -862,6 +954,35 @@ mod tests {
         idx.set_file_object_models("objects.ini", object_models_in(&a, &parse));
         idx.set_file_object_parents("objects.ini", object_parents_in(&parse));
         assert_eq!(idx.models_for_object("child"), vec!["ParentModel"]);
+    }
+
+    #[test]
+    fn raw_assets_are_case_insensitive_and_track_effective_names() {
+        let audio = |name: &str| FileAsset {
+            kind: AssetKind::Audio,
+            name: name.into(),
+        };
+        let mut idx = WorkspaceIndex::new();
+        idx.set_file_assets("base", vec![audio("Click.WAV")]);
+        let first = idx.generation();
+        assert!(idx.is_asset(AssetKind::Audio, "click.wav"));
+
+        idx.set_file_assets("mod", vec![audio("CLICK.wav")]);
+        assert_eq!(
+            idx.generation(),
+            first,
+            "duplicate contributor changes no effective name"
+        );
+        idx.remove_file("base");
+        assert_eq!(
+            idx.generation(),
+            first,
+            "removing one duplicate preserves the name"
+        );
+        idx.set_file_assets("mod", vec![audio("Other.wav")]);
+        assert_ne!(idx.generation(), first);
+        assert!(!idx.is_asset(AssetKind::Audio, "Click.wav"));
+        assert!(idx.is_asset(AssetKind::Audio, "OTHER.WAV"));
     }
 
     #[test]

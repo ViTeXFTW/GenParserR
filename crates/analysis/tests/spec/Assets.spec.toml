@@ -1,0 +1,79 @@
+no_errors = true
+audio_assets = ["Click.wav", "Track.mp3"]
+texture_assets = ["Particle.dds", "Cursor0000.tga", "Cursor0001.tga"]
+
+[[complete]]
+at = "$1"
+includes = ["Click"]
+excludes = ["Click.wav", "Track"]
+
+[[complete]]
+at = "$2"
+includes = ["Click.wav"]
+excludes = ["Track.mp3"]
+
+[[complete]]
+at = "$3"
+includes = ["Track.mp3"]
+excludes = ["Click.wav"]
+
+[[complete]]
+at = "$4"
+includes = ["Particle.tga"]
+
+[[complete]]
+at = "$5"
+includes = ["Particle"]
+
+[[complete]]
+at = "$6"
+includes = ["Cursor"]
+excludes = ["Cursor0000", "Cursor0001"]
+
+[[complete]]
+at = "$7"
+includes = ["Particle.tga"]
+
+[[complete]]
+at = "$8"
+includes = ["Click"]
+excludes = ["Click.wav", "Track"]
+
+[[diag]]
+severity = "warning"
+code = "unknown-audio-file"
+on = "MissingOne"
+
+[[diag]]
+severity = "warning"
+code = "unknown-audio-file"
+on = "MissingTwo"
+
+[[diag]]
+severity = "warning"
+code = "unknown-audio-file"
+on = "MissingEva"
+
+[[diag]]
+severity = "warning"
+code = "unknown-texture"
+on = "MissingTexture.tga"
+
+[[diag]]
+severity = "warning"
+code = "unknown-audio-file"
+on = "Click.wav"
+absent = true
+
+[[diag]]
+severity = "warning"
+code = "unknown-texture"
+on = "Particle.tga"
+absent = true
+
+[[diag]]
+severity = "warning"
+code = "unknown-texture"
+on = "Particle.tga"
+nth = 2
+absent = true

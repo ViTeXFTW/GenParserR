@@ -33,8 +33,8 @@ indexed together before diagnostics run, so references between them resolve.
 Overlapping targets are checked once.
 
 `--base-root` is repeatable and accepts directories or `.big` archives
-containing base/mod INIs and W3D assets. Base roots participate in reference,
-model, and bone checks but do not emit diagnostics themselves. For stdin,
+containing base/mod INIs and game assets. Base roots participate in reference,
+model, bone, audio, and texture checks but do not emit diagnostics themselves. For stdin,
 `--stdin-filename` supplies the displayed/indexed name and enables `map.ini` or
 `solo.ini` override semantics; it defaults to `<stdin>`.
 
@@ -102,8 +102,12 @@ symbols.
   applicable model), or `strict` (member exists in every applicable model). It
   defaults to `compatible`.
 - `baseIniRoots` accepts directories and `.big` archives containing base game
-  or mod INI files and W3D assets. Those INI definitions are treated as loaded
-  before `map.ini` and `solo.ini`.
+  or mod INI files and game assets. WAV/MP3 filenames and TGA/DDS textures power
+  asset completion and warnings; DDS-only textures complete as the canonical
+  INI spelling `stem.tga`. Audio and texture warnings activate independently
+  only after that asset kind is indexed. Supply every loaded game/mod root to
+  avoid warnings caused by a partial asset index. INI definitions are treated
+  as loaded before `map.ini` and `solo.ini`.
 
 Restart the language server after changing initialization options.
 

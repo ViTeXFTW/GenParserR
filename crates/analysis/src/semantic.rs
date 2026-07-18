@@ -231,7 +231,12 @@ fn value_token_kind(tok: &SyntaxToken, ty: Option<&ValueType>) -> SemKind {
         Some(ValueType::Reference { .. })
         | Some(ValueType::ReferenceList { .. })
         | Some(ValueType::W3dModel)
-        | Some(ValueType::W3dModelMember) => SemKind::Reference,
+        | Some(ValueType::W3dModelMember)
+        | Some(ValueType::AudioFile { .. })
+        | Some(ValueType::AudioStemList)
+        | Some(ValueType::TextureFile)
+        | Some(ValueType::TextureStem)
+        | Some(ValueType::TextureSequenceStem) => SemKind::Reference,
         _ => SemKind::StringLit,
     }
 }

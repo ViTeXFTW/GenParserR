@@ -169,6 +169,14 @@ pub enum ModelSource {
     ObjectReferenceField { field: String },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioExtension {
+    Any,
+    Wav,
+    Mp3,
+}
+
 /// The type of a field's value, derived from its engine parse function.
 ///
 /// The variant determines how the value tokens are validated and which
@@ -207,6 +215,16 @@ pub enum ValueType {
     W3dModel,
     /// A bone, subobject, mesh, or other member of a W3D model asset.
     W3dModelMember,
+    /// An indexed audio filename, optionally restricted by extension.
+    AudioFile { extension: AudioExtension },
+    /// A variadic list of extensionless indexed WAV names.
+    AudioStemList,
+    /// An indexed texture filename. DDS transparently aliases the same TGA stem.
+    TextureFile,
+    /// An extensionless indexed TGA/DDS texture name.
+    TextureStem,
+    /// A texture stem that may be backed by a numbered `0000` first frame.
+    TextureSequenceStem,
     /// `R:r G:g B:b [A:a]` color.
     Color,
     /// `X:x Y:y` coordinate.
@@ -1367,7 +1385,7 @@ mod tests {
         }
 
         let decal_fields = [
-            ("Texture", ValueType::AsciiString),
+            ("Texture", ValueType::TextureStem),
             ("Style", bit_flags("shadow_type")),
             ("OpacityMin", ValueType::Percent),
             ("OpacityMax", ValueType::Percent),
@@ -1393,6 +1411,14 @@ mod tests {
         assert!(radius.fields.is_empty());
         assert!(radius.sub_blocks.is_empty());
 
+        let cursor_blocks = &schema.index().block("InGameUI").unwrap().sub_blocks;
+        assert_eq!(cursor_blocks.len(), 29);
+        assert!(cursor_blocks.iter().all(|cursor| cursor
+            .fields
+            .iter()
+            .map(|field| (field.name.as_str(), field.value_type.clone()))
+            .eq(decal_fields.iter().cloned())));
+
         let ai_data = schema.index().block("AIData").unwrap();
         let build_list = ai_data
             .sub_blocks
@@ -1410,6 +1436,44 @@ mod tests {
             schema.index().block("EvaEvent").unwrap().defines,
             Some(RefKind::EvaEvent)
         );
+        let eva_side_sounds = schema
+            .index()
+            .block("EvaEvent")
+            .unwrap()
+            .sub_blocks
+            .iter()
+            .find(|sub_block| sub_block.keyword == "SideSounds")
+            .unwrap();
+        assert_eq!(
+            eva_side_sounds
+                .fields
+                .iter()
+                .map(|field| (field.name.as_str(), field.value_type.clone()))
+                .collect::<Vec<_>>(),
+            [
+                ("Side", ValueType::AsciiString),
+                ("Sounds", ValueType::AudioStemList),
+            ]
+        );
+        for module in [
+            "W3DDependencyModelDraw",
+            "W3DModelDraw",
+            "W3DOverlordAircraftDraw",
+            "W3DOverlordTankDraw",
+            "W3DOverlordTruckDraw",
+            "W3DPoliceCarDraw",
+            "W3DScienceModelDraw",
+            "W3DSupplyDraw",
+            "W3DTankDraw",
+            "W3DTankTruckDraw",
+            "W3DTruckDraw",
+        ] {
+            assert_eq!(
+                module_field(&schema, module, "TrackMarks").value_type,
+                ValueType::TextureFile,
+                "{module}.TrackMarks"
+            );
+        }
         assert_eq!(
             schema.index().block("CrateData").unwrap().defines,
             Some(RefKind::CrateData)
