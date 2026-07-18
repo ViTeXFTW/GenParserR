@@ -7,7 +7,7 @@ use zerosyntax_schema::{RefKind, ValueType};
 use zerosyntax_syntax::ast::{Field, Module};
 use zerosyntax_syntax::{Parse, SyntaxErrorKind, SyntaxKind, SyntaxNode, SyntaxToken};
 
-use crate::diagnostics::{pragma_rest, pragma_words, Diagnostic, Severity};
+use crate::diagnostics::{pragma_rest, pragma_words, Diagnostic};
 use crate::model::scope_schema;
 use crate::{nav, Analyzer, Span, WorkspaceIndex};
 
@@ -203,12 +203,8 @@ fn diagnostic_fixes(
             }
             _ => {}
         }
-        // Suppress pragma: warnings and hints only; never errors, never the
-        // misspelled-suppression hint (suppressing it is self-defeating).
-        if d.severity != Severity::Error
-            && d.code != "unknown-suppression"
-            && suppress_seen.insert(d.code)
-        {
+        // Suppressing the misspelled-suppression hint is self-defeating.
+        if d.code != "unknown-suppression" && suppress_seen.insert(d.code) {
             suppress_fix(parse, text, d.code, out);
         }
     }
@@ -429,7 +425,7 @@ fn stub_keyword<'a>(analyzer: &'a Analyzer, kind: RefKind) -> Option<&'a str> {
 }
 
 /// Offer to add `; zerosyntax-disable: <code>` at the top of the file (or
-/// append to an existing pragma line) for warning/hint diagnostics.
+/// append to an existing pragma line) for a diagnostic.
 fn suppress_fix(parse: &Parse, text: &str, code: &'static str, out: &mut Vec<Fix>) {
     let root = parse.syntax();
     let mut first_pragma: Option<(u32, bool)> = None; // (insert offset, has_any_codes)
@@ -923,17 +919,14 @@ mod tests {
     }
 
     #[test]
-    fn suppress_fix_severity_and_dedupe_rules() {
-        // bad-bool is Error severity → no Suppress action.
+    fn suppress_fix_errors_and_dedupes() {
+        // Error diagnostics get the same Suppress action as warnings.
         let src_err = "Weapon W\n  ScaleWeaponSpeed = Maybe\nEnd\n";
         let fx_err = all_fixes(src_err);
         let has_suppress_for_error = fx_err
             .iter()
             .any(|f| f.title.contains("Suppress") && f.title.contains("bad-bool"));
-        assert!(
-            !has_suppress_for_error,
-            "errors must not get suppress: {fx_err:?}"
-        );
+        assert!(has_suppress_for_error, "error missing suppress: {fx_err:?}");
 
         // Two unresolved references with the same code → only one Suppress action.
         let src_dup = "Weapon W\n  FireFX = NoSuchFX\n  FireFX = NoSuchFX2\nEnd\n";
