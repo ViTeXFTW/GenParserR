@@ -315,7 +315,11 @@ impl ValueType {
                 };
             }
             return match active {
-                ValueType::BitFlags { .. } | ValueType::ReferenceList { .. } => Some(active),
+                ValueType::BitFlags { .. }
+                | ValueType::ReferenceList { .. }
+                | ValueType::RandomVariable { .. }
+                | ValueType::RandomKeyframe
+                | ValueType::ColorKeyframe => Some(active),
                 _ if index == 0 => Some(active),
                 _ => None,
             };
@@ -560,6 +564,16 @@ mod tests {
                 ref_kind: RefKind::FxList
             })
         ));
+    }
+
+    #[test]
+    fn structured_particle_values_type_every_raw_token() {
+        for (ty, input) in [
+            (ValueType::RandomKeyframe, vec!["0", "1", "2"]),
+            (ValueType::ColorKeyframe, vec!["R:0", "G:0", "B:0", "2"]),
+        ] {
+            assert!((0..input.len()).all(|index| ty.token_type_at_input(&input, index).is_some()));
+        }
     }
 
     fn contains(ty: &ValueType, predicate: fn(&ValueType) -> bool) -> bool {

@@ -296,6 +296,19 @@ mod tests {
     }
 
     #[test]
+    fn classifies_particle_keyframe_values_as_numbers() {
+        let src = "ParticleSystem Test\n  Alpha1 = 0 1 2\n  Color1 = R:0 G:1 B:2 3\nEnd\n";
+        let t = toks(src);
+        for value in ["0", "1", "2", "R:0", "G:1", "B:2", "3"] {
+            assert!(
+                t.iter()
+                    .any(|(kind, text)| *kind == SemKind::Number && text == value),
+                "{value} was not classified as a number"
+            );
+        }
+    }
+
+    #[test]
     fn range_tokens_cover_exactly_the_intersecting_blocks() {
         let a = Analyzer::embedded();
         let src = "Weapon A\nEnd\nWeapon B\n  ClipSize = 1\nEnd\nWeapon C\nEnd\n";
