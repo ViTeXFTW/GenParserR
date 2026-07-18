@@ -58,9 +58,15 @@ suite("ZeroSyntax VS Code extension", () => {
       percentDiagnostic.range,
       vscode.CodeActionKind.QuickFix.value
     );
-    assert.ok(
-      actions.some((action) => action.title === "Allow percentages without `%`"),
-      "expected the bare-percentage settings quick fix"
+    const allow = actions.find(
+      (action) => action.title === "Allow percentages without `%`"
+    );
+    assert.ok(allow, "expected the bare-percentage settings quick fix");
+    await vscode.commands.executeCommand("zerosyntax.allowBarePercentages");
+    await waitFor(
+      () => vscode.languages.getDiagnostics(uri),
+      (items) => items.every((diag) => diag.code !== "bad-percent"),
+      "hot-reloaded bare-percentage setting"
     );
   });
 });
