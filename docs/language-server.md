@@ -87,7 +87,8 @@ symbols.
   "schemaPath": "C:/Mods/MyMod/schema.json",
   "analysis": {
     "modelMemberStrictness": "compatible",
-    "mapOrderingDiagnostics": true
+    "mapOrderingDiagnostics": true,
+    "debounceMs": 250
   },
   "baseIniRoots": [
     "C:/Games/Zero Hour",
@@ -106,6 +107,10 @@ symbols.
   defaults to `compatible`.
 - `analysis.mapOrderingDiagnostics` controls source-backed forward-order
   warnings in `map.ini` and `solo.ini`. It defaults to `true`.
+- `analysis.debounceMs` waits this many milliseconds after the latest edit
+  before refreshing whole-document indexes and diagnostics. Parsing and
+  completions remain immediate. It defaults to `250`; valid values are
+  `0`–`5000`, where `0` refreshes as soon as possible.
 - `baseIniRoots` accepts directories and `.big` archives containing base game
   or mod INI files and W3D assets. Those INI definitions are treated as loaded
   before `map.ini` and `solo.ini`.

@@ -86,6 +86,13 @@
           "default": true,
           "markdownDescription": "Warn when map.ini or solo.ini uses a definition before an engine parser resolves it. Changing this restarts the language server."
         },
+        "zerosyntax.analysis.debounceMs": {
+          "type": "integer",
+          "default": 250,
+          "minimum": 0,
+          "maximum": 5000,
+          "markdownDescription": "Milliseconds to wait after typing before refreshing whole-document indexes and diagnostics. Parsing and completions remain immediate. Use `0` to refresh as soon as possible. Changing this restarts the language server."
+        },
         "zerosyntax.trace.server": {
           "type": "string",
           "enum": [
