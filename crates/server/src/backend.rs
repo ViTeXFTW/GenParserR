@@ -75,7 +75,7 @@ pub struct Backend {
     index: Arc<RwLock<WorkspaceIndex>>,
     /// Workspace roots, captured at `initialize` and scanned in `initialized`.
     roots: Mutex<Vec<PathBuf>>,
-    /// User-configured game/mod INI roots. Entries may be directories or `.big`
+    /// User-configured game/mod INI and asset roots. Entries may be directories or `.big`
     /// archives; both seed definitions that map.ini/solo.ini can rely on.
     base_roots: Mutex<Vec<PathBuf>>,
     /// Number of base INI files indexed from configured base roots.
@@ -388,7 +388,7 @@ impl Backend {
         self.client
             .show_message(
                 MessageType::WARNING,
-                "ZeroSyntax v2: map/solo.ini diagnostics are limited until base game or mod INIs are configured. Set `zerosyntax.baseIniRoots` to your game/mod `.big` files or INI folder.",
+                "ZeroSyntax v2: map/solo.ini diagnostics are limited until base game or mod data is configured. Set `zerosyntax.baseIniRoots` to your game/mod `.big` files or data folders.",
             )
             .await;
     }
@@ -439,7 +439,7 @@ impl Backend {
         let (scanned, base_scanned) = handle.await.unwrap_or_default();
         let base_ini_count = base_scanned
             .iter()
-            .filter(|(_, _, _, _, _, _, models, _)| models.is_empty())
+            .filter(|(_, _, _, _, _, _, models, assets, _)| models.is_empty() && assets.is_empty())
             .count();
         self.base_indexed_count
             .store(base_ini_count, Ordering::Relaxed);
@@ -447,13 +447,23 @@ impl Backend {
         let ini_total = base_ini_count
             + scanned
                 .iter()
-                .filter(|(_, _, _, _, _, _, models, _)| models.is_empty())
+                .filter(|(_, _, _, _, _, _, models, assets, _)| {
+                    models.is_empty() && assets.is_empty()
+                })
                 .count();
         let model_total: usize = base_scanned
             .iter()
             .chain(scanned.iter())
-            .map(|(_, _, _, _, _, _, models, _)| models.len())
+            .map(|(_, _, _, _, _, _, models, _, _)| models.len())
             .sum();
+        let (audio_total, texture_total) = base_scanned
+            .iter()
+            .chain(scanned.iter())
+            .flat_map(|(_, _, _, _, _, _, _, assets, _)| assets)
+            .fold((0, 0), |(audio, texture), asset| match asset.kind {
+                zerosyntax_analysis::index::AssetKind::Audio => (audio + 1, texture),
+                zerosyntax_analysis::index::AssetKind::Texture => (audio, texture + 1),
+            });
         // Don't overwrite index entries for already-open documents with stale
         // disk content; `initialized` calls `refresh` for each open doc right
         // after this returns, so they will populate the index from live text.
@@ -466,7 +476,7 @@ impl Backend {
             let Ok(mut idx) = self.index.write() else {
                 return;
             };
-            for (uri, defs, refs, tags, object_models, object_parents, models, text) in
+            for (uri, defs, refs, tags, object_models, object_parents, models, assets, text) in
                 base_scanned.into_iter().chain(scanned)
             {
                 if let Some(text) = text {
@@ -479,11 +489,18 @@ impl Backend {
                     idx.set_file_object_models(&uri, object_models);
                     idx.set_file_object_parents(&uri, object_parents);
                     idx.set_file_models(&uri, models);
+                    idx.set_file_assets(&uri, assets);
                 }
             }
         }
-        self.end_scan_progress(progress_token, ini_total, model_total)
-            .await;
+        self.end_scan_progress(
+            progress_token,
+            ini_total,
+            model_total,
+            audio_total,
+            texture_total,
+        )
+        .await;
     }
 
     /// Ask the client to show an indexing spinner. Returns the token to end
@@ -505,7 +522,7 @@ impl Backend {
                 value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
                     WorkDoneProgressBegin {
                         title: "Indexing game data".into(),
-                        message: Some("scanning workspace and base INI roots".into()),
+                        message: Some("scanning workspace and configured game-data roots".into()),
                         cancellable: Some(false),
                         // Signals that reports will carry a percentage.
                         percentage: Some(0),
@@ -543,6 +560,8 @@ impl Backend {
         token: Option<NumberOrString>,
         ini_total: usize,
         model_total: usize,
+        audio_total: usize,
+        texture_total: usize,
     ) {
         let Some(token) = token else { return };
         self.client
@@ -550,7 +569,7 @@ impl Backend {
                 token,
                 value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(WorkDoneProgressEnd {
                     message: Some(format!(
-                        "{ini_total} INI files, {model_total} W3D models indexed"
+                        "{ini_total} INI files, {model_total} W3D models, {audio_total} audio files, {texture_total} textures indexed"
                     )),
                 })),
             })
@@ -801,19 +820,38 @@ impl LanguageServer for Backend {
         for uri in open {
             self.refresh(&uri, None).await;
         }
-        let (ini, models) = {
+        let (ini, models, audio, textures) = {
             let idx = self.index.read().ok();
             let models = idx
                 .as_ref()
                 .map(|i| i.model_names().count())
                 .unwrap_or_default();
-            (self.base_indexed_count.load(Ordering::Relaxed), models)
+            let audio = idx
+                .as_ref()
+                .map(|i| {
+                    i.asset_names(zerosyntax_analysis::index::AssetKind::Audio)
+                        .count()
+                })
+                .unwrap_or_default();
+            let textures = idx
+                .as_ref()
+                .map(|i| {
+                    i.asset_names(zerosyntax_analysis::index::AssetKind::Texture)
+                        .count()
+                })
+                .unwrap_or_default();
+            (
+                self.base_indexed_count.load(Ordering::Relaxed),
+                models,
+                audio,
+                textures,
+            )
         };
         self.client
             .log_message(
                 MessageType::INFO,
                 format!(
-                    "zerosyntax language server ready ({ini} base INI files, {models} W3D models indexed)"
+                    "zerosyntax language server ready ({ini} base INI files, {models} W3D models, {audio} audio files, {textures} textures indexed)"
                 ),
             )
             .await;
@@ -1614,36 +1652,73 @@ mod tests {
     }
 
     #[test]
-    fn scans_ini_from_big_archive() {
+    fn scans_ini_w3d_audio_and_texture_from_big_archive() {
         let dir = std::env::temp_dir();
         let path = dir.join(format!("zerosyntax-test-{}.big", std::process::id()));
-        let entry_name = b"Data\\INI\\Test.ini\0";
-        let ini = b"Object BigArchiveObject\nEnd\n";
-        let data_offset = 0x10 + 8 + entry_name.len();
-        let archive_size = data_offset + ini.len();
+        let entries: Vec<(&str, &[u8])> = vec![
+            ("Data\\INI\\Test.ini", b"Object BigArchiveObject\nEnd\n"),
+            ("Art\\Good.w3d", b""),
+            ("Audio\\Click.WAV", b"not read"),
+            ("Textures\\Particle.DDS", b"not read"),
+        ];
+        let data_offset = 0x10
+            + entries
+                .iter()
+                .map(|(name, _)| 8 + name.len() + 1)
+                .sum::<usize>();
+        let archive_size = data_offset + entries.iter().map(|(_, data)| data.len()).sum::<usize>();
 
         let mut bytes = Vec::new();
         bytes.extend_from_slice(b"BIGF");
         bytes.extend_from_slice(&(archive_size as u32).to_be_bytes());
-        bytes.extend_from_slice(&1u32.to_be_bytes());
+        bytes.extend_from_slice(&(entries.len() as u32).to_be_bytes());
         bytes.extend_from_slice(&0u32.to_be_bytes());
-        bytes.extend_from_slice(&(data_offset as u32).to_be_bytes());
-        bytes.extend_from_slice(&(ini.len() as u32).to_be_bytes());
-        bytes.extend_from_slice(entry_name);
-        bytes.extend_from_slice(ini);
+        let mut offset = data_offset;
+        for (name, data) in &entries {
+            bytes.extend_from_slice(&(offset as u32).to_be_bytes());
+            bytes.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            bytes.extend_from_slice(name.as_bytes());
+            bytes.push(0);
+            offset += data.len();
+        }
+        for (_, data) in &entries {
+            bytes.extend_from_slice(data);
+        }
         std::fs::write(&path, bytes).unwrap();
 
         let analyzer = Analyzer::embedded();
         let scanned = scan_big(&analyzer, &path).unwrap();
         let _ = std::fs::remove_file(&path);
 
-        assert_eq!(scanned.len(), 1);
-        assert!(Url::parse(&scanned[0].0).is_ok());
-        assert!(scanned[0].1.iter().any(|d| d.name == "BigArchiveObject"));
-        assert_eq!(
-            scanned[0].7.as_deref(),
-            Some("Object BigArchiveObject\nEnd\n")
-        );
+        assert_eq!(scanned.len(), 3, "INI, W3D, and one aggregated asset entry");
+        let ini = scanned.iter().find(|entry| !entry.1.is_empty()).unwrap();
+        assert!(Url::parse(&ini.0).is_ok());
+        assert!(ini.1.iter().any(|d| d.name == "BigArchiveObject"));
+        assert_eq!(ini.8.as_deref(), Some("Object BigArchiveObject\nEnd\n"));
+        assert!(scanned
+            .iter()
+            .any(|entry| entry.6.iter().any(|model| model.name == "Good")));
+        let assets = &scanned.iter().find(|entry| !entry.7.is_empty()).unwrap().7;
+        assert_eq!(assets.len(), 2);
+        assert!(assets.iter().any(|asset| asset.name == "Click.WAV"));
+        assert!(assets.iter().any(|asset| asset.name == "Particle.DDS"));
+    }
+
+    #[test]
+    fn loose_directory_scan_indexes_audio_and_texture_assets() {
+        let dir = std::env::temp_dir().join(format!("zerosyntax-assets-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Click.wav"), b"").unwrap();
+        std::fs::write(dir.join("Particle.tga"), b"").unwrap();
+        let scanned = scan_roots(&Analyzer::embedded(), std::slice::from_ref(&dir));
+        std::fs::remove_dir_all(&dir).unwrap();
+        let assets = scanned
+            .into_iter()
+            .flat_map(|entry| entry.7)
+            .collect::<Vec<_>>();
+        assert_eq!(assets.len(), 2);
+        assert!(assets.iter().any(|asset| asset.name == "Click.wav"));
+        assert!(assets.iter().any(|asset| asset.name == "Particle.tga"));
     }
 
     #[test]
@@ -1667,13 +1742,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
 
         let mut idx = WorkspaceIndex::new();
-        for (uri, defs, refs, tags, object_models, object_parents, models, _) in scanned {
+        for (uri, defs, refs, tags, object_models, object_parents, models, assets, _) in scanned {
             idx.set_file(&uri, defs);
             idx.set_file_refs(&uri, refs);
             idx.set_file_tags(&uri, tags);
             idx.set_file_object_models(&uri, object_models);
             idx.set_file_object_parents(&uri, object_parents);
             idx.set_file_models(&uri, models);
+            idx.set_file_assets(&uri, assets);
         }
         assert!(idx.is_model_asset("Good"), "model name from file stem");
 

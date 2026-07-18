@@ -16,11 +16,11 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use zerosyntax_schema::{Field as SchemaField, RefKind, ValueType};
+use zerosyntax_schema::{AudioExtension, Field as SchemaField, RefKind, ValueType};
 use zerosyntax_syntax::ast::{Block, Field, Module};
 use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode, SyntaxToken};
 
-use crate::index::ModelMemberStrictness;
+use crate::index::{AssetKind, ModelMemberStrictness};
 use crate::model::{
     is_model_asset_type, is_model_member_type, model_member_matches, models_for_source,
     module_fits_slot, scope_schema, ScopeSchema,
@@ -96,6 +96,8 @@ pub const KNOWN_CODES: &[&str] = &[
     "unresolved-reference",
     "unknown-model",
     "unknown-model-member",
+    "unknown-audio-file",
+    "unknown-texture",
     "unknown-suppression",
     "module-wrong-slot",
     "duplicate-module-tag",
@@ -989,6 +991,7 @@ impl<'a> Ctx<'a> {
         if let Some(schema_field) = scope.field(name) {
             self.validate_value(&field, &schema_field.value_type);
             self.validate_model_asset(&field, schema_field, scope_node);
+            self.validate_raw_asset(&field, &schema_field.value_type);
         } else if scope.has_field_schema()
             && !scope.module_slots().iter().any(|s| s.keyword == name)
         {
@@ -1049,6 +1052,63 @@ impl<'a> Ctx<'a> {
                     );
                 }
             }
+        }
+    }
+
+    fn validate_raw_asset(&mut self, field: &Field, ty: &ValueType) {
+        let Some(index) = self.index else { return };
+        let tokens = field.value_tokens();
+        match ty {
+            ValueType::AudioFile { extension } if index.has_assets(AssetKind::Audio) => {
+                if let Some(token) = tokens.first() {
+                    let name = unquote(token.text());
+                    let allowed = match extension {
+                        AudioExtension::Any => {
+                            has_extension(name, "wav") || has_extension(name, "mp3")
+                        }
+                        AudioExtension::Wav => has_extension(name, "wav"),
+                        AudioExtension::Mp3 => has_extension(name, "mp3"),
+                    };
+                    if !name.eq_ignore_ascii_case("None")
+                        && (!allowed || !index.is_asset(AssetKind::Audio, name))
+                    {
+                        self.warning(
+                            token,
+                            "unknown-audio-file",
+                            format!("`{name}` is not a known audio file"),
+                        );
+                    }
+                }
+            }
+            ValueType::AudioStemList if index.has_assets(AssetKind::Audio) => {
+                for token in tokens {
+                    let name = unquote(token.text());
+                    if !name.eq_ignore_ascii_case("None")
+                        && !index.is_asset(AssetKind::Audio, &format!("{name}.wav"))
+                    {
+                        self.warning(
+                            &token,
+                            "unknown-audio-file",
+                            format!("`{name}` is not a known WAV sound stem"),
+                        );
+                    }
+                }
+            }
+            ValueType::TextureFile | ValueType::TextureStem | ValueType::TextureSequenceStem
+                if index.has_assets(AssetKind::Texture) =>
+            {
+                if let Some(token) = tokens.first() {
+                    let name = unquote(token.text());
+                    if !name.eq_ignore_ascii_case("None") && !texture_exists(index, ty, name) {
+                        self.warning(
+                            token,
+                            "unknown-texture",
+                            format!("`{name}` is not a known texture"),
+                        );
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
@@ -1511,6 +1571,11 @@ impl<'a> Ctx<'a> {
             | ValueType::W3dModel
             | ValueType::W3dModelList
             | ValueType::W3dModelMember
+            | ValueType::AudioFile { .. }
+            | ValueType::AudioStemList
+            | ValueType::TextureFile
+            | ValueType::TextureStem
+            | ValueType::TextureSequenceStem
             | ValueType::Color
             | ValueType::Coord2D
             | ValueType::Coord3D
@@ -1828,6 +1893,30 @@ impl<'a> Ctx<'a> {
             code,
             message,
         });
+    }
+}
+
+fn has_extension(name: &str, extension: &str) -> bool {
+    name.rsplit_once('.')
+        .is_some_and(|(_, actual)| actual.eq_ignore_ascii_case(extension))
+}
+
+fn texture_exists(index: &WorkspaceIndex, ty: &ValueType, name: &str) -> bool {
+    let exact = |candidate: &str| index.is_asset(AssetKind::Texture, candidate);
+    match ty {
+        ValueType::TextureFile if has_extension(name, "dds") => exact(name),
+        ValueType::TextureFile if has_extension(name, "tga") => {
+            exact(name) || exact(&format!("{}.dds", &name[..name.len() - 4]))
+        }
+        ValueType::TextureFile => false,
+        ValueType::TextureStem => exact(&format!("{name}.tga")) || exact(&format!("{name}.dds")),
+        ValueType::TextureSequenceStem => {
+            exact(&format!("{name}.tga"))
+                || exact(&format!("{name}.dds"))
+                || exact(&format!("{name}0000.tga"))
+                || exact(&format!("{name}0000.dds"))
+        }
+        _ => false,
     }
 }
 
@@ -2736,5 +2825,40 @@ End
         assert!(!diagnose(&a, &parse, Some(&index), None)
             .iter()
             .any(|d| d.code == "unknown-model-member"));
+    }
+
+    #[test]
+    fn raw_asset_warnings_are_gated_per_kind() {
+        let a = Analyzer::embedded();
+        let src = "DialogEvent Dialog\n  Filename = Missing.wav\nEnd\nMappedImage Image\n  Texture = Missing.tga\nEnd\n";
+        let parse = a.parse(src);
+        let mut index = WorkspaceIndex::new();
+        let codes = |index: &WorkspaceIndex| {
+            diagnose(&a, &parse, Some(index), None)
+                .into_iter()
+                .map(|diagnostic| diagnostic.code)
+                .collect::<Vec<_>>()
+        };
+        assert!(!codes(&index)
+            .iter()
+            .any(|code| code.starts_with("unknown-")));
+        index.set_file_assets(
+            "audio",
+            vec![crate::index::FileAsset {
+                kind: AssetKind::Audio,
+                name: "Known.wav".into(),
+            }],
+        );
+        let audio_only = codes(&index);
+        assert!(audio_only.contains(&"unknown-audio-file"));
+        assert!(!audio_only.contains(&"unknown-texture"));
+        index.set_file_assets(
+            "texture",
+            vec![crate::index::FileAsset {
+                kind: AssetKind::Texture,
+                name: "Known.dds".into(),
+            }],
+        );
+        assert!(codes(&index).contains(&"unknown-texture"));
     }
 }

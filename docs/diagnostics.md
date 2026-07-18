@@ -44,9 +44,11 @@ file. Fix error-level syntax and schema problems rather than suppressing them.
 | `bad-enum` | A value is not a member of the expected enum. |
 | `bad-flag` | A bitflag is not a member of the expected flag set. |
 | `bad-prefixed` | A tagged value does not use its required `Prefix:value` form. |
-| `unresolved-reference` | A referenced definition is not found in the workspace or configured base INI roots. |
+| `unresolved-reference` | A referenced definition is not found in the workspace or configured game-data roots. |
 | `unknown-model` | A model name is not found in the indexed W3D assets. |
 | `unknown-model-member` | A bone or subobject is not found in the models active in that scope. |
+| `unknown-audio-file` | An audio filename or WAV stem is not found in indexed WAV/MP3 assets. Enabled only after audio assets are indexed. |
+| `unknown-texture` | A texture filename or stem is not found in indexed TGA/DDS assets. Enabled only after texture assets are indexed. |
 | `unknown-suppression` | A `zerosyntax-disable` comment names an unknown code. |
 | `module-wrong-slot` | A module type is used under the wrong slot. |
 | `duplicate-module-tag` | Two modules in one object use the same module tag. |

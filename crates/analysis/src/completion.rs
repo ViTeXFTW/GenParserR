@@ -6,10 +6,11 @@
 //! * after `=` -> enum/bitflag members, `Yes`/`No`, module names, or (with the
 //!   workspace index) names of the referenced definition kind.
 
-use zerosyntax_schema::ValueType;
+use zerosyntax_schema::{AudioExtension, ValueType};
 use zerosyntax_syntax::ast::{Block, Field, Module};
 use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode};
 
+use crate::index::AssetKind;
 use crate::model::{
     is_model_asset_type, is_model_member_type, model_member_ini_name, models_for_source,
     scope_schema,
@@ -494,6 +495,10 @@ fn type_snippet_placeholder(ty: &ValueType, n: usize) -> String {
         ValueType::AsciiString | ValueType::AsciiStringList | ValueType::QuotedString => {
             format!("${{{n}:Value}}")
         }
+        ValueType::AudioFile { .. } => format!("${{{n}:Sound.wav}}"),
+        ValueType::AudioStemList => format!("${{{n}:Sound}}"),
+        ValueType::TextureFile => format!("${{{n}:Texture.tga}}"),
+        ValueType::TextureStem | ValueType::TextureSequenceStem => format!("${{{n}:Texture}}"),
         ValueType::W3dModel | ValueType::W3dModelList => format!("${{{n}:Model}}"),
         ValueType::W3dModelMember => format!("${{{n}:Bone}}"),
         _ => format!("${{{n}:?}}"),
@@ -678,9 +683,81 @@ fn completions_for_type(
             }));
             out
         }
+        ValueType::AudioFile { extension } => asset_completions(
+            index,
+            AssetKind::Audio,
+            "audio file",
+            |name| match extension {
+                AudioExtension::Any => Some(name.to_string()),
+                AudioExtension::Wav if has_extension(name, "wav") => Some(name.to_string()),
+                AudioExtension::Mp3 if has_extension(name, "mp3") => Some(name.to_string()),
+                _ => None,
+            },
+        ),
+        ValueType::AudioStemList => {
+            asset_completions(index, AssetKind::Audio, "sound stem", |name| {
+                has_extension(name, "wav").then(|| file_stem(name).to_string())
+            })
+        }
+        ValueType::TextureFile => asset_completions(index, AssetKind::Texture, "texture", |name| {
+            Some(format!("{}.tga", file_stem(name)))
+        }),
+        ValueType::TextureStem => asset_completions(index, AssetKind::Texture, "texture", |name| {
+            Some(file_stem(name).to_string())
+        }),
+        ValueType::TextureSequenceStem => {
+            asset_completions(index, AssetKind::Texture, "texture", |name| {
+                let stem = file_stem(name);
+                if let Some(base) = stem.strip_suffix("0000") {
+                    Some(base.to_string())
+                } else if stem
+                    .as_bytes()
+                    .get(stem.len().saturating_sub(4)..)
+                    .is_some_and(|suffix| {
+                        suffix.len() == 4 && suffix.iter().all(u8::is_ascii_digit)
+                    })
+                {
+                    None
+                } else {
+                    Some(stem.to_string())
+                }
+            })
+        }
         ValueType::W3dModel | ValueType::W3dModelList | ValueType::W3dModelMember => Vec::new(),
         _ => Vec::new(),
     }
+}
+
+fn file_stem(name: &str) -> &str {
+    name.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(name)
+}
+
+fn has_extension(name: &str, extension: &str) -> bool {
+    name.rsplit_once('.')
+        .is_some_and(|(_, actual)| actual.eq_ignore_ascii_case(extension))
+}
+
+fn asset_completions(
+    index: Option<&WorkspaceIndex>,
+    kind: AssetKind,
+    detail: &str,
+    label: impl Fn(&str) -> Option<String>,
+) -> Vec<Completion> {
+    let Some(index) = index.filter(|index| index.has_assets(kind)) else {
+        return Vec::new();
+    };
+    let mut seen = std::collections::HashSet::new();
+    index
+        .asset_names(kind)
+        .filter_map(label)
+        .filter(|label| seen.insert(label.to_ascii_lowercase()))
+        .map(|label| Completion {
+            label,
+            kind: CompletionKind::Reference,
+            detail: Some(detail.to_string()),
+            insert: None,
+        })
+        .collect()
 }
 
 fn top_level_completions(analyzer: &Analyzer) -> Vec<Completion> {

@@ -28,14 +28,16 @@ across its INI files.
 
 When editing `map.ini` or `solo.ini`, configure **ZeroSyntax v2: Base Ini Roots**
 with any game or mod folders and `.big` archives that load before the map. This
-prevents false unresolved-reference warnings and enables W3D model and bone
-checks.
+prevents false unresolved-reference warnings and enables W3D model, bone,
+WAV/MP3 audio, and TGA/DDS texture checks. Configure every loaded game/mod root;
+asset warnings activate per kind once any matching asset is indexed. DDS-only
+textures are offered using the engine-compatible `stem.tga` spelling.
 
 ## Settings
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `zerosyntax.baseIniRoots` | `[]` | Base game/mod directories and `.big` archives used for map and model checks. |
+| `zerosyntax.baseIniRoots` | `[]` | Base game/mod directories and `.big` archives used for INI and game-asset checks. |
 | `zerosyntax.schema.path` | empty | Custom schema JSON; invalid files fall back to the built-in schema. |
 | `zerosyntax.analysis.modelMemberStrictness` | `compatible` | Disables member warnings, accepts any applicable model, or requires every model. |
 | `zerosyntax.analysis.mapOrderingDiagnostics` | `true` | Warns about source-proven forward-order problems in `map.ini` and `solo.ini`. |
