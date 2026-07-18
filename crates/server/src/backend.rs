@@ -173,18 +173,26 @@ fn filter_map_ordering_diagnostics(
     }
 }
 
+#[derive(Clone, Copy)]
+struct RefreshOptions {
+    enc: PositionEnc,
+    expected_version: Option<i32>,
+    map_ordering_diagnostics_enabled: bool,
+}
+
 async fn refresh_document(
     client: Client,
     analyzer: Arc<Analyzer>,
     docs: Arc<DashMap<Url, DocumentState>>,
     index: Arc<RwLock<WorkspaceIndex>>,
     uri: Url,
-    enc: PositionEnc,
-    expected_version: Option<i32>,
-    map_ordering_diagnostics_enabled: bool,
+    options: RefreshOptions,
 ) {
     let Some((rope, parse, version)) = docs.get(&uri).and_then(|d| {
-        if expected_version.is_some_and(|expected| expected != d.version) {
+        if options
+            .expected_version
+            .is_some_and(|expected| expected != d.version)
+        {
             None
         } else {
             Some((d.rope.clone(), d.parse.clone(), d.version))
@@ -236,10 +244,10 @@ async fn refresh_document(
             Some(uri.as_str()),
             &mut cache,
         );
-        filter_map_ordering_diagnostics(&mut diags, map_ordering_diagnostics_enabled);
+        filter_map_ordering_diagnostics(&mut diags, options.map_ordering_diagnostics_enabled);
         diags
             .iter()
-            .map(|d| convert::to_lsp_diagnostic(&rope, d, enc))
+            .map(|d| convert::to_lsp_diagnostic(&rope, d, options.enc))
             .collect()
     };
 
@@ -316,9 +324,11 @@ impl Backend {
             self.docs.clone(),
             self.index.clone(),
             uri.clone(),
-            self.enc(),
-            expected_version,
-            self.map_ordering_diagnostics_enabled(),
+            RefreshOptions {
+                enc: self.enc(),
+                expected_version,
+                map_ordering_diagnostics_enabled: self.map_ordering_diagnostics_enabled(),
+            },
         )
         .await;
         self.maybe_warn_missing_base_roots(uri).await;
@@ -344,9 +354,11 @@ impl Backend {
                 docs,
                 index,
                 uri,
-                enc,
-                Some(version),
-                map_ordering_diagnostics_enabled,
+                RefreshOptions {
+                    enc,
+                    expected_version: Some(version),
+                    map_ordering_diagnostics_enabled,
+                },
             )
             .await;
         });
