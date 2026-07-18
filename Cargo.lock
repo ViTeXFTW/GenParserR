@@ -1528,7 +1528,7 @@ dependencies = [
 
 [[package]]
 name = "zerosyntax-analysis"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "criterion",
  "rowan",
@@ -1540,7 +1540,7 @@ dependencies = [
 
 [[package]]
 name = "zerosyntax-schema"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1548,7 +1548,7 @@ dependencies = [
 
 [[package]]
 name = "zerosyntax-server"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1568,7 +1568,7 @@ dependencies = [
 
 [[package]]
 name = "zerosyntax-syntax"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "criterion",
  "logos",
