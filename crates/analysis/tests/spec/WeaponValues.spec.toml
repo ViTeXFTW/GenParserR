@@ -1,0 +1,44 @@
+[[diag]]
+severity = "warning"
+code = "unresolved-reference"
+on = "MissingLaser"
+
+[[diag]]
+severity = "error"
+code = "bad-enum"
+on = "CRANKY"
+
+[[diag]]
+severity = "error"
+code = "bad-flag"
+on = "FRIENDS"
+
+[[diag]]
+severity = "error"
+code = "bad-flag"
+on = "CIVILIANS"
+
+[[diag]]
+severity = "error"
+code = "bad-bool"
+on = "Maybe"
+
+[[diag]]
+severity = "error"
+code = "bad-number"
+on = "eventually"
+
+[[diag]]
+severity = "error"
+code = "bad-enum"
+on = "SOMETIMES"
+
+[[diag]]
+severity = "error"
+code = "bad-enum"
+on = "POWER"
+
+[[diag]]
+severity = "error"
+code = "bad-percent"
+on = "lots"

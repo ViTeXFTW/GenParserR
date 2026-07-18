@@ -16005,7 +16005,8 @@
         {
           "name": "LaserName",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "reference",
+            "ref_kind": "object"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -16016,7 +16017,7 @@
             "kind": "ascii_string"
           },
           "parse_fn": "INI::parseAsciiString",
-          "doc": null
+          "doc": "Bone on the firing object's model; a shared Weapon template does not identify that object statically."
         },
         {
           "name": "LeechRangeWeapon",
@@ -16134,8 +16135,8 @@
         {
           "name": "DamageStatusType",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "ObjectStatusMaskType::parseSingleBitFromINI"
+            "kind": "enum",
+            "value_set": "object_status"
           },
           "parse_fn": "ObjectStatusMaskType::parseSingleBitFromINI",
           "doc": null
@@ -16278,8 +16279,31 @@
         {
           "name": "DelayBetweenShots",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "WeaponTemplate::parseShotDelay"
+            "kind": "one_of",
+            "variants": [
+              {
+                "kind": "duration"
+              },
+              {
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "prefixed",
+                    "prefix": "Min",
+                    "value_type": {
+                      "kind": "duration"
+                    }
+                  },
+                  {
+                    "kind": "prefixed",
+                    "prefix": "Max",
+                    "value_type": {
+                      "kind": "duration"
+                    }
+                  }
+                ]
+              }
+            ]
           },
           "parse_fn": "WeaponTemplate::parseShotDelay",
           "doc": null
@@ -16287,8 +16311,8 @@
         {
           "name": "RadiusDamageAffects",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
+            "kind": "bit_flags",
+            "value_set": "weapon_affects"
           },
           "parse_fn": "INI::parseBitString32",
           "doc": null
@@ -16296,8 +16320,8 @@
         {
           "name": "ProjectileCollidesWith",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
+            "kind": "bit_flags",
+            "value_set": "weapon_collide"
           },
           "parse_fn": "INI::parseBitString32",
           "doc": null
@@ -16305,8 +16329,7 @@
         {
           "name": "AntiAirborneVehicle",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitInInt32"
+            "kind": "bool"
           },
           "parse_fn": "INI::parseBitInInt32",
           "doc": null
@@ -16314,8 +16337,7 @@
         {
           "name": "AntiGround",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitInInt32"
+            "kind": "bool"
           },
           "parse_fn": "INI::parseBitInInt32",
           "doc": null
@@ -16323,8 +16345,7 @@
         {
           "name": "AntiProjectile",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitInInt32"
+            "kind": "bool"
           },
           "parse_fn": "INI::parseBitInInt32",
           "doc": null
@@ -16332,8 +16353,7 @@
         {
           "name": "AntiSmallMissile",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitInInt32"
+            "kind": "bool"
           },
           "parse_fn": "INI::parseBitInInt32",
           "doc": null
@@ -16341,8 +16361,7 @@
         {
           "name": "AntiMine",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitInInt32"
+            "kind": "bool"
           },
           "parse_fn": "INI::parseBitInInt32",
           "doc": null
@@ -16350,8 +16369,7 @@
         {
           "name": "AntiParachute",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitInInt32"
+            "kind": "bool"
           },
           "parse_fn": "INI::parseBitInInt32",
           "doc": null
@@ -16359,8 +16377,7 @@
         {
           "name": "AntiAirborneInfantry",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitInInt32"
+            "kind": "bool"
           },
           "parse_fn": "INI::parseBitInInt32",
           "doc": null
@@ -16368,8 +16385,7 @@
         {
           "name": "AntiBallisticMissile",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitInInt32"
+            "kind": "bool"
           },
           "parse_fn": "INI::parseBitInInt32",
           "doc": null
@@ -16386,8 +16402,20 @@
         {
           "name": "WeaponBonus",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "WeaponTemplate::parseWeaponBonusSet"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "enum",
+                "value_set": "weapon_bonus_condition"
+              },
+              {
+                "kind": "enum",
+                "value_set": "weapon_bonus_field"
+              },
+              {
+                "kind": "percent"
+              }
+            ]
           },
           "parse_fn": "WeaponTemplate::parseWeaponBonusSet",
           "doc": null
@@ -67970,6 +67998,32 @@
       "doc": "TheWeaponBonusNames (Weapon.h)"
     },
     {
+      "id": "weapon_bonus_field",
+      "members": [
+        {
+          "name": "DAMAGE",
+          "value": 0
+        },
+        {
+          "name": "RADIUS",
+          "value": 1
+        },
+        {
+          "name": "RANGE",
+          "value": 2
+        },
+        {
+          "name": "RATE_OF_FIRE",
+          "value": 3
+        },
+        {
+          "name": "PRE_ATTACK",
+          "value": 4
+        }
+      ],
+      "doc": "TheWeaponBonusFieldNames (Weapon.h)"
+    },
+    {
       "id": "ocl_create_location",
       "members": [
         {
@@ -69458,6 +69512,48 @@
           "value": 6
         }
       ]
+    },
+    {
+      "id": "weapon_collide",
+      "members": [
+        {
+          "name": "ALLIES",
+          "value": 0
+        },
+        {
+          "name": "ENEMIES",
+          "value": 1
+        },
+        {
+          "name": "STRUCTURES",
+          "value": 2
+        },
+        {
+          "name": "SHRUBBERY",
+          "value": 3
+        },
+        {
+          "name": "PROJECTILES",
+          "value": 4
+        },
+        {
+          "name": "WALLS",
+          "value": 5
+        },
+        {
+          "name": "SMALL_MISSILES",
+          "value": 6
+        },
+        {
+          "name": "BALLISTIC_MISSILES",
+          "value": 7
+        },
+        {
+          "name": "CONTROLLED_STRUCTURES",
+          "value": 8
+        }
+      ],
+      "doc": "TheWeaponCollideMaskNames (Weapon.h)"
     },
     {
       "id": "terrain_class",

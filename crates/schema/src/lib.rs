@@ -828,6 +828,25 @@ mod tests {
     }
 
     #[test]
+    fn weapon_fields_have_concrete_value_types() {
+        let schema = embedded();
+        let weapon = schema
+            .index()
+            .block("Weapon")
+            .expect("Weapon block missing");
+        for field in &weapon.fields {
+            assert!(
+                !contains(&field.value_type, |ty| matches!(
+                    ty,
+                    ValueType::Unknown { .. }
+                )),
+                "Weapon.{} still has an unknown value type",
+                field.name
+            );
+        }
+    }
+
+    #[test]
     fn object_backed_module_fields_are_object_references() {
         let schema = embedded();
         let expected = [
