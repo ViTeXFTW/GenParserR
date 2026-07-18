@@ -87,6 +87,7 @@ symbols.
   "schemaPath": "C:/Mods/MyMod/schema.json",
   "analysis": {
     "modelMemberStrictness": "compatible",
+    "allowPercentagesWithoutSign": false,
     "mapOrderingDiagnostics": true,
     "debounceMs": 250
   },
@@ -105,6 +106,8 @@ symbols.
 - `analysis.modelMemberStrictness` is `off`, `compatible` (member exists in any
   applicable model), or `strict` (member exists in every applicable model). It
   defaults to `compatible`.
+- `analysis.allowPercentagesWithoutSign` accepts engine-compatible bare numbers
+  in percentage fields. It defaults to `false`, requiring the trailing `%`.
 - `analysis.mapOrderingDiagnostics` controls source-backed forward-order
   warnings in `map.ini` and `solo.ini`. It defaults to `true`.
 - `analysis.debounceMs` waits this many milliseconds after the latest edit
