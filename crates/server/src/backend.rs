@@ -9,6 +9,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::time::Duration;
 
 use dashmap::DashMap;
 use ropey::Rope;
@@ -46,15 +47,32 @@ struct DocumentState {
     last_semantic: Option<(u64, Vec<SemanticToken>)>,
 }
 
+const DEFAULT_ANALYSIS_DEBOUNCE_MS: u64 = 250;
+const MAX_ANALYSIS_DEBOUNCE_MS: u64 = 5_000;
+
+fn analysis_debounce(options: Option<&serde_json::Value>) -> Duration {
+    let value = options
+        .and_then(|v| v.get("analysis"))
+        .and_then(|v| v.get("debounceMs"));
+    let millis = value
+        .and_then(|v| {
+            v.as_i64()
+                .map(|n| n.clamp(0, MAX_ANALYSIS_DEBOUNCE_MS as i64) as u64)
+                .or_else(|| v.as_u64().map(|n| n.min(MAX_ANALYSIS_DEBOUNCE_MS)))
+        })
+        .unwrap_or(DEFAULT_ANALYSIS_DEBOUNCE_MS);
+    Duration::from_millis(millis)
+}
+
 pub struct Backend {
     client: Client,
     analyzer: RwLock<Arc<Analyzer>>,
     schema_error: Mutex<Option<String>>,
     /// Open documents, keyed by URI.
-    docs: DashMap<Url, DocumentState>,
+    docs: Arc<DashMap<Url, DocumentState>>,
     /// Read-only documents synthesized from configured `.big` archives.
     virtual_files: DashMap<String, Arc<str>>,
-    index: RwLock<WorkspaceIndex>,
+    index: Arc<RwLock<WorkspaceIndex>>,
     /// Workspace roots, captured at `initialize` and scanned in `initialized`.
     roots: Mutex<Vec<PathBuf>>,
     /// User-configured game/mod INI and asset roots. Entries may be directories or `.big`
@@ -75,12 +93,18 @@ pub struct Backend {
     /// default: format-on-save rewriting a whole hand-indented game file is
     /// surprising, so formatting is opt-in per editor.
     format_enabled: OnceLock<bool>,
+    /// Whether source-backed map/solo.ini forward-order warnings are emitted.
+    /// Defaults on; clients can set `analysis.mapOrderingDiagnostics` to false.
+    map_ordering_diagnostics: OnceLock<bool>,
     /// Whether the client supports snippet insertText (tab-stops, placeholders).
     /// Captured at `initialize` from the client's completion-item capabilities.
     snippet_support: OnceLock<bool>,
     /// Whether the client supports `window/workDoneProgress` (the scan
     /// spinner). Captured at `initialize`.
     progress_support: OnceLock<bool>,
+    /// Delay after the latest edit before whole-document indexes and
+    /// diagnostics refresh. Parsing and definition-name indexing stay eager.
+    analysis_debounce: OnceLock<Duration>,
     /// Monotonic id source for semantic-token results (delta bookkeeping).
     semantic_result_id: std::sync::atomic::AtomicU64,
 }
@@ -132,18 +156,128 @@ fn is_map_layer_file(file: &str) -> bool {
     })
 }
 
+fn map_ordering_diagnostics_option(options: Option<&serde_json::Value>) -> bool {
+    options
+        .and_then(|value| value.get("analysis"))
+        .and_then(|analysis| analysis.get("mapOrderingDiagnostics"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true)
+}
+
+fn filter_map_ordering_diagnostics(
+    diagnostics: &mut Vec<zerosyntax_analysis::Diagnostic>,
+    enabled: bool,
+) {
+    if !enabled {
+        diagnostics.retain(|diagnostic| diagnostic.code != "map-forward-reference");
+    }
+}
+
+#[derive(Clone, Copy)]
+struct RefreshOptions {
+    enc: PositionEnc,
+    expected_version: Option<i32>,
+    map_ordering_diagnostics_enabled: bool,
+}
+
+async fn refresh_document(
+    client: Client,
+    analyzer: Arc<Analyzer>,
+    docs: Arc<DashMap<Url, DocumentState>>,
+    index: Arc<RwLock<WorkspaceIndex>>,
+    uri: Url,
+    options: RefreshOptions,
+) {
+    let Some((rope, parse, version)) = docs.get(&uri).and_then(|d| {
+        if options
+            .expected_version
+            .is_some_and(|expected| expected != d.version)
+        {
+            None
+        } else {
+            Some((d.rope.clone(), d.parse.clone(), d.version))
+        }
+    }) else {
+        return;
+    };
+
+    let defs = definitions_in(&analyzer, &parse, uri.as_str());
+    let refs = references_in(&analyzer, &parse);
+    let tags = module_tags_in(&analyzer, &parse);
+    let object_models = object_models_in(&analyzer, &parse);
+    let object_parents = object_parents_in(&parse);
+    let str_keys = load_sibling_str_keys(&uri);
+
+    // Keep this document guard through the short index commit so didChange
+    // cannot advance the document and then be overwritten by this snapshot.
+    let Some(entry) = docs.get(&uri) else { return };
+    if entry.version != version {
+        return;
+    }
+    if let Ok(mut idx) = index.write() {
+        idx.set_file(uri.as_str(), defs);
+        idx.set_file_refs(uri.as_str(), refs);
+        idx.set_file_tags(uri.as_str(), tags);
+        idx.set_file_object_models(uri.as_str(), object_models);
+        idx.set_file_object_parents(uri.as_str(), object_parents);
+        idx.set_ini_string_keys(uri.as_str(), str_keys);
+    }
+    drop(entry);
+
+    // Take the cache only after the versioned index commit. Expensive work
+    // above never empties the live document's cache when an edit supersedes it.
+    let Some(mut entry) = docs.get_mut(&uri) else {
+        return;
+    };
+    if entry.version != version {
+        return;
+    }
+    let mut cache = std::mem::take(&mut entry.diag_cache);
+    drop(entry);
+
+    let lsp_diags: Vec<Diagnostic> = {
+        let idx = index.read().ok();
+        let mut diags = diagnostics::diagnose_with_cache(
+            &analyzer,
+            &parse,
+            idx.as_deref(),
+            Some(uri.as_str()),
+            &mut cache,
+        );
+        filter_map_ordering_diagnostics(&mut diags, options.map_ordering_diagnostics_enabled);
+        diags
+            .iter()
+            .map(|d| convert::to_lsp_diagnostic(&rope, d, options.enc))
+            .collect()
+    };
+
+    let Some(mut entry) = docs.get_mut(&uri) else {
+        return;
+    };
+    if entry.version != version {
+        return;
+    }
+    entry.diag_cache = cache;
+    drop(entry);
+
+    client
+        .publish_diagnostics(uri, lsp_diags, Some(version))
+        .await;
+}
+
 impl Backend {
     pub fn new(client: Client) -> Self {
         Backend {
             client,
             analyzer: RwLock::new(Arc::new(Analyzer::embedded())),
             schema_error: Mutex::new(None),
-            docs: DashMap::new(),
+            docs: Arc::new(DashMap::new()),
             virtual_files: DashMap::new(),
-            index: RwLock::new(WorkspaceIndex::new()),
+            index: Arc::new(RwLock::new(WorkspaceIndex::new())),
             roots: Mutex::new(Vec::new()),
             encoding: OnceLock::new(),
             format_enabled: OnceLock::new(),
+            map_ordering_diagnostics: OnceLock::new(),
             base_roots: Mutex::new(Vec::new()),
             base_indexed_count: AtomicUsize::new(0),
             scan_finished: AtomicBool::new(false),
@@ -151,6 +285,7 @@ impl Backend {
             client_base_ini_hint: OnceLock::new(),
             snippet_support: OnceLock::new(),
             progress_support: OnceLock::new(),
+            analysis_debounce: OnceLock::new(),
             semantic_result_id: std::sync::atomic::AtomicU64::new(1),
         }
     }
@@ -170,6 +305,10 @@ impl Backend {
         self.format_enabled.get().copied().unwrap_or(false)
     }
 
+    fn map_ordering_diagnostics_enabled(&self) -> bool {
+        self.map_ordering_diagnostics.get().copied().unwrap_or(true)
+    }
+
     fn next_semantic_id(&self) -> u64 {
         self.semantic_result_id
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
@@ -178,70 +317,51 @@ impl Backend {
     /// Update the cross-file index from the document's cached parse, run
     /// diagnostics (via the per-block cache), and publish. The parse itself is
     /// maintained synchronously by `did_open`/`did_change`.
-    async fn refresh(&self, uri: &Url) {
-        // Take the cache out so diagnostics run without holding the doc entry
-        // (avoids lock-order entanglement with the index RwLock).
-        let Some((rope, parse, version, mut cache)) = self.docs.get_mut(uri).map(|mut d| {
-            (
-                d.rope.clone(),
-                d.parse.clone(),
-                d.version,
-                std::mem::take(&mut d.diag_cache),
-            )
-        }) else {
-            return;
-        };
-
-        // `set_file` bumps the index generation only when definition *names*
-        // changed, so ordinary keystrokes keep diagnostics caches warm.
-        // Reference sites never bump it.
-        let analyzer = self.analyzer();
-        let defs = definitions_in(&analyzer, &parse, uri.as_str());
-        let refs = references_in(&analyzer, &parse);
-        let tags = module_tags_in(&analyzer, &parse);
-        let object_models = object_models_in(&analyzer, &parse);
-        let object_parents = object_parents_in(&parse);
-        let str_keys = load_sibling_str_keys(uri);
-        if let Ok(mut idx) = self.index.write() {
-            idx.set_file(uri.as_str(), defs);
-            idx.set_file_refs(uri.as_str(), refs);
-            idx.set_file_tags(uri.as_str(), tags);
-            idx.set_file_object_models(uri.as_str(), object_models);
-            idx.set_file_object_parents(uri.as_str(), object_parents);
-            idx.set_ini_string_keys(uri.as_str(), str_keys);
-        }
-
-        let enc = self.enc();
-        let lsp_diags: Vec<Diagnostic> = {
-            let idx = self.index.read().ok();
-            let diags = diagnostics::diagnose_with_cache(
-                &analyzer,
-                &parse,
-                idx.as_deref(),
-                Some(uri.as_str()),
-                &mut cache,
-            );
-            diags
-                .iter()
-                .map(|d| convert::to_lsp_diagnostic(&rope, d, enc))
-                .collect()
-        };
-
-        // Hand the warmed cache back unless a newer change superseded us (the
-        // newer change runs its own refresh against its own parse).
-        {
-            let Some(mut entry) = self.docs.get_mut(uri) else {
-                return;
-            };
-            if entry.version != version {
-                return;
-            }
-            entry.diag_cache = cache;
-        }
-        self.client
-            .publish_diagnostics(uri.clone(), lsp_diags, Some(version))
-            .await;
+    async fn refresh(&self, uri: &Url, expected_version: Option<i32>) {
+        refresh_document(
+            self.client.clone(),
+            self.analyzer(),
+            self.docs.clone(),
+            self.index.clone(),
+            uri.clone(),
+            RefreshOptions {
+                enc: self.enc(),
+                expected_version,
+                map_ordering_diagnostics_enabled: self.map_ordering_diagnostics_enabled(),
+            },
+        )
+        .await;
         self.maybe_warn_missing_base_roots(uri).await;
+    }
+
+    fn schedule_refresh(&self, uri: Url, version: i32) {
+        let client = self.client.clone();
+        let analyzer = self.analyzer();
+        let docs = self.docs.clone();
+        let index = self.index.clone();
+        let enc = self.enc();
+        let map_ordering_diagnostics_enabled = self.map_ordering_diagnostics_enabled();
+        let delay = self
+            .analysis_debounce
+            .get()
+            .copied()
+            .unwrap_or_else(|| Duration::from_millis(DEFAULT_ANALYSIS_DEBOUNCE_MS));
+        tokio::spawn(async move {
+            tokio::time::sleep(delay).await;
+            refresh_document(
+                client,
+                analyzer,
+                docs,
+                index,
+                uri,
+                RefreshOptions {
+                    enc,
+                    expected_version: Some(version),
+                    map_ordering_diagnostics_enabled,
+                },
+            )
+            .await;
+        });
     }
 
     async fn maybe_warn_missing_base_roots(&self, uri: &Url) {
@@ -545,7 +665,8 @@ impl LanguageServer for Backend {
         // requires a client restart (the VS Code extension does this
         // automatically). Shape:
         // `{ "format": {"enable": bool}, "schemaPath": "schema.json",
-        //    "analysis": {"modelMemberStrictness": "compatible"},
+        //    "analysis": {"modelMemberStrictness": "compatible",
+        //                 "mapOrderingDiagnostics": true, "debounceMs": 250},
         //    "baseIniRoots": ["dir-or-big", ...],
         //    "clientBaseIniHint": bool }`.
         let format_enabled = params
@@ -556,6 +677,10 @@ impl LanguageServer for Backend {
             .and_then(|e| e.as_bool())
             .unwrap_or(false);
         let _ = self.format_enabled.set(format_enabled);
+
+        let map_ordering_diagnostics =
+            map_ordering_diagnostics_option(params.initialization_options.as_ref());
+        let _ = self.map_ordering_diagnostics.set(map_ordering_diagnostics);
 
         let model_member_strictness = params
             .initialization_options
@@ -569,6 +694,9 @@ impl LanguageServer for Backend {
                 _ => ModelMemberStrictness::Compatible,
             })
             .unwrap_or_default();
+        let _ = self
+            .analysis_debounce
+            .set(analysis_debounce(params.initialization_options.as_ref()));
         if let Ok(mut index) = self.index.write() {
             index.set_model_member_strictness(model_member_strictness);
         }
@@ -690,7 +818,7 @@ impl LanguageServer for Backend {
         // still valid — only the index changed.
         let open: Vec<Url> = self.docs.iter().map(|e| e.key().clone()).collect();
         for uri in open {
-            self.refresh(&uri).await;
+            self.refresh(&uri, None).await;
         }
         let (ini, models, audio, textures) = {
             let idx = self.index.read().ok();
@@ -750,13 +878,14 @@ impl LanguageServer for Backend {
                 last_semantic: None,
             },
         );
-        self.refresh(&uri).await;
+        self.refresh(&uri, Some(version)).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = canonical_uri(params.text_document.uri);
         let version = params.text_document.version;
         let enc = self.enc();
+        let analyzer = self.analyzer();
         {
             let Some(mut entry) = self.docs.get_mut(&uri) else {
                 return;
@@ -785,7 +914,7 @@ impl LanguageServer for Backend {
                     convert::apply_change(&mut entry.rope, change.range, &change.text, enc);
                 }
                 entry.text = entry.rope.to_string().into();
-                entry.parse = Arc::new(self.analyzer().parse(&entry.text));
+                entry.parse = Arc::new(analyzer.parse(&entry.text));
                 entry.version = version;
             } else {
                 // Each change applies to the text produced by the previous
@@ -805,8 +934,7 @@ impl LanguageServer for Backend {
                                 new_len: change.text.len(),
                             };
                             let (parse, _strategy) =
-                                self.analyzer()
-                                    .reparse(&entry.parse, &entry.text, &new_text, edit);
+                                analyzer.reparse(&entry.parse, &entry.text, &new_text, edit);
                             entry.parse = Arc::new(parse);
                             entry.text = new_text;
                         }
@@ -814,14 +942,21 @@ impl LanguageServer for Backend {
                             // Full-document replacement.
                             entry.rope = Rope::from_str(&change.text);
                             entry.text = change.text.into();
-                            entry.parse = Arc::new(self.analyzer().parse(&entry.text));
+                            entry.parse = Arc::new(analyzer.parse(&entry.text));
                         }
                     }
                 }
                 entry.version = version;
             }
+            // Definition names power reference completions and are cheap to
+            // extract. Commit them while the document guard preserves version
+            // order; the expensive index passes wait for the debounce.
+            let defs = definitions_in(&analyzer, &entry.parse, uri.as_str());
+            if let Ok(mut idx) = self.index.write() {
+                idx.set_file(uri.as_str(), defs);
+            }
         }
-        self.refresh(&uri).await;
+        self.schedule_refresh(uri, version);
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
@@ -961,13 +1096,14 @@ impl LanguageServer for Backend {
         let range_span = zerosyntax_analysis::Span::new(start, end);
         let fixes = {
             let idx = self.index.read().ok();
-            let diags = diagnostics::diagnose_with_cache(
+            let mut diags = diagnostics::diagnose_with_cache(
                 &self.analyzer(),
                 &parse,
                 idx.as_deref(),
                 Some(uri.as_str()),
                 &mut cache,
             );
+            filter_map_ordering_diagnostics(&mut diags, self.map_ordering_diagnostics_enabled());
             let mut f = actions::fixes(
                 &self.analyzer(),
                 &parse,
@@ -1415,6 +1551,60 @@ fn origin_copy_fixes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn map_ordering_diagnostics_can_be_disabled() {
+        assert!(map_ordering_diagnostics_option(None));
+        assert!(map_ordering_diagnostics_option(Some(
+            &serde_json::json!({})
+        )));
+        assert!(!map_ordering_diagnostics_option(Some(
+            &serde_json::json!({"analysis": {"mapOrderingDiagnostics": false}})
+        )));
+
+        let mut diagnostics = vec![
+            zerosyntax_analysis::Diagnostic {
+                span: zerosyntax_analysis::Span::new(0, 1),
+                severity: zerosyntax_analysis::Severity::Warning,
+                code: "map-forward-reference",
+                message: String::new(),
+            },
+            zerosyntax_analysis::Diagnostic {
+                span: zerosyntax_analysis::Span::new(0, 1),
+                severity: zerosyntax_analysis::Severity::Warning,
+                code: "map-projectile-object",
+                message: String::new(),
+            },
+        ];
+        filter_map_ordering_diagnostics(&mut diagnostics, false);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "map-projectile-object");
+    }
+
+    #[test]
+    fn analysis_debounce_defaults_overrides_and_clamps() {
+        assert_eq!(analysis_debounce(None), Duration::from_millis(250));
+        assert_eq!(
+            analysis_debounce(Some(&serde_json::json!({"analysis": {"debounceMs": 0}}))),
+            Duration::ZERO
+        );
+        assert_eq!(
+            analysis_debounce(Some(&serde_json::json!({"analysis": {"debounceMs": 400}}))),
+            Duration::from_millis(400)
+        );
+        assert_eq!(
+            analysis_debounce(Some(&serde_json::json!({"analysis": {"debounceMs": -1}}))),
+            Duration::ZERO
+        );
+        assert_eq!(
+            analysis_debounce(Some(&serde_json::json!({"analysis": {"debounceMs": 9000}}))),
+            Duration::from_millis(5000)
+        );
+        assert_eq!(
+            analysis_debounce(Some(&serde_json::json!({"analysis": {"debounceMs": 12.5}}))),
+            Duration::from_millis(250)
+        );
+    }
 
     #[test]
     fn custom_schema_changes_analysis() {

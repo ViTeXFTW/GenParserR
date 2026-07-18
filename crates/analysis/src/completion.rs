@@ -120,17 +120,48 @@ fn classify_position(analyzer: &Analyzer, root: &SyntaxNode, offset: u32) -> Pos
                 .map(|k| k.text().to_string())
                 .unwrap_or_default();
             let value_tokens = field.value_tokens();
-            let value_index = value_tokens
+            let raw_value_index = value_tokens
                 .iter()
                 .filter(|t| u32::from(t.text_range().end()) < offset)
                 .count();
+            let input = value_tokens
+                .iter()
+                .map(|token| token.text().trim_matches('"'))
+                .collect::<Vec<_>>();
+            let value_index = scope_node
+                .as_ref()
+                .and_then(|scope_node| scope_schema(analyzer, scope_node).field(&key))
+                .and_then(|field| {
+                    field
+                        .value_type
+                        .token_index_at_input(&input, raw_value_index)
+                })
+                .unwrap_or(raw_value_index);
             let current_token = value_tokens
                 .iter()
-                .find(|t| {
+                .position(|t| {
                     let range = t.text_range();
                     u32::from(range.start()) <= offset && offset <= u32::from(range.end())
                 })
-                .map(|t| t.text().trim_matches('"').to_string());
+                .map(|index| {
+                    let current = value_tokens[index].text().trim_matches('"');
+                    index
+                        .checked_sub(1)
+                        .and_then(|index| value_tokens.get(index))
+                        .map(|previous| previous.text().trim_matches('"'))
+                        .filter(|previous| previous.ends_with(':'))
+                        .map_or_else(
+                            || current.to_string(),
+                            |previous| format!("{previous}{current}"),
+                        )
+                })
+                .or_else(|| {
+                    raw_value_index
+                        .checked_sub(1)
+                        .and_then(|index| input.get(index))
+                        .filter(|previous| previous.ends_with(':'))
+                        .map(|previous| (*previous).to_string())
+                });
             let first_token = value_tokens
                 .first()
                 .map(|t| t.text().trim_matches('"').to_string());
@@ -468,7 +499,7 @@ fn type_snippet_placeholder(ty: &ValueType, n: usize) -> String {
         ValueType::AudioStemList => format!("${{{n}:Sound}}"),
         ValueType::TextureFile => format!("${{{n}:Texture.tga}}"),
         ValueType::TextureStem | ValueType::TextureSequenceStem => format!("${{{n}:Texture}}"),
-        ValueType::W3dModel => format!("${{{n}:Model}}"),
+        ValueType::W3dModel | ValueType::W3dModelList => format!("${{{n}:Model}}"),
         ValueType::W3dModelMember => format!("${{{n}:Bone}}"),
         _ => format!("${{{n}:?}}"),
     }
@@ -476,6 +507,9 @@ fn type_snippet_placeholder(ty: &ValueType, n: usize) -> String {
 
 fn value_snippet(ty: &ValueType) -> Option<String> {
     match ty {
+        ValueType::RandomVariable { .. } => Some("${1:0} ${2:0}$0".into()),
+        ValueType::RandomKeyframe => Some("${1:0} ${2:0} ${3:0}$0".into()),
+        ValueType::ColorKeyframe => Some("R:${1:0} G:${2:0} B:${3:0} ${4:0}$0".into()),
         ValueType::TokenList { tokens } if tokens.len() > 1 => {
             let mut snippet = tokens
                 .iter()
@@ -500,6 +534,19 @@ fn completions_for_type(
     index: Option<&WorkspaceIndex>,
 ) -> Vec<Completion> {
     match ty {
+        ValueType::RandomVariable { value_set } if value_index == 2 => completions_for_type(
+            analyzer,
+            &ValueType::Enum {
+                value_set: value_set.clone(),
+            },
+            0,
+            current_token,
+            first_token,
+            index,
+        ),
+        ValueType::RandomVariable { .. } | ValueType::RandomKeyframe | ValueType::ColorKeyframe => {
+            Vec::new()
+        }
         ValueType::OneOf { variants } => {
             if current_token.is_some() || value_index > 0 {
                 return ty
@@ -676,7 +723,7 @@ fn completions_for_type(
                 }
             })
         }
-        ValueType::W3dModel | ValueType::W3dModelMember => Vec::new(),
+        ValueType::W3dModel | ValueType::W3dModelList | ValueType::W3dModelMember => Vec::new(),
         _ => Vec::new(),
     }
 }
@@ -821,7 +868,11 @@ fn type_label(ty: &ValueType) -> String {
         ValueType::BitFlags { value_set } => format!("flags {value_set}"),
         ValueType::Reference { ref_kind } => format!("ref {ref_kind:?}"),
         ValueType::W3dModel => "w3d model".into(),
+        ValueType::W3dModelList => "w3d models".into(),
         ValueType::W3dModelMember => "w3d model member".into(),
+        ValueType::RandomVariable { .. } => "real real [distribution]".into(),
+        ValueType::RandomKeyframe => "real real frame".into(),
+        ValueType::ColorKeyframe => "R: G: B: frame".into(),
         ValueType::Prefixed { prefix, value_type } => {
             format!("{prefix}:{}", type_label(value_type))
         }
@@ -1014,6 +1065,27 @@ End
     }
 
     #[test]
+    fn ocl_model_list_completes_every_position() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        index.set_file_models(
+            "models/Good.w3d",
+            vec![crate::index::ModelAsset {
+                name: "Good".into(),
+                members: vec![],
+            }],
+        );
+        let src =
+            "ObjectCreationList Debris\n  CreateDebris\n    ModelNames = First \n  End\nEnd\n";
+        let offset = src.find("First ").unwrap() + "First ".len();
+        let out = complete(&a, &a.parse(src), offset as u32, Some(&index), None)
+            .into_iter()
+            .map(|item| item.label)
+            .collect::<Vec<_>>();
+        assert!(out.contains(&"Good".to_string()), "{out:?}");
+    }
+
+    #[test]
     fn weapon_bone_completions_use_token_positions() {
         let a = Analyzer::embedded();
         let mut index = WorkspaceIndex::new();
@@ -1100,8 +1172,8 @@ End
 
     #[test]
     fn loc_variant_reference_suggests_while_typing() {
-        let src = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    DamagedFXList1 = Loc:X:0.0 Y:0.0 Z:0.0 FXList:FX_\n  End\nEnd\n";
-        let offset = src.find("FXList:FX_").unwrap() + "FXList:FX_".len();
+        let src = "Object Tank\n  Behavior = TransitionDamageFX ModuleTag_01\n    ReallyDamagedFXList1 = Loc: X:0 Y:0 Z:0 FXList: FX_\n  End\nEnd\n";
+        let offset = src.find("FXList: FX_").unwrap() + "FXList: FX_".len();
         let got = item_with_defs(
             src,
             offset as u32,

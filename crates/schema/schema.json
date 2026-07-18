@@ -5752,24 +5752,24 @@
             {
               "name": "Radius",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "INI::parseGameClientRandomVariable"
+                "kind": "random_variable",
+                "value_set": "random_distribution"
               },
               "parse_fn": "INI::parseGameClientRandomVariable"
             },
             {
               "name": "Height",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "INI::parseGameClientRandomVariable"
+                "kind": "random_variable",
+                "value_set": "random_distribution"
               },
               "parse_fn": "INI::parseGameClientRandomVariable"
             },
             {
               "name": "InitialDelay",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "INI::parseGameClientRandomVariable"
+                "kind": "random_variable",
+                "value_set": "random_distribution"
               },
               "parse_fn": "INI::parseGameClientRandomVariable"
             },
@@ -14276,7 +14276,8 @@
             {
               "name": "ParticleSystem",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "reference",
+                "ref_kind": "particle_system"
               },
               "parse_fn": "INI::parseAsciiString"
             },
@@ -14488,8 +14489,8 @@
             {
               "name": "ObjectNames",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseDebrisObjectNames"
+                "kind": "reference_list",
+                "ref_kind": "object"
               },
               "parse_fn": "parseDebrisObjectNames"
             },
@@ -14557,7 +14558,8 @@
             {
               "name": "ParticleSystem",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "reference",
+                "ref_kind": "particle_system"
               },
               "parse_fn": "INI::parseAsciiString"
             },
@@ -14762,8 +14764,7 @@
             {
               "name": "ModelNames",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "parseDebrisObjectNames"
+                "kind": "w3d_model_list"
               },
               "parse_fn": "parseDebrisObjectNames"
             },
@@ -14816,8 +14817,8 @@
             {
               "name": "BounceSound",
               "value_type": {
-                "kind": "unknown",
-                "parse_fn": "INI::parseAudioEventRTS"
+                "kind": "reference",
+                "ref_kind": "audio_event"
               },
               "parse_fn": "INI::parseAudioEventRTS"
             }
@@ -15618,8 +15619,8 @@
         {
           "name": "AngleX",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": "only compiled with PARTICLE_USE_XY_ROTATION"
@@ -15627,8 +15628,8 @@
         {
           "name": "AngleY",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": "only compiled with PARTICLE_USE_XY_ROTATION"
@@ -15636,8 +15637,8 @@
         {
           "name": "AngleZ",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": null
@@ -15645,8 +15646,8 @@
         {
           "name": "AngularRateX",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": "only compiled with PARTICLE_USE_XY_ROTATION"
@@ -15654,8 +15655,8 @@
         {
           "name": "AngularRateY",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": "only compiled with PARTICLE_USE_XY_ROTATION"
@@ -15663,8 +15664,8 @@
         {
           "name": "AngularRateZ",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": null
@@ -15672,8 +15673,8 @@
         {
           "name": "AngularDamping",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": null
@@ -15681,8 +15682,8 @@
         {
           "name": "VelocityDamping",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": null
@@ -15724,8 +15725,8 @@
         {
           "name": "Lifetime",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": null
@@ -15741,8 +15742,8 @@
         {
           "name": "Size",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": null
@@ -15750,8 +15751,8 @@
         {
           "name": "StartSizeRate",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": null
@@ -15759,8 +15760,8 @@
         {
           "name": "SizeRate",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": null
@@ -15768,8 +15769,8 @@
         {
           "name": "SizeRateDamping",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": null
@@ -15777,8 +15778,7 @@
         {
           "name": "Alpha1",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "ParticleSystemTemplate::parseRandomKeyframe"
+            "kind": "random_keyframe"
           },
           "parse_fn": "ParticleSystemTemplate::parseRandomKeyframe",
           "doc": "<low> <high> <frame>"
@@ -15786,8 +15786,7 @@
         {
           "name": "Alpha2",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "ParticleSystemTemplate::parseRandomKeyframe"
+            "kind": "random_keyframe"
           },
           "parse_fn": "ParticleSystemTemplate::parseRandomKeyframe",
           "doc": "<low> <high> <frame>"
@@ -15795,8 +15794,7 @@
         {
           "name": "Alpha3",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "ParticleSystemTemplate::parseRandomKeyframe"
+            "kind": "random_keyframe"
           },
           "parse_fn": "ParticleSystemTemplate::parseRandomKeyframe",
           "doc": "<low> <high> <frame>"
@@ -15804,8 +15802,7 @@
         {
           "name": "Alpha4",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "ParticleSystemTemplate::parseRandomKeyframe"
+            "kind": "random_keyframe"
           },
           "parse_fn": "ParticleSystemTemplate::parseRandomKeyframe",
           "doc": "<low> <high> <frame>"
@@ -15813,8 +15810,7 @@
         {
           "name": "Alpha5",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "ParticleSystemTemplate::parseRandomKeyframe"
+            "kind": "random_keyframe"
           },
           "parse_fn": "ParticleSystemTemplate::parseRandomKeyframe",
           "doc": "<low> <high> <frame>"
@@ -15822,8 +15818,7 @@
         {
           "name": "Alpha6",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "ParticleSystemTemplate::parseRandomKeyframe"
+            "kind": "random_keyframe"
           },
           "parse_fn": "ParticleSystemTemplate::parseRandomKeyframe",
           "doc": "<low> <high> <frame>"
@@ -15831,8 +15826,7 @@
         {
           "name": "Alpha7",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "ParticleSystemTemplate::parseRandomKeyframe"
+            "kind": "random_keyframe"
           },
           "parse_fn": "ParticleSystemTemplate::parseRandomKeyframe",
           "doc": "<low> <high> <frame>"
@@ -15840,8 +15834,7 @@
         {
           "name": "Alpha8",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "ParticleSystemTemplate::parseRandomKeyframe"
+            "kind": "random_keyframe"
           },
           "parse_fn": "ParticleSystemTemplate::parseRandomKeyframe",
           "doc": "<low> <high> <frame>"
@@ -15849,8 +15842,7 @@
         {
           "name": "Color1",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "ParticleSystemTemplate::parseRGBColorKeyframe"
+            "kind": "color_keyframe"
           },
           "parse_fn": "ParticleSystemTemplate::parseRGBColorKeyframe",
           "doc": "R:r G:g B:b <frame>"
@@ -15858,8 +15850,7 @@
         {
           "name": "Color2",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "ParticleSystemTemplate::parseRGBColorKeyframe"
+            "kind": "color_keyframe"
           },
           "parse_fn": "ParticleSystemTemplate::parseRGBColorKeyframe",
           "doc": "R:r G:g B:b <frame>"
@@ -15867,8 +15858,7 @@
         {
           "name": "Color3",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "ParticleSystemTemplate::parseRGBColorKeyframe"
+            "kind": "color_keyframe"
           },
           "parse_fn": "ParticleSystemTemplate::parseRGBColorKeyframe",
           "doc": "R:r G:g B:b <frame>"
@@ -15876,8 +15866,7 @@
         {
           "name": "Color4",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "ParticleSystemTemplate::parseRGBColorKeyframe"
+            "kind": "color_keyframe"
           },
           "parse_fn": "ParticleSystemTemplate::parseRGBColorKeyframe",
           "doc": "R:r G:g B:b <frame>"
@@ -15885,8 +15874,7 @@
         {
           "name": "Color5",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "ParticleSystemTemplate::parseRGBColorKeyframe"
+            "kind": "color_keyframe"
           },
           "parse_fn": "ParticleSystemTemplate::parseRGBColorKeyframe",
           "doc": "R:r G:g B:b <frame>"
@@ -15894,8 +15882,7 @@
         {
           "name": "Color6",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "ParticleSystemTemplate::parseRGBColorKeyframe"
+            "kind": "color_keyframe"
           },
           "parse_fn": "ParticleSystemTemplate::parseRGBColorKeyframe",
           "doc": "R:r G:g B:b <frame>"
@@ -15903,8 +15890,7 @@
         {
           "name": "Color7",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "ParticleSystemTemplate::parseRGBColorKeyframe"
+            "kind": "color_keyframe"
           },
           "parse_fn": "ParticleSystemTemplate::parseRGBColorKeyframe",
           "doc": "R:r G:g B:b <frame>"
@@ -15912,8 +15898,7 @@
         {
           "name": "Color8",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "ParticleSystemTemplate::parseRGBColorKeyframe"
+            "kind": "color_keyframe"
           },
           "parse_fn": "ParticleSystemTemplate::parseRGBColorKeyframe",
           "doc": "R:r G:g B:b <frame>"
@@ -15921,8 +15906,8 @@
         {
           "name": "ColorScale",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": null
@@ -15930,8 +15915,8 @@
         {
           "name": "BurstDelay",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": null
@@ -15939,8 +15924,8 @@
         {
           "name": "BurstCount",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": null
@@ -15948,8 +15933,8 @@
         {
           "name": "InitialDelay",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": null
@@ -15974,8 +15959,8 @@
         {
           "name": "VelOrthoX",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": null
@@ -15983,8 +15968,8 @@
         {
           "name": "VelOrthoY",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": null
@@ -15992,8 +15977,8 @@
         {
           "name": "VelOrthoZ",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": null
@@ -16001,8 +15986,8 @@
         {
           "name": "VelSpherical",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": null
@@ -16010,8 +15995,8 @@
         {
           "name": "VelHemispherical",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": null
@@ -16019,8 +16004,8 @@
         {
           "name": "VelCylindricalRadial",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": null
@@ -16028,8 +16013,8 @@
         {
           "name": "VelCylindricalNormal",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": null
@@ -16037,8 +16022,8 @@
         {
           "name": "VelOutward",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": null
@@ -16046,8 +16031,8 @@
         {
           "name": "VelOutwardOther",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseGameClientRandomVariable"
+            "kind": "random_variable",
+            "value_set": "random_distribution"
           },
           "parse_fn": "INI::parseGameClientRandomVariable",
           "doc": null
@@ -17753,7 +17738,8 @@
         {
           "name": "LaserName",
           "value_type": {
-            "kind": "ascii_string"
+            "kind": "reference",
+            "ref_kind": "object"
           },
           "parse_fn": "INI::parseAsciiString",
           "doc": null
@@ -17764,7 +17750,7 @@
             "kind": "ascii_string"
           },
           "parse_fn": "INI::parseAsciiString",
-          "doc": null
+          "doc": "Bone on the firing object's model; a shared Weapon template does not identify that object statically."
         },
         {
           "name": "LeechRangeWeapon",
@@ -17882,8 +17868,8 @@
         {
           "name": "DamageStatusType",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "ObjectStatusMaskType::parseSingleBitFromINI"
+            "kind": "enum",
+            "value_set": "object_status"
           },
           "parse_fn": "ObjectStatusMaskType::parseSingleBitFromINI",
           "doc": null
@@ -18026,8 +18012,31 @@
         {
           "name": "DelayBetweenShots",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "WeaponTemplate::parseShotDelay"
+            "kind": "one_of",
+            "variants": [
+              {
+                "kind": "duration"
+              },
+              {
+                "kind": "token_list",
+                "tokens": [
+                  {
+                    "kind": "prefixed",
+                    "prefix": "Min",
+                    "value_type": {
+                      "kind": "duration"
+                    }
+                  },
+                  {
+                    "kind": "prefixed",
+                    "prefix": "Max",
+                    "value_type": {
+                      "kind": "duration"
+                    }
+                  }
+                ]
+              }
+            ]
           },
           "parse_fn": "WeaponTemplate::parseShotDelay",
           "doc": null
@@ -18035,8 +18044,8 @@
         {
           "name": "RadiusDamageAffects",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
+            "kind": "bit_flags",
+            "value_set": "weapon_affects"
           },
           "parse_fn": "INI::parseBitString32",
           "doc": null
@@ -18044,8 +18053,8 @@
         {
           "name": "ProjectileCollidesWith",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitString32"
+            "kind": "bit_flags",
+            "value_set": "weapon_collide"
           },
           "parse_fn": "INI::parseBitString32",
           "doc": null
@@ -18053,8 +18062,7 @@
         {
           "name": "AntiAirborneVehicle",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitInInt32"
+            "kind": "bool"
           },
           "parse_fn": "INI::parseBitInInt32",
           "doc": null
@@ -18062,8 +18070,7 @@
         {
           "name": "AntiGround",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitInInt32"
+            "kind": "bool"
           },
           "parse_fn": "INI::parseBitInInt32",
           "doc": null
@@ -18071,8 +18078,7 @@
         {
           "name": "AntiProjectile",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitInInt32"
+            "kind": "bool"
           },
           "parse_fn": "INI::parseBitInInt32",
           "doc": null
@@ -18080,8 +18086,7 @@
         {
           "name": "AntiSmallMissile",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitInInt32"
+            "kind": "bool"
           },
           "parse_fn": "INI::parseBitInInt32",
           "doc": null
@@ -18089,8 +18094,7 @@
         {
           "name": "AntiMine",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitInInt32"
+            "kind": "bool"
           },
           "parse_fn": "INI::parseBitInInt32",
           "doc": null
@@ -18098,8 +18102,7 @@
         {
           "name": "AntiParachute",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitInInt32"
+            "kind": "bool"
           },
           "parse_fn": "INI::parseBitInInt32",
           "doc": null
@@ -18107,8 +18110,7 @@
         {
           "name": "AntiAirborneInfantry",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitInInt32"
+            "kind": "bool"
           },
           "parse_fn": "INI::parseBitInInt32",
           "doc": null
@@ -18116,8 +18118,7 @@
         {
           "name": "AntiBallisticMissile",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "INI::parseBitInInt32"
+            "kind": "bool"
           },
           "parse_fn": "INI::parseBitInInt32",
           "doc": null
@@ -18134,8 +18135,20 @@
         {
           "name": "WeaponBonus",
           "value_type": {
-            "kind": "unknown",
-            "parse_fn": "WeaponTemplate::parseWeaponBonusSet"
+            "kind": "token_list",
+            "tokens": [
+              {
+                "kind": "enum",
+                "value_set": "weapon_bonus_condition"
+              },
+              {
+                "kind": "enum",
+                "value_set": "weapon_bonus_field"
+              },
+              {
+                "kind": "percent"
+              }
+            ]
           },
           "parse_fn": "WeaponTemplate::parseWeaponBonusSet",
           "doc": null
@@ -69718,6 +69731,32 @@
       "doc": "TheWeaponBonusNames (Weapon.h)"
     },
     {
+      "id": "weapon_bonus_field",
+      "members": [
+        {
+          "name": "DAMAGE",
+          "value": 0
+        },
+        {
+          "name": "RADIUS",
+          "value": 1
+        },
+        {
+          "name": "RANGE",
+          "value": 2
+        },
+        {
+          "name": "RATE_OF_FIRE",
+          "value": 3
+        },
+        {
+          "name": "PRE_ATTACK",
+          "value": 4
+        }
+      ],
+      "doc": "TheWeaponBonusFieldNames (Weapon.h)"
+    },
+    {
       "id": "ocl_create_location",
       "members": [
         {
@@ -70601,6 +70640,35 @@
       ]
     },
     {
+      "id": "random_distribution",
+      "members": [
+        {
+          "name": "CONSTANT",
+          "value": 0
+        },
+        {
+          "name": "UNIFORM",
+          "value": 1
+        },
+        {
+          "name": "GAUSSIAN",
+          "value": 2
+        },
+        {
+          "name": "TRIANGULAR",
+          "value": 3
+        },
+        {
+          "name": "LOW_BIAS",
+          "value": 4
+        },
+        {
+          "name": "HIGH_BIAS",
+          "value": 5
+        }
+      ]
+    },
+    {
       "id": "particle_priority",
       "members": [
         {
@@ -71177,6 +71245,48 @@
           "value": 6
         }
       ]
+    },
+    {
+      "id": "weapon_collide",
+      "members": [
+        {
+          "name": "ALLIES",
+          "value": 0
+        },
+        {
+          "name": "ENEMIES",
+          "value": 1
+        },
+        {
+          "name": "STRUCTURES",
+          "value": 2
+        },
+        {
+          "name": "SHRUBBERY",
+          "value": 3
+        },
+        {
+          "name": "PROJECTILES",
+          "value": 4
+        },
+        {
+          "name": "WALLS",
+          "value": 5
+        },
+        {
+          "name": "SMALL_MISSILES",
+          "value": 6
+        },
+        {
+          "name": "BALLISTIC_MISSILES",
+          "value": 7
+        },
+        {
+          "name": "CONTROLLED_STRUCTURES",
+          "value": 8
+        }
+      ],
+      "doc": "TheWeaponCollideMaskNames (Weapon.h)"
     },
     {
       "id": "terrain_class",

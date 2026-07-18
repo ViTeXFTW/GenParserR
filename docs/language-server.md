@@ -85,7 +85,11 @@ symbols.
 {
   "format": { "enable": false },
   "schemaPath": "C:/Mods/MyMod/schema.json",
-  "analysis": { "modelMemberStrictness": "compatible" },
+  "analysis": {
+    "modelMemberStrictness": "compatible",
+    "mapOrderingDiagnostics": true,
+    "debounceMs": 250
+  },
   "baseIniRoots": [
     "C:/Games/Zero Hour",
     "C:/Mods/MyMod/Data/INI",
@@ -101,6 +105,12 @@ symbols.
 - `analysis.modelMemberStrictness` is `off`, `compatible` (member exists in any
   applicable model), or `strict` (member exists in every applicable model). It
   defaults to `compatible`.
+- `analysis.mapOrderingDiagnostics` controls source-backed forward-order
+  warnings in `map.ini` and `solo.ini`. It defaults to `true`.
+- `analysis.debounceMs` waits this many milliseconds after the latest edit
+  before refreshing whole-document indexes and diagnostics. Parsing and
+  completions remain immediate. It defaults to `250`; valid values are
+  `0`–`5000`, where `0` refreshes as soon as possible.
 - `baseIniRoots` accepts directories and `.big` archives containing base game
   or mod INI files and game assets. WAV/MP3 filenames and TGA/DDS textures power
   asset completion and warnings; DDS-only textures complete as the canonical

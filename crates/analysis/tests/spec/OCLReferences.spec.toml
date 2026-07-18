@@ -1,0 +1,37 @@
+# ObjectNames is a variadic list of Object references.
+
+[[diag]]
+severity = "warning"
+code = "unresolved-reference"
+on = "NoSuchOCLObject"
+
+[[complete]]
+at = "$1"
+includes = ["OCLObjectOne", "OCLObjectTwo"]
+
+[[diag]]
+severity = "warning"
+code = "unresolved-reference"
+on = "NoSuchParticleSystem"
+
+[[diag]]
+severity = "warning"
+code = "unresolved-reference"
+on = "NoSuchDebrisParticleSystem"
+
+[[diag]]
+severity = "warning"
+code = "unresolved-reference"
+on = "NoSuchBounceSound"
+
+[[complete]]
+at = "$2"
+includes = ["HulkExplosionTrail"]
+
+[[complete]]
+at = "$3"
+includes = ["HulkExplosionTrail"]
+
+[[complete]]
+at = "$4"
+includes = ["DebrisBigMetal"]

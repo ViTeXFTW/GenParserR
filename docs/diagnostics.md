@@ -27,7 +27,7 @@ file. Fix error-level syntax and schema problems rather than suppressing them.
 | `unknown-block` | A top-level block is not in the Generals INI schema. |
 | `overrides` | A map layer redefines an existing object-style definition. |
 | `duplicate-definition` | The same definition is declared more than once. |
-| `map-forward-reference` | A map or solo INI references a definition declared later in that file, after the point where the game needs it. |
+| `map-forward-reference` | A map or solo INI uses a definition before an engine parser that resolves it immediately. Move the named definition above the consumer. Stored names resolved later, such as an Object's `CommandSet`, may be declared afterward and do not warn. |
 | `map-projectile-object` | A weapon uses a map-defined projectile object that the game cannot resolve reliably. |
 | `unreachable-set` | A `WeaponSet` or `ArmorSet` cannot activate, or an upgrade module has no matching set. |
 | `unknown-field` | A field is not valid in the current block or module. |

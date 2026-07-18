@@ -144,7 +144,7 @@ pub fn enclosing_scopes<'a>(analyzer: &'a Analyzer, node: &SyntaxNode) -> Vec<Sc
 }
 
 pub(crate) fn is_model_asset_type(ty: &ValueType) -> bool {
-    matches!(ty, ValueType::W3dModel)
+    matches!(ty, ValueType::W3dModel | ValueType::W3dModelList)
 }
 
 pub(crate) fn is_model_member_type(ty: &ValueType) -> bool {
@@ -248,9 +248,25 @@ fn collect_models(analyzer: &Analyzer, node: &SyntaxNode, out: &mut Vec<String>)
                     continue;
                 };
                 let values = field.value_tokens();
+                let input = values
+                    .iter()
+                    .map(|value| value.text().trim_matches('"'))
+                    .collect::<Vec<_>>();
                 match &schema_field.value_type {
-                    ValueType::TokenList { tokens } => {
-                        for (spec, value) in tokens.iter().zip(values.iter()) {
+                    ValueType::W3dModelList => out.extend(
+                        values
+                            .iter()
+                            .map(|value| value.text().trim_matches('"').to_string()),
+                    ),
+                    ValueType::TokenList { .. }
+                    | ValueType::OneOf { .. }
+                    | ValueType::Prefixed { .. } => {
+                        for (index, value) in values.iter().enumerate() {
+                            let Some(spec) =
+                                schema_field.value_type.token_type_at_input(&input, index)
+                            else {
+                                continue;
+                            };
                             if is_model_asset_type(spec) {
                                 out.push(value.text().trim_matches('"').to_string());
                             }
