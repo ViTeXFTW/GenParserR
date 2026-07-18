@@ -205,6 +205,8 @@ pub enum ValueType {
     AsciiStringList,
     /// A W3D model asset name, backed by indexed `.w3d` files.
     W3dModel,
+    /// One or more W3D model asset names.
+    W3dModelList,
     /// A bone, subobject, mesh, or other member of a W3D model asset.
     W3dModelMember,
     /// `R:r G:g B:b [A:a]` color.

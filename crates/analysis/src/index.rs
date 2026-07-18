@@ -586,10 +586,19 @@ fn collect_object_models(analyzer: &Analyzer, node: &SyntaxNode, out: &mut Vec<S
                 let Some(schema_field) = field.key().and_then(|key| scope.field(key.text())) else {
                     continue;
                 };
-                if matches!(schema_field.value_type, ValueType::W3dModel) {
-                    if let Some(value) = field.value_tokens().first() {
-                        out.push(value.text().trim_matches('"').to_string());
+                let values = field.value_tokens();
+                match schema_field.value_type {
+                    ValueType::W3dModelList => out.extend(
+                        values
+                            .iter()
+                            .map(|value| value.text().trim_matches('"').to_string()),
+                    ),
+                    ValueType::W3dModel => {
+                        if let Some(value) = values.first() {
+                            out.push(value.text().trim_matches('"').to_string());
+                        }
                     }
+                    _ => {}
                 }
             }
             SyntaxKind::BLOCK | SyntaxKind::MODULE => collect_object_models(analyzer, &child, out),
