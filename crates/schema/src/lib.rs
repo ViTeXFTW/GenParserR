@@ -213,6 +213,12 @@ pub enum ValueType {
     Coord2D,
     /// `X:x Y:y Z:z` coordinate.
     Coord3D,
+    /// Two real bounds followed by an optional distribution name.
+    RandomVariable { value_set: String },
+    /// Two real bounds followed by an unsigned frame number.
+    RandomKeyframe,
+    /// `R:r G:g B:b` followed by an unsigned frame number.
+    ColorKeyframe,
     /// One name drawn from a value set (an enum).
     Enum { value_set: String },
     /// One or more flag names from a value set, with optional `+`/`-` modifiers
@@ -309,7 +315,11 @@ impl ValueType {
                 };
             }
             return match active {
-                ValueType::BitFlags { .. } | ValueType::ReferenceList { .. } => Some(active),
+                ValueType::BitFlags { .. }
+                | ValueType::ReferenceList { .. }
+                | ValueType::RandomVariable { .. }
+                | ValueType::RandomKeyframe
+                | ValueType::ColorKeyframe => Some(active),
                 _ if index == 0 => Some(active),
                 _ => None,
             };
@@ -346,7 +356,12 @@ impl ValueType {
             return active.token_index_at_input(input, index);
         }
         let ValueType::TokenList { tokens } = active else {
-            return Some(0);
+            return match active {
+                ValueType::RandomVariable { .. }
+                | ValueType::RandomKeyframe
+                | ValueType::ColorKeyframe => Some(index),
+                _ => Some(0),
+            };
         };
         let mut raw = 0;
         for (logical, ty) in tokens.iter().enumerate() {
@@ -551,6 +566,16 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn structured_particle_values_type_every_raw_token() {
+        for (ty, input) in [
+            (ValueType::RandomKeyframe, vec!["0", "1", "2"]),
+            (ValueType::ColorKeyframe, vec!["R:0", "G:0", "B:0", "2"]),
+        ] {
+            assert!((0..input.len()).all(|index| ty.token_type_at_input(&input, index).is_some()));
+        }
+    }
+
     fn contains(ty: &ValueType, predicate: fn(&ValueType) -> bool) -> bool {
         predicate(ty)
             || match ty {
@@ -694,7 +719,9 @@ mod tests {
         definitions: &HashSet<RefKind>,
     ) {
         match value_type {
-            ValueType::Enum { value_set } | ValueType::BitFlags { value_set } => assert!(
+            ValueType::Enum { value_set }
+            | ValueType::BitFlags { value_set }
+            | ValueType::RandomVariable { value_set } => assert!(
                 value_sets.contains(value_set.as_str()),
                 "{path} uses missing value set `{value_set}`"
             ),

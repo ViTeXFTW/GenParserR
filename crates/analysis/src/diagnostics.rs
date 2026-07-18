@@ -1326,6 +1326,50 @@ impl<'a> Ctx<'a> {
                     self.check_reference(*ref_kind, tok);
                 }
             }
+            ValueType::RandomVariable { value_set } => {
+                for tok in tokens.iter().take(2) {
+                    self.check_number(tok, NumKind::Real);
+                }
+                if tokens.len() < 2 {
+                    if let Some(key) = field.key() {
+                        self.warning(
+                            &key,
+                            "missing-value",
+                            format!("`{}` expects at least 2 values", key.text()),
+                        );
+                    }
+                }
+                if let Some(distribution) = tokens.get(2) {
+                    self.check_enum_member(value_set, distribution);
+                }
+            }
+            ValueType::RandomKeyframe => {
+                for tok in tokens.iter().take(2) {
+                    self.check_number(tok, NumKind::Real);
+                }
+                if let Some(frame) = tokens.get(2) {
+                    self.check_number(frame, NumKind::UInt);
+                } else if let Some(key) = field.key() {
+                    self.warning(
+                        &key,
+                        "missing-value",
+                        format!("`{}` expects 3 values", key.text()),
+                    );
+                }
+            }
+            ValueType::ColorKeyframe => {
+                if tokens.len() >= 4 {
+                    let (color, frame) = tokens.split_at(tokens.len() - 1);
+                    self.check_axes(field, color, &["R", "G", "B"], None, true);
+                    self.check_number(&frame[0], NumKind::UInt);
+                } else if let Some(key) = field.key() {
+                    self.warning(
+                        &key,
+                        "missing-value",
+                        format!("`{}` expects a color and frame", key.text()),
+                    );
+                }
+            }
             // A fixed sequence of typed tokens; each listed token is required
             // (the engine's parse function calls getNextToken for each).
             ValueType::TokenList { tokens: specs } => {
@@ -1459,6 +1503,9 @@ impl<'a> Ctx<'a> {
             | ValueType::Color
             | ValueType::Coord2D
             | ValueType::Coord3D
+            | ValueType::RandomVariable { .. }
+            | ValueType::RandomKeyframe
+            | ValueType::ColorKeyframe
             | ValueType::TokenList { .. }
             | ValueType::OneOf { .. }
             | ValueType::Unknown { .. } => {}

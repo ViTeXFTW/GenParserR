@@ -502,6 +502,9 @@ fn type_snippet_placeholder(ty: &ValueType, n: usize) -> String {
 
 fn value_snippet(ty: &ValueType) -> Option<String> {
     match ty {
+        ValueType::RandomVariable { .. } => Some("${1:0} ${2:0}$0".into()),
+        ValueType::RandomKeyframe => Some("${1:0} ${2:0} ${3:0}$0".into()),
+        ValueType::ColorKeyframe => Some("R:${1:0} G:${2:0} B:${3:0} ${4:0}$0".into()),
         ValueType::TokenList { tokens } if tokens.len() > 1 => {
             let mut snippet = tokens
                 .iter()
@@ -526,6 +529,19 @@ fn completions_for_type(
     index: Option<&WorkspaceIndex>,
 ) -> Vec<Completion> {
     match ty {
+        ValueType::RandomVariable { value_set } if value_index == 2 => completions_for_type(
+            analyzer,
+            &ValueType::Enum {
+                value_set: value_set.clone(),
+            },
+            0,
+            current_token,
+            first_token,
+            index,
+        ),
+        ValueType::RandomVariable { .. } | ValueType::RandomKeyframe | ValueType::ColorKeyframe => {
+            Vec::new()
+        }
         ValueType::OneOf { variants } => {
             if current_token.is_some() || value_index > 0 {
                 return ty
@@ -776,6 +792,9 @@ fn type_label(ty: &ValueType) -> String {
         ValueType::Reference { ref_kind } => format!("ref {ref_kind:?}"),
         ValueType::W3dModel => "w3d model".into(),
         ValueType::W3dModelMember => "w3d model member".into(),
+        ValueType::RandomVariable { .. } => "real real [distribution]".into(),
+        ValueType::RandomKeyframe => "real real frame".into(),
+        ValueType::ColorKeyframe => "R: G: B: frame".into(),
         ValueType::Prefixed { prefix, value_type } => {
             format!("{prefix}:{}", type_label(value_type))
         }
