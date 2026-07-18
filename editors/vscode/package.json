@@ -68,7 +68,7 @@
           "items": {
             "type": "string"
           },
-          "markdownDescription": "Directories or `.big` archives containing base game/mod INI files and W3D assets. INI definitions are treated as already loaded before `map.ini`/`solo.ini`; W3D assets power model and bone completions/diagnostics. Changing this restarts the language server."
+          "markdownDescription": "Directories or `.big` archives containing base game/mod INI files and game assets. INI definitions are treated as already loaded before `map.ini`/`solo.ini`; W3D, WAV/MP3, and TGA/DDS assets power completions and diagnostics. Configure all loaded roots to avoid partial-index warnings. Changing this restarts the language server."
         },
         "zerosyntax.schema.path": {
           "type": "string",
@@ -86,6 +86,18 @@
           "default": false,
           "markdownDescription": "Allow engine-compatible percentage values without a trailing `%` sign. Changing this restarts the language server."
         },
+        "zerosyntax.analysis.mapOrderingDiagnostics": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Warn when map.ini or solo.ini uses a definition before an engine parser resolves it. Changing this restarts the language server."
+        },
+        "zerosyntax.analysis.debounceMs": {
+          "type": "integer",
+          "default": 250,
+          "minimum": 0,
+          "maximum": 5000,
+          "markdownDescription": "Milliseconds to wait after typing before refreshing whole-document indexes and diagnostics. Parsing and completions remain immediate. Use `0` to refresh as soon as possible. Changing this restarts the language server."
+        },
         "zerosyntax.trace.server": {
           "type": "string",
           "enum": [
@@ -100,9 +112,9 @@
     }
   },
   "scripts": {
-    "compile": "tsc -p ./",
+    "compile": "tsc --noEmit && esbuild src/extension.ts --bundle --minify --legal-comments=linked --platform=node --external:vscode --outfile=out/extension.js",
     "compile:test": "tsc -p ./tsconfig.test.json",
-    "watch": "tsc -watch -p ./",
+    "watch": "esbuild src/extension.ts --bundle --platform=node --external:vscode --outfile=out/extension.js --watch",
     "vscode:prepublish": "node -e \"const fs=require('fs');fs.mkdirSync('icon',{recursive:true});fs.copyFileSync('../../icon/ZeroSyntaxLogo256.png','icon/ZeroSyntaxLogo256.png')\" && npm run compile",
     "package": "vsce package --allow-missing-repository",
     "test": "npm run compile && npm run compile:test && node ./out-test/src/test/runTest.js"
@@ -116,6 +128,7 @@
     "@types/vscode": "^1.84.0",
     "@vscode/test-electron": "^3.0.0",
     "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.1",
     "mocha": "^11.3.0",
     "typescript": "^6.0.3"
   }

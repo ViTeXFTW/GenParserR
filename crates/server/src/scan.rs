@@ -7,8 +7,8 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use tower_lsp::lsp_types::Url;
 use zerosyntax_analysis::index::{
-    definitions_in, module_tags_in, object_models_in, object_parents_in, references_in, Definition,
-    ModelAsset, ReferenceSite,
+    definitions_in, module_tags_in, object_models_in, object_parents_in, references_in, AssetKind,
+    Definition, FileAsset, ModelAsset, ReferenceSite,
 };
 use zerosyntax_analysis::Analyzer;
 
@@ -20,6 +20,7 @@ pub(crate) type ScanEntry = (
     Vec<(String, Vec<String>)>,
     Vec<(String, String)>,
     Vec<ModelAsset>,
+    Vec<FileAsset>,
     Option<Arc<str>>,
 );
 
@@ -132,6 +133,22 @@ fn file_stem_str(path: &str) -> String {
         .map(|(stem, _)| stem)
         .unwrap_or(file_name)
         .to_string()
+}
+
+fn raw_asset(path: &str) -> Option<FileAsset> {
+    let name = path.rsplit(['/', '\\']).next()?;
+    let (_, extension) = name.rsplit_once('.')?;
+    let kind = if extension.eq_ignore_ascii_case("wav") || extension.eq_ignore_ascii_case("mp3") {
+        AssetKind::Audio
+    } else if extension.eq_ignore_ascii_case("tga") || extension.eq_ignore_ascii_case("dds") {
+        AssetKind::Texture
+    } else {
+        return None;
+    };
+    Some(FileAsset {
+        kind,
+        name: name.to_string(),
+    })
 }
 
 pub(crate) fn parse_w3d_models(bytes: &[u8], fallback_name: &str) -> Vec<ModelAsset> {
@@ -250,9 +267,14 @@ fn dedup_case_insensitive(values: &mut Vec<String>) {
 
 pub(crate) fn scan_big(analyzer: &Analyzer, path: &Path) -> Result<Vec<ScanEntry>> {
     let mut out = Vec::new();
+    let mut assets = Vec::new();
     for entry in big_entries(path)? {
         let file = big_uri(path, &entry.name);
-        if entry.name.ends_with(".ini") || entry.name.ends_with(".INI") {
+        let extension = Path::new(&entry.name)
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
+        if extension.eq_ignore_ascii_case("ini") {
             let bytes = read_big_entry_bytes(path, &entry).with_context(|| {
                 format!("failed to read {} from {}", entry.name, path.display())
             })?;
@@ -266,9 +288,10 @@ pub(crate) fn scan_big(analyzer: &Analyzer, path: &Path) -> Result<Vec<ScanEntry
                 object_models_in(analyzer, &parse),
                 object_parents_in(&parse),
                 Vec::new(),
+                Vec::new(),
                 Some(Arc::from(text)),
             ));
-        } else if entry.name.ends_with(".w3d") || entry.name.ends_with(".W3D") {
+        } else if extension.eq_ignore_ascii_case("w3d") {
             let bytes = read_big_entry_bytes(path, &entry).with_context(|| {
                 format!("failed to read {} from {}", entry.name, path.display())
             })?;
@@ -282,10 +305,26 @@ pub(crate) fn scan_big(analyzer: &Analyzer, path: &Path) -> Result<Vec<ScanEntry
                     Vec::new(),
                     Vec::new(),
                     models,
+                    Vec::new(),
                     None,
                 ));
             }
+        } else if let Some(asset) = raw_asset(&entry.name) {
+            assets.push(asset);
         }
+    }
+    if !assets.is_empty() {
+        out.push((
+            big_uri(path, "__assets__"),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            assets,
+            None,
+        ));
     }
     Ok(out)
 }
@@ -326,6 +365,10 @@ fn collect_paths(roots: &[PathBuf], checked: bool) -> Result<Vec<PathBuf>> {
             if ext.eq_ignore_ascii_case("big")
                 || ext.eq_ignore_ascii_case("ini")
                 || ext.eq_ignore_ascii_case("w3d")
+                || ext.eq_ignore_ascii_case("wav")
+                || ext.eq_ignore_ascii_case("mp3")
+                || ext.eq_ignore_ascii_case("tga")
+                || ext.eq_ignore_ascii_case("dds")
             {
                 out.push(path.to_path_buf());
             }
@@ -377,6 +420,7 @@ fn scan_path(analyzer: &Analyzer, path: &Path) -> Result<Vec<ScanEntry>> {
             object_models_in(analyzer, &parse),
             object_parents_in(&parse),
             Vec::new(),
+            Vec::new(),
             None,
         )])
     } else if ext.eq_ignore_ascii_case("w3d") {
@@ -396,10 +440,23 @@ fn scan_path(analyzer: &Analyzer, path: &Path) -> Result<Vec<ScanEntry>> {
                 Vec::new(),
                 Vec::new(),
                 models,
+                Vec::new(),
                 None,
             ))
             .into_iter()
             .collect())
+    } else if let Some(asset) = raw_asset(&path.to_string_lossy()) {
+        Ok(vec![(
+            uri.to_string(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![asset],
+            None,
+        )])
     } else {
         Ok(Vec::new())
     }

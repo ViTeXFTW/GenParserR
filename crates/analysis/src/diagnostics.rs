@@ -16,11 +16,11 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use zerosyntax_schema::{RefKind, ValueType};
+use zerosyntax_schema::{AudioExtension, Field as SchemaField, RefKind, ValueType};
 use zerosyntax_syntax::ast::{Block, Field, Module};
 use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode, SyntaxToken};
 
-use crate::index::ModelMemberStrictness;
+use crate::index::{AssetKind, ModelMemberStrictness};
 use crate::model::{
     is_model_asset_type, is_model_member_type, model_member_matches, models_for_source,
     module_fits_slot, scope_schema, ScopeSchema,
@@ -96,6 +96,8 @@ pub const KNOWN_CODES: &[&str] = &[
     "unresolved-reference",
     "unknown-model",
     "unknown-model-member",
+    "unknown-audio-file",
+    "unknown-texture",
     "unknown-suppression",
     "module-wrong-slot",
     "duplicate-module-tag",
@@ -365,9 +367,10 @@ fn short_file(file: &str) -> &str {
     file.rsplit(['/', '\\']).next().unwrap_or(file)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct MapDef {
     order: usize,
+    header: String,
 }
 
 type MapDefs = HashMap<(RefKind, String), Vec<MapDef>>;
@@ -378,9 +381,9 @@ fn map_layer_diagnostics(
     index: Option<&WorkspaceIndex>,
     file: Option<&str>,
 ) -> Vec<Diagnostic> {
-    if !file.is_some_and(is_override_layer) {
+    let Some(file) = file.filter(|file| is_override_layer(file)) else {
         return Vec::new();
-    }
+    };
 
     let defs = map_top_level_defs(analyzer, parse);
     let mut out = Vec::new();
@@ -390,7 +393,26 @@ fn map_layer_diagnostics(
         .filter(|n| n.kind() == SyntaxKind::BLOCK)
         .enumerate()
     {
-        collect_map_reference_diags(analyzer, &node, order, &defs, index, &mut out);
+        let consumer = block_header(&Block(node.clone()));
+        collect_map_reference_diags(
+            analyzer,
+            &node,
+            order,
+            &defs,
+            index,
+            &consumer,
+            short_file(file),
+            &mut out,
+        );
+        collect_map_reskin_diag(
+            &node,
+            order,
+            &defs,
+            index,
+            &consumer,
+            short_file(file),
+            &mut out,
+        );
         collect_map_projectile_diags(&node, &defs, &mut out);
     }
     out
@@ -405,27 +427,60 @@ fn map_top_level_defs(analyzer: &Analyzer, parse: &Parse) -> MapDefs {
         .enumerate()
     {
         let block = Block(node);
-        let Some(kind) = block
-            .keyword()
-            .and_then(|k| analyzer.block(k.text()))
-            .and_then(|b| b.defines)
-        else {
+        let Some(keyword) = block.keyword() else {
+            continue;
+        };
+        let Some(kind) = analyzer.block(keyword.text()).and_then(|b| b.defines) else {
             continue;
         };
         let Some(name) = block.name() else { continue };
         out.entry((kind, name.text().to_ascii_lowercase()))
             .or_default()
-            .push(MapDef { order });
+            .push(MapDef {
+                order,
+                header: block_header(&block),
+            });
     }
     out
 }
 
+fn block_header(block: &Block) -> String {
+    [block.keyword(), block.name(), block.parent_name()]
+        .into_iter()
+        .flatten()
+        .map(|token| token.text().to_string())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn has_base_definition(index: Option<&WorkspaceIndex>, kind: RefKind, name: &str) -> bool {
+    index.is_some_and(|idx| {
+        idx.locations(kind, name)
+            .iter()
+            .any(|loc| !is_override_layer(&loc.file))
+    })
+}
+
+fn later_map_definition<'a>(
+    defs: &'a MapDefs,
+    kind: RefKind,
+    name: &str,
+    order: usize,
+) -> Option<&'a MapDef> {
+    defs.get(&(kind, name.to_ascii_lowercase()))?
+        .iter()
+        .find(|site| site.order > order)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn collect_map_reference_diags(
     analyzer: &Analyzer,
     node: &SyntaxNode,
     order: usize,
     defs: &MapDefs,
     index: Option<&WorkspaceIndex>,
+    consumer: &str,
+    file: &str,
     out: &mut Vec<Diagnostic>,
 ) {
     let scope = scope_schema(analyzer, node);
@@ -437,66 +492,245 @@ fn collect_map_reference_diags(
                 let Some(schema_field) = scope.field(key.text()) else {
                     continue;
                 };
-                for (kind, tok) in reference_tokens(&field, &schema_field.value_type) {
-                    let name = unquote(tok.text());
+                for reference in reference_tokens(&field, &schema_field.value_type) {
+                    if !eager_map_reference(&scope, schema_field, reference.kind) {
+                        continue;
+                    }
+                    let name = reference.name;
                     if name.eq_ignore_ascii_case("None") {
                         continue;
                     }
-                    if index.is_some_and(|idx| {
-                        idx.locations(kind, name)
-                            .iter()
-                            .any(|loc| !is_override_layer(&loc.file))
-                    }) {
+                    if has_base_definition(index, reference.kind, &name) {
                         continue;
                     }
-                    let later = defs
-                        .get(&(kind, name.to_ascii_lowercase()))
-                        .is_some_and(|sites| sites.iter().any(|site| site.order > order));
-                    if later {
+                    if let Some(site) = later_map_definition(defs, reference.kind, &name, order) {
+                        let field_kind = if key.text().chars().all(|c| c.is_ascii_digit()) {
+                            "slot"
+                        } else {
+                            "field"
+                        };
                         out.push(Diagnostic {
-                            span: tok.text_range().into(),
+                            span: reference.token.text_range().into(),
                             severity: Severity::Warning,
                             code: "map-forward-reference",
                             message: format!(
-                                "`{name}` is defined later in this map file; map.ini/solo.ini \
-                                 loads in order, so this reference binds before that definition \
-                                 and the later map entry will not take effect here"
+                                "`{}` is declared after `{consumer}`, but {field_kind} `{}` is \
+                                 resolved immediately while `{file}` loads. Move `{}` above \
+                                 `{consumer}`.",
+                                site.header,
+                                key.text(),
+                                site.header,
                             ),
                         });
                     }
                 }
             }
             SyntaxKind::MODULE | SyntaxKind::BLOCK => {
-                collect_map_reference_diags(analyzer, &child, order, defs, index, out);
+                collect_map_reference_diags(
+                    analyzer, &child, order, defs, index, consumer, file, out,
+                );
             }
             _ => {}
         }
     }
 }
 
-fn reference_tokens(field: &Field, ty: &ValueType) -> Vec<(RefKind, SyntaxToken)> {
+fn eager_map_reference(scope: &ScopeSchema<'_>, field: &SchemaField, kind: RefKind) -> bool {
+    if matches!(scope, ScopeSchema::Block(block) if block.name == "Object")
+        && matches!(field.name.as_str(), "SelectPortrait" | "ButtonImage")
+    {
+        return true;
+    }
+
+    if field.parse_fn == "parseFactionObjectCreationList" {
+        return kind == RefKind::ObjectCreationList;
+    }
+
+    matches!(
+        field.parse_fn.as_str(),
+        "AI::parseScience"
+            | "AIUpdateModuleData::parseLocomotorSet"
+            | "ArmorStore::parseArmorTemplate"
+            | "BoneFXUpdateModuleData::parseFXList"
+            | "BoneFXUpdateModuleData::parseObjectCreationList"
+            | "BoneFXUpdateModuleData::parseParticleSystem"
+            | "CommandSet::parseCommandButton"
+            | "DamageFX::parseMajorFXList"
+            | "DamageFX::parseMinorFXList"
+            | "DamageFXStore::parseDamageFX"
+            | "INI::parseFXList"
+            | "INI::parseMappedImage"
+            | "INI::parseObjectCreationList"
+            | "INI::parseParticleSystemTemplate"
+            | "INI::parseScience"
+            | "INI::parseScienceVector"
+            | "INI::parseSpecialPowerTemplate"
+            | "INI::parseThingTemplate"
+            | "INI::parseUpgradeTemplate"
+            | "INI::parseWeaponTemplate"
+            | "ProductionPrerequisite::parsePrerequisiteScience"
+            | "ProductionPrerequisite::parsePrerequisiteUnit"
+            | "TransitionDamageFXModuleData::parseFXList"
+            | "TransitionDamageFXModuleData::parseObjectCreationList"
+            | "TransitionDamageFXModuleData::parseParticleSystem"
+            | "WeaponTemplateSet::parseWeapon"
+            | "parseAllVetLevelsFXList"
+            | "parseAllVetLevelsPSys"
+            | "parseAngleFX"
+            | "parseBountyUpgradePair"
+            | "parseCashHackUpgradePair"
+            | "parseFX"
+            | "parseOCL"
+            | "parseOCLUpgradePair"
+            | "parseParticleSysBone"
+            | "parsePerVetLevelFXList"
+            | "parsePerVetLevelPSys"
+            | "parseWeapon"
+    )
+}
+
+struct MapReference {
+    kind: RefKind,
+    token: SyntaxToken,
+    name: String,
+}
+
+fn reference_tokens(field: &Field, ty: &ValueType) -> Vec<MapReference> {
     let tokens = field.value_tokens();
     match ty {
+        ValueType::OneOf { .. } => ty
+            .variant_for_first_token(tokens.first().map(|token| unquote(token.text())))
+            .map(|variant| reference_tokens(field, variant))
+            .unwrap_or_default(),
         ValueType::Reference { ref_kind } => tokens
             .first()
-            .map(|tok| vec![(*ref_kind, tok.clone())])
+            .map(|tok| vec![map_reference(*ref_kind, tok, unquote(tok.text()))])
             .unwrap_or_default(),
         ValueType::ReferenceList { ref_kind } => tokens
-            .into_iter()
-            .map(|tok| (*ref_kind, tok))
-            .collect::<Vec<_>>(),
-        ValueType::TokenList { tokens: specs } => specs
             .iter()
-            .zip(tokens)
-            .filter_map(|(spec, tok)| match spec {
-                ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } => {
-                    Some((*ref_kind, tok))
+            .map(|tok| map_reference(*ref_kind, tok, unquote(tok.text())))
+            .collect::<Vec<_>>(),
+        ValueType::Prefixed { .. } => {
+            let mut out = Vec::new();
+            reference_value_tokens(ty, &tokens, 0, &mut out);
+            out
+        }
+        ValueType::TokenList { tokens: specs } => {
+            let mut out = Vec::new();
+            let mut raw = 0;
+            for (i, spec) in specs.iter().enumerate() {
+                if tokens.get(raw).is_none() {
+                    break;
                 }
-                _ => None,
-            })
-            .collect(),
+                if i + 1 == specs.len() {
+                    if let ValueType::ReferenceList { ref_kind } = spec {
+                        out.extend(
+                            tokens[raw..]
+                                .iter()
+                                .map(|tok| map_reference(*ref_kind, tok, unquote(tok.text()))),
+                        );
+                        break;
+                    }
+                }
+                raw += reference_value_tokens(spec, &tokens, raw, &mut out);
+            }
+            out
+        }
         _ => Vec::new(),
     }
+}
+
+fn reference_value_tokens(
+    ty: &ValueType,
+    tokens: &[SyntaxToken],
+    index: usize,
+    out: &mut Vec<MapReference>,
+) -> usize {
+    let Some(tok) = tokens.get(index) else {
+        return 0;
+    };
+    if let Some(value_type) = ty.split_prefix_value_type(unquote(tok.text())) {
+        if let Some(value) = tokens.get(index + 1) {
+            reference_token(value_type, value, out);
+            return 2;
+        }
+    }
+    reference_token(ty, tok, out);
+    1
+}
+
+fn map_reference(kind: RefKind, token: &SyntaxToken, name: &str) -> MapReference {
+    MapReference {
+        kind,
+        token: token.clone(),
+        name: name.to_string(),
+    }
+}
+
+fn reference_token(ty: &ValueType, tok: &SyntaxToken, out: &mut Vec<MapReference>) {
+    match ty {
+        ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } => {
+            out.push(map_reference(*ref_kind, tok, unquote(tok.text())));
+        }
+        ValueType::Prefixed { prefix, value_type } => {
+            let raw = unquote(tok.text());
+            let Some((actual, name)) = raw.split_once(':') else {
+                return;
+            };
+            if !actual.eq_ignore_ascii_case(prefix) {
+                return;
+            }
+            if let ValueType::Reference { ref_kind } | ValueType::ReferenceList { ref_kind } =
+                value_type.as_ref()
+            {
+                out.push(map_reference(*ref_kind, tok, name));
+            }
+        }
+        ValueType::OneOf { .. } => {
+            if let Some(variant) = ty.variant_for_first_token(Some(unquote(tok.text()))) {
+                reference_token(variant, tok, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_map_reskin_diag(
+    node: &SyntaxNode,
+    order: usize,
+    defs: &MapDefs,
+    index: Option<&WorkspaceIndex>,
+    consumer: &str,
+    file: &str,
+    out: &mut Vec<Diagnostic>,
+) {
+    let block = Block(node.clone());
+    if !block
+        .keyword()
+        .is_some_and(|keyword| keyword.text().eq_ignore_ascii_case("ObjectReskin"))
+    {
+        return;
+    }
+    let Some(parent) = block.parent_name() else {
+        return;
+    };
+    let name = unquote(parent.text());
+    if has_base_definition(index, RefKind::Object, name) {
+        return;
+    }
+    let Some(site) = later_map_definition(defs, RefKind::Object, name, order) else {
+        return;
+    };
+    out.push(Diagnostic {
+        span: parent.text_range().into(),
+        severity: Severity::Warning,
+        code: "map-forward-reference",
+        message: format!(
+            "`{}` is declared after `{consumer}`; `ObjectReskin` requires its parent to exist \
+             when parsed while `{file}` loads. Move `{}` above `{consumer}`.",
+            site.header, site.header,
+        ),
+    });
 }
 
 fn collect_map_projectile_diags(node: &SyntaxNode, defs: &MapDefs, out: &mut Vec<Diagnostic>) {
@@ -757,6 +991,7 @@ impl<'a> Ctx<'a> {
         if let Some(schema_field) = scope.field(name) {
             self.validate_value(&field, &schema_field.value_type);
             self.validate_model_asset(&field, schema_field, scope_node);
+            self.validate_raw_asset(&field, &schema_field.value_type);
         } else if scope.has_field_schema()
             && !scope.module_slots().iter().any(|s| s.keyword == name)
         {
@@ -780,18 +1015,35 @@ impl<'a> Ctx<'a> {
         }
         let tokens = field.value_tokens();
         match &schema_field.value_type {
-            ValueType::TokenList { tokens: specs } => {
-                for (spec, tok) in specs.iter().zip(tokens.iter()) {
+            ValueType::W3dModelList => {
+                for tok in &tokens {
                     self.validate_model_asset_token(
-                        spec,
+                        &schema_field.value_type,
                         tok,
                         scope_node,
                         schema_field.model_source.as_ref(),
                     );
                 }
             }
+            ValueType::TokenList { tokens: specs } => {
+                let mut i = 0;
+                for spec in specs {
+                    let Some(tok) = tokens.get(i) else { break };
+                    let (ty, tok, consumed) = split_prefixed_token(&tokens[i..], spec)
+                        .map(|(ty, tok)| (ty, tok, 2))
+                        .unwrap_or((spec, tok, 1));
+                    self.validate_model_asset_token(
+                        ty,
+                        tok,
+                        scope_node,
+                        schema_field.model_source.as_ref(),
+                    );
+                    i += consumed;
+                }
+            }
             ty => {
                 if let Some(tok) = tokens.first() {
+                    let (ty, tok) = split_prefixed_token(&tokens, ty).unwrap_or((ty, tok));
                     self.validate_model_asset_token(
                         ty,
                         tok,
@@ -803,6 +1055,63 @@ impl<'a> Ctx<'a> {
         }
     }
 
+    fn validate_raw_asset(&mut self, field: &Field, ty: &ValueType) {
+        let Some(index) = self.index else { return };
+        let tokens = field.value_tokens();
+        match ty {
+            ValueType::AudioFile { extension } if index.has_assets(AssetKind::Audio) => {
+                if let Some(token) = tokens.first() {
+                    let name = unquote(token.text());
+                    let allowed = match extension {
+                        AudioExtension::Any => {
+                            has_extension(name, "wav") || has_extension(name, "mp3")
+                        }
+                        AudioExtension::Wav => has_extension(name, "wav"),
+                        AudioExtension::Mp3 => has_extension(name, "mp3"),
+                    };
+                    if !name.eq_ignore_ascii_case("None")
+                        && (!allowed || !index.is_asset(AssetKind::Audio, name))
+                    {
+                        self.warning(
+                            token,
+                            "unknown-audio-file",
+                            format!("`{name}` is not a known audio file"),
+                        );
+                    }
+                }
+            }
+            ValueType::AudioStemList if index.has_assets(AssetKind::Audio) => {
+                for token in tokens {
+                    let name = unquote(token.text());
+                    if !name.eq_ignore_ascii_case("None")
+                        && !index.is_asset(AssetKind::Audio, &format!("{name}.wav"))
+                    {
+                        self.warning(
+                            &token,
+                            "unknown-audio-file",
+                            format!("`{name}` is not a known WAV sound stem"),
+                        );
+                    }
+                }
+            }
+            ValueType::TextureFile | ValueType::TextureStem | ValueType::TextureSequenceStem
+                if index.has_assets(AssetKind::Texture) =>
+            {
+                if let Some(token) = tokens.first() {
+                    let name = unquote(token.text());
+                    if !name.eq_ignore_ascii_case("None") && !texture_exists(index, ty, name) {
+                        self.warning(
+                            token,
+                            "unknown-texture",
+                            format!("`{name}` is not a known texture"),
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn validate_model_asset_token(
         &mut self,
         ty: &ValueType,
@@ -811,7 +1120,19 @@ impl<'a> Ctx<'a> {
         source: Option<&zerosyntax_schema::ModelSource>,
     ) {
         let Some(index) = self.index else { return };
-        let value = unquote(tok.text());
+        let raw = unquote(tok.text());
+        let (ty, value) = match ty {
+            ValueType::Prefixed { prefix, value_type } => {
+                let Some((actual, value)) = raw.split_once(':') else {
+                    return;
+                };
+                if !actual.eq_ignore_ascii_case(prefix) {
+                    return;
+                }
+                (value_type.as_ref(), value)
+            }
+            _ => (ty, raw),
+        };
         if value.is_empty() || value.eq_ignore_ascii_case("None") {
             return;
         }
@@ -1012,6 +1333,9 @@ impl<'a> Ctx<'a> {
         if tokens.is_empty() {
             return;
         }
+        let ty = ty
+            .variant_for_first_token(tokens.first().map(|token| unquote(token.text())))
+            .unwrap_or(ty);
         match ty {
             ValueType::BitFlags { .. } | ValueType::ReferenceList { .. } => {
                 for token in &tokens {
@@ -1019,18 +1343,17 @@ impl<'a> Ctx<'a> {
                 }
             }
             ValueType::TokenList { tokens: specs } => {
-                for (token, spec) in tokens.iter().zip(specs) {
-                    self.check_token(token, spec);
+                let mut index = 0;
+                for spec in specs {
+                    if tokens.get(index).is_none() {
+                        break;
+                    }
+                    index += self.check_value_tokens(&tokens[index..], spec);
                 }
             }
-            ValueType::OneOf { .. } => {
-                if let Some(variant) =
-                    ty.variant_for_first_token(tokens.first().map(|t| unquote(t.text())))
-                {
-                    self.check_token(&tokens[0], variant);
-                }
+            single => {
+                self.check_value_tokens(&tokens, single);
             }
-            single => self.check_token(&tokens[0], single),
         }
     }
 
@@ -1073,12 +1396,57 @@ impl<'a> Ctx<'a> {
                     self.check_reference(*ref_kind, tok);
                 }
             }
+            ValueType::RandomVariable { value_set } => {
+                for tok in tokens.iter().take(2) {
+                    self.check_number(tok, NumKind::Real);
+                }
+                if tokens.len() < 2 {
+                    if let Some(key) = field.key() {
+                        self.warning(
+                            &key,
+                            "missing-value",
+                            format!("`{}` expects at least 2 values", key.text()),
+                        );
+                    }
+                }
+                if let Some(distribution) = tokens.get(2) {
+                    self.check_enum_member(value_set, distribution);
+                }
+            }
+            ValueType::RandomKeyframe => {
+                for tok in tokens.iter().take(2) {
+                    self.check_number(tok, NumKind::Real);
+                }
+                if let Some(frame) = tokens.get(2) {
+                    self.check_number(frame, NumKind::UInt);
+                } else if let Some(key) = field.key() {
+                    self.warning(
+                        &key,
+                        "missing-value",
+                        format!("`{}` expects 3 values", key.text()),
+                    );
+                }
+            }
+            ValueType::ColorKeyframe => {
+                if tokens.len() >= 4 {
+                    let (color, frame) = tokens.split_at(tokens.len() - 1);
+                    self.check_axes(field, color, &["R", "G", "B"], None, true);
+                    self.check_number(&frame[0], NumKind::UInt);
+                } else if let Some(key) = field.key() {
+                    self.warning(
+                        &key,
+                        "missing-value",
+                        format!("`{}` expects a color and frame", key.text()),
+                    );
+                }
+            }
             // A fixed sequence of typed tokens; each listed token is required
             // (the engine's parse function calls getNextToken for each).
             ValueType::TokenList { tokens: specs } => {
-                for (i, spec) in specs.iter().enumerate() {
+                let mut i = 0;
+                for spec in specs {
                     match tokens.get(i) {
-                        Some(tok) => self.check_token(tok, spec),
+                        Some(_) => i += self.check_value_tokens(&tokens[i..], spec),
                         None => {
                             if let Some(key) = field.key() {
                                 self.warning(
@@ -1100,7 +1468,7 @@ impl<'a> Ctx<'a> {
                     .last()
                     .filter(|spec| matches!(spec, ValueType::BitFlags { .. }))
                 {
-                    for tok in tokens.iter().skip(specs.len()) {
+                    for tok in tokens.iter().skip(i) {
                         self.check_token(tok, spec);
                     }
                 }
@@ -1111,8 +1479,29 @@ impl<'a> Ctx<'a> {
             // `X:0 Y:0 [Z:0]` — reals (INI.cpp parseCoord2D / parseCoord3D).
             ValueType::Coord2D => self.check_axes(field, &tokens, &["X", "Y"], None, false),
             ValueType::Coord3D => self.check_axes(field, &tokens, &["X", "Y", "Z"], None, false),
-            single => self.check_token(&tokens[0], single),
+            single => {
+                self.check_value_tokens(&tokens, single);
+            }
         }
+    }
+
+    /// Validate one logical value, accepting the engine's optional whitespace
+    /// after a prefix colon (`Loc:X:0` and `Loc: X:0`).
+    fn check_value_tokens(&mut self, tokens: &[SyntaxToken], ty: &ValueType) -> usize {
+        let tok = &tokens[0];
+        if let Some((value_type, value)) = split_prefixed_token(tokens, ty) {
+            if ty
+                .first_prefix()
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("Loc"))
+            {
+                self.check_loc_value(value, unquote(value.text()));
+            } else {
+                self.check_token(value, value_type);
+            }
+            return 2;
+        }
+        self.check_token(tok, ty);
+        1
     }
 
     /// Validate one value token against a single-token type.
@@ -1178,10 +1567,19 @@ impl<'a> Ctx<'a> {
             | ValueType::QuotedString
             | ValueType::AsciiStringList
             | ValueType::W3dModel
+            | ValueType::W3dModelList
             | ValueType::W3dModelMember
+            | ValueType::AudioFile { .. }
+            | ValueType::AudioStemList
+            | ValueType::TextureFile
+            | ValueType::TextureStem
+            | ValueType::TextureSequenceStem
             | ValueType::Color
             | ValueType::Coord2D
             | ValueType::Coord3D
+            | ValueType::RandomVariable { .. }
+            | ValueType::RandomKeyframe
+            | ValueType::ColorKeyframe
             | ValueType::TokenList { .. }
             | ValueType::OneOf { .. }
             | ValueType::Unknown { .. } => {}
@@ -1207,29 +1605,7 @@ impl<'a> Ctx<'a> {
             return;
         }
         if prefix.eq_ignore_ascii_case("Loc") {
-            let Some((axis, n)) = value.split_once(':') else {
-                self.error(
-                    tok,
-                    "bad-prefixed",
-                    format!("expected `Loc:X:<n>`, found `{text}`"),
-                );
-                return;
-            };
-            if !axis.eq_ignore_ascii_case("X") {
-                self.error(
-                    tok,
-                    "bad-prefixed",
-                    format!("expected `Loc:X:<n>`, found `{text}`"),
-                );
-                return;
-            }
-            if n.parse::<f64>().is_err() {
-                self.error(
-                    tok,
-                    "bad-number",
-                    format!("expected a number for `Loc:X:`, found `{n}`"),
-                );
-            }
+            self.check_loc_value(tok, value);
             return;
         }
         match ty {
@@ -1263,6 +1639,32 @@ impl<'a> Ctx<'a> {
             }
             ValueType::AsciiString | ValueType::AsciiStringList | ValueType::QuotedString => {}
             _ => {}
+        }
+    }
+
+    fn check_loc_value(&mut self, tok: &SyntaxToken, value: &str) {
+        let Some((axis, n)) = value.split_once(':') else {
+            self.error(
+                tok,
+                "bad-prefixed",
+                format!("expected `X:<n>` after `Loc:`, found `{value}`"),
+            );
+            return;
+        };
+        if !axis.eq_ignore_ascii_case("X") {
+            self.error(
+                tok,
+                "bad-prefixed",
+                format!("expected `X:<n>` after `Loc:`, found `{value}`"),
+            );
+            return;
+        }
+        if n.parse::<f64>().is_err() {
+            self.error(
+                tok,
+                "bad-number",
+                format!("expected a number for `Loc:X:`, found `{n}`"),
+            );
         }
     }
 
@@ -1492,6 +1894,30 @@ impl<'a> Ctx<'a> {
     }
 }
 
+fn has_extension(name: &str, extension: &str) -> bool {
+    name.rsplit_once('.')
+        .is_some_and(|(_, actual)| actual.eq_ignore_ascii_case(extension))
+}
+
+fn texture_exists(index: &WorkspaceIndex, ty: &ValueType, name: &str) -> bool {
+    let exact = |candidate: &str| index.is_asset(AssetKind::Texture, candidate);
+    match ty {
+        ValueType::TextureFile if has_extension(name, "dds") => exact(name),
+        ValueType::TextureFile if has_extension(name, "tga") => {
+            exact(name) || exact(&format!("{}.dds", &name[..name.len() - 4]))
+        }
+        ValueType::TextureFile => false,
+        ValueType::TextureStem => exact(&format!("{name}.tga")) || exact(&format!("{name}.dds")),
+        ValueType::TextureSequenceStem => {
+            exact(&format!("{name}.tga"))
+                || exact(&format!("{name}.dds"))
+                || exact(&format!("{name}0000.tga"))
+                || exact(&format!("{name}0000.dds"))
+        }
+        _ => false,
+    }
+}
+
 enum NumKind {
     Int,
     UInt,
@@ -1522,6 +1948,15 @@ fn unquote(s: &str) -> &str {
     s.strip_prefix('"')
         .map(|s| s.strip_suffix('"').unwrap_or(s))
         .unwrap_or(s)
+}
+
+fn split_prefixed_token<'t, 'v>(
+    tokens: &'t [SyntaxToken],
+    ty: &'v ValueType,
+) -> Option<(&'v ValueType, &'t SyntaxToken)> {
+    let value = tokens.get(1)?;
+    ty.split_prefix_value_type(unquote(tokens.first()?.text()))
+        .map(|value_type| (value_type, value))
 }
 
 #[cfg(test)]
@@ -1933,6 +2368,227 @@ End
     }
 
     #[test]
+    fn map_ordering_classifies_only_source_proven_eager_references() {
+        let eager = [
+            "AI::parseScience",
+            "AIUpdateModuleData::parseLocomotorSet",
+            "ArmorStore::parseArmorTemplate",
+            "BoneFXUpdateModuleData::parseFXList",
+            "BoneFXUpdateModuleData::parseObjectCreationList",
+            "BoneFXUpdateModuleData::parseParticleSystem",
+            "CommandSet::parseCommandButton",
+            "DamageFX::parseMajorFXList",
+            "DamageFX::parseMinorFXList",
+            "DamageFXStore::parseDamageFX",
+            "INI::parseFXList",
+            "INI::parseMappedImage",
+            "INI::parseObjectCreationList",
+            "INI::parseParticleSystemTemplate",
+            "INI::parseScience",
+            "INI::parseScienceVector",
+            "INI::parseSpecialPowerTemplate",
+            "INI::parseThingTemplate",
+            "INI::parseUpgradeTemplate",
+            "INI::parseWeaponTemplate",
+            "ProductionPrerequisite::parsePrerequisiteScience",
+            "ProductionPrerequisite::parsePrerequisiteUnit",
+            "TransitionDamageFXModuleData::parseFXList",
+            "TransitionDamageFXModuleData::parseObjectCreationList",
+            "TransitionDamageFXModuleData::parseParticleSystem",
+            "WeaponTemplateSet::parseWeapon",
+            "parseAllVetLevelsFXList",
+            "parseAllVetLevelsPSys",
+            "parseAngleFX",
+            "parseBountyUpgradePair",
+            "parseCashHackUpgradePair",
+            "parseFX",
+            "parseOCL",
+            "parseOCLUpgradePair",
+            "parseParticleSysBone",
+            "parsePerVetLevelFXList",
+            "parsePerVetLevelPSys",
+            "parseWeapon",
+        ];
+        let mut field = SchemaField {
+            name: "Test".into(),
+            value_type: ValueType::Reference {
+                ref_kind: RefKind::Object,
+            },
+            parse_fn: String::new(),
+            doc: None,
+            model_source: None,
+        };
+        for parser in eager {
+            field.parse_fn = parser.into();
+            assert!(
+                eager_map_reference(&ScopeSchema::Unknown, &field, RefKind::Object),
+                "{parser}"
+            );
+        }
+        field.parse_fn = "INI::parseAsciiString".into();
+        assert!(!eager_map_reference(
+            &ScopeSchema::Unknown,
+            &field,
+            RefKind::Object
+        ));
+
+        let a = Analyzer::embedded();
+        let ocl_update = a.module("OCLUpdate").unwrap();
+        let faction_ocl = ocl_update
+            .fields
+            .iter()
+            .find(|field| field.name == "FactionOCL")
+            .unwrap();
+        assert!(eager_map_reference(
+            &ScopeSchema::Module(ocl_update),
+            faction_ocl,
+            RefKind::ObjectCreationList
+        ));
+        assert!(!eager_map_reference(
+            &ScopeSchema::Module(ocl_update),
+            faction_ocl,
+            RefKind::PlayerTemplate
+        ));
+
+        let object = a.block("Object").unwrap();
+        let object_image = object
+            .fields
+            .iter()
+            .find(|field| field.name == "ButtonImage")
+            .unwrap();
+        assert!(eager_map_reference(
+            &ScopeSchema::Block(object),
+            object_image,
+            RefKind::MappedImage
+        ));
+        for block_name in ["CommandButton", "Upgrade"] {
+            let block = a.block(block_name).unwrap();
+            let image = block
+                .fields
+                .iter()
+                .find(|field| field.name == "ButtonImage")
+                .unwrap();
+            assert!(!eager_map_reference(
+                &ScopeSchema::Block(block),
+                image,
+                RefKind::MappedImage
+            ));
+        }
+    }
+
+    #[test]
+    fn map_reference_extraction_handles_prefixed_and_trailing_lists() {
+        let a = Analyzer::embedded();
+        let parse =
+            a.parse("Object X\n  Test = Faction:LateFaction OCL:LateOCL ExtraA ExtraB\nEnd\n");
+        let field = Block(parse.syntax().children().next().unwrap())
+            .fields()
+            .next()
+            .unwrap();
+        let prefixed = ValueType::TokenList {
+            tokens: vec![
+                ValueType::Prefixed {
+                    prefix: "Faction".into(),
+                    value_type: Box::new(ValueType::Reference {
+                        ref_kind: RefKind::PlayerTemplate,
+                    }),
+                },
+                ValueType::Prefixed {
+                    prefix: "OCL".into(),
+                    value_type: Box::new(ValueType::Reference {
+                        ref_kind: RefKind::ObjectCreationList,
+                    }),
+                },
+            ],
+        };
+        let refs = reference_tokens(&field, &prefixed);
+        assert_eq!(
+            refs.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+            ["LateFaction", "LateOCL"]
+        );
+
+        let split_parse = a.parse("Object X\n  Test = Faction: LateFaction OCL: LateOCL\nEnd\n");
+        let split_field = Block(split_parse.syntax().children().next().unwrap())
+            .fields()
+            .next()
+            .unwrap();
+        let refs = reference_tokens(&split_field, &prefixed);
+        assert_eq!(
+            refs.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+            ["LateFaction", "LateOCL"]
+        );
+
+        let trailing = ValueType::TokenList {
+            tokens: vec![
+                ValueType::AsciiString,
+                ValueType::ReferenceList {
+                    ref_kind: RefKind::FxList,
+                },
+            ],
+        };
+        let refs = reference_tokens(&field, &trailing);
+        assert_eq!(
+            refs.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+            ["OCL:LateOCL", "ExtraA", "ExtraB"]
+        );
+    }
+
+    #[test]
+    fn map_forward_reference_message_is_actionable_and_suppressible() {
+        let a = Analyzer::embedded();
+        let body = "CommandSet MapSet\n  1 = LateButton\nEnd\n\nCommandButton LateButton\n  Command = UNIT_BUILD\nEnd\n";
+        let parse = a.parse(body);
+        let diag = diagnose(&a, &parse, None, Some("maps/map.ini"))
+            .into_iter()
+            .find(|diag| diag.code == "map-forward-reference")
+            .unwrap();
+        for expected in [
+            "CommandButton LateButton",
+            "CommandSet MapSet",
+            "slot `1`",
+            "`map.ini`",
+            "Move `CommandButton LateButton` above `CommandSet MapSet`",
+        ] {
+            assert!(diag.message.contains(expected), "{}", diag.message);
+        }
+
+        let suppressed = a.parse(&format!(
+            "; zerosyntax-disable: map-forward-reference\n{body}"
+        ));
+        assert!(!diagnose(&a, &suppressed, None, Some("maps/map.ini"))
+            .iter()
+            .any(|diag| diag.code == "map-forward-reference"));
+
+        let reskin = a.parse("ObjectReskin Child Parent\nEnd\n\nObject Parent\nEnd\n");
+        let message = diagnose(&a, &reskin, None, Some("maps/map.ini"))
+            .into_iter()
+            .find(|diag| diag.code == "map-forward-reference")
+            .unwrap()
+            .message;
+        assert!(message.contains("`ObjectReskin` requires its parent"));
+        assert!(message.contains("Move `Object Parent` above `ObjectReskin Child Parent`"));
+    }
+
+    #[test]
+    fn map_reskin_parent_allows_base_game_definition() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        let base = a.parse("Object Parent\nEnd\n");
+        index.set_file(
+            "Data/INI/Object.ini",
+            crate::index::definitions_in(&a, &base, "Data/INI/Object.ini"),
+        );
+        let map = a.parse("ObjectReskin Child Parent\nEnd\n\nObject Parent\nEnd\n");
+        index.set_file(
+            "maps/map.ini",
+            crate::index::definitions_in(&a, &map, "maps/map.ini"),
+        );
+        assert!(!diagnose(&a, &map, Some(&index), Some("maps/map.ini"))
+            .iter()
+            .any(|diag| diag.code == "map-forward-reference"));
+    }
+
+    #[test]
     fn duplicate_object_definition_outside_overrides_warns() {
         let a = Analyzer::embedded();
         let mut index = WorkspaceIndex::new();
@@ -1991,6 +2647,9 @@ Object Tank
       WeaponRecoilBone = PRIMARY MissingMuzzle
     End
   End
+  Behavior = BoneFXUpdate ModuleTag_02
+    PristineFXList1 = Bone: SplitMissing OnlyOnce: No 0 0 FXList: None
+  End
 End
 ";
         let parse = a.parse(src);
@@ -2019,6 +2678,13 @@ End
             diags.iter().any(|d| {
                 d.code == "unknown-model-member"
                     && &src[d.span.start as usize..d.span.end as usize] == "MissingMuzzle"
+            }),
+            "{diags:?}"
+        );
+        assert!(
+            diags.iter().any(|d| {
+                d.code == "unknown-model-member"
+                    && &src[d.span.start as usize..d.span.end as usize] == "SplitMissing"
             }),
             "{diags:?}"
         );
@@ -2121,6 +2787,30 @@ End
     }
 
     #[test]
+    fn ocl_object_and_model_lists_validate_every_reference() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        let objects = a.parse("Object KnownObject\nEnd\n");
+        index.set_file(
+            "objects.ini",
+            crate::index::definitions_in(&a, &objects, "objects.ini"),
+        );
+        index.set_file_models(
+            "models/Good.w3d",
+            vec![crate::index::ModelAsset {
+                name: "Good".into(),
+                members: vec![],
+            }],
+        );
+        let src = "ObjectCreationList Test\n  CreateObject\n    ObjectNames = KnownObject MissingObject\n  End\n  CreateDebris\n    ModelNames = Good MissingModel\n  End\nEnd\n";
+        let diags = diagnose(&a, &a.parse(src), Some(&index), Some("ocl.ini"));
+        assert!(diags.iter().any(|d| d.code == "unresolved-reference"
+            && &src[d.span.start as usize..d.span.end as usize] == "MissingObject"));
+        assert!(diags.iter().any(|d| d.code == "unknown-model"
+            && &src[d.span.start as usize..d.span.end as usize] == "MissingModel"));
+    }
+
+    #[test]
     fn model_member_strictness_supports_off_compatible_and_strict() {
         let a = Analyzer::embedded();
         let mut index = WorkspaceIndex::new();
@@ -2151,5 +2841,40 @@ End
         assert!(!diagnose(&a, &parse, Some(&index), None)
             .iter()
             .any(|d| d.code == "unknown-model-member"));
+    }
+
+    #[test]
+    fn raw_asset_warnings_are_gated_per_kind() {
+        let a = Analyzer::embedded();
+        let src = "DialogEvent Dialog\n  Filename = Missing.wav\nEnd\nMappedImage Image\n  Texture = Missing.tga\nEnd\n";
+        let parse = a.parse(src);
+        let mut index = WorkspaceIndex::new();
+        let codes = |index: &WorkspaceIndex| {
+            diagnose(&a, &parse, Some(index), None)
+                .into_iter()
+                .map(|diagnostic| diagnostic.code)
+                .collect::<Vec<_>>()
+        };
+        assert!(!codes(&index)
+            .iter()
+            .any(|code| code.starts_with("unknown-")));
+        index.set_file_assets(
+            "audio",
+            vec![crate::index::FileAsset {
+                kind: AssetKind::Audio,
+                name: "Known.wav".into(),
+            }],
+        );
+        let audio_only = codes(&index);
+        assert!(audio_only.contains(&"unknown-audio-file"));
+        assert!(!audio_only.contains(&"unknown-texture"));
+        index.set_file_assets(
+            "texture",
+            vec![crate::index::FileAsset {
+                kind: AssetKind::Texture,
+                name: "Known.dds".into(),
+            }],
+        );
+        assert!(codes(&index).contains(&"unknown-texture"));
     }
 }

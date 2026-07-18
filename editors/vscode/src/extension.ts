@@ -44,6 +44,8 @@ export function activate(context: vscode.ExtensionContext) {
       analysis: {
         modelMemberStrictness: setting<string>("analysis.modelMemberStrictness", "compatible"),
         allowPercentagesWithoutSign: setting<boolean>(allowBarePercentagesSetting, false),
+        mapOrderingDiagnostics: setting<boolean>("analysis.mapOrderingDiagnostics", true),
+        debounceMs: setting<number>("analysis.debounceMs", 250),
       },
       clientBaseIniHint: true,
     }),

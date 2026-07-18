@@ -15,8 +15,8 @@ Separate multiple codes with spaces or commas. Multiple file-scope pragma lines
 accumulate. A misspelled code produces `unknown-suppression` instead of silently
 hiding nothing.
 
-Suppressions are intended for warnings and hints that are valid for a specific
-file. Fix error-level syntax and schema problems rather than suppressing them.
+Suppressions can hide any diagnostic code for a specific file. Prefer fixing
+error-level syntax and schema problems when possible.
 
 ## Diagnostic codes
 
@@ -27,7 +27,7 @@ file. Fix error-level syntax and schema problems rather than suppressing them.
 | `unknown-block` | A top-level block is not in the Generals INI schema. |
 | `overrides` | A map layer redefines an existing object-style definition. |
 | `duplicate-definition` | The same definition is declared more than once. |
-| `map-forward-reference` | A map or solo INI references a definition declared later in that file, after the point where the game needs it. |
+| `map-forward-reference` | A map or solo INI uses a definition before an engine parser that resolves it immediately. Move the named definition above the consumer. Stored names resolved later, such as an Object's `CommandSet`, may be declared afterward and do not warn. |
 | `map-projectile-object` | A weapon uses a map-defined projectile object that the game cannot resolve reliably. |
 | `unreachable-set` | A `WeaponSet` or `ArmorSet` cannot activate, or an upgrade module has no matching set. |
 | `unknown-field` | A field is not valid in the current block or module. |
@@ -44,9 +44,11 @@ file. Fix error-level syntax and schema problems rather than suppressing them.
 | `bad-enum` | A value is not a member of the expected enum. |
 | `bad-flag` | A bitflag is not a member of the expected flag set. |
 | `bad-prefixed` | A tagged value does not use its required `Prefix:value` form. |
-| `unresolved-reference` | A referenced definition is not found in the workspace or configured base INI roots. |
+| `unresolved-reference` | A referenced definition is not found in the workspace or configured game-data roots. |
 | `unknown-model` | A model name is not found in the indexed W3D assets. |
 | `unknown-model-member` | A bone or subobject is not found in the models active in that scope. |
+| `unknown-audio-file` | An audio filename or WAV stem is not found in indexed WAV/MP3 assets. Enabled only after audio assets are indexed. |
+| `unknown-texture` | A texture filename or stem is not found in indexed TGA/DDS assets. Enabled only after texture assets are indexed. |
 | `unknown-suppression` | A `zerosyntax-disable` comment names an unknown code. |
 | `module-wrong-slot` | A module type is used under the wrong slot. |
 | `duplicate-module-tag` | Two modules in one object use the same module tag. |
@@ -64,4 +66,4 @@ available fix.
 | Create a stub definition | A reference points to a missing definition that can be scaffolded safely. |
 | Remove an unreachable `WeaponSet` or `ArmorSet` | An upgrade-conditioned set can never activate. |
 | Insert a matching upgrade module or set | An object has only one side of an upgrade-conditioned weapon or armor setup. |
-| Suppress a code in this file | A warning or hint is intentional for the current file. |
+| Suppress a code in this file | A diagnostic is intentional for the current file. |
