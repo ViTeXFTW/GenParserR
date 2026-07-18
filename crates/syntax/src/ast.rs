@@ -20,7 +20,9 @@ fn token_kind(t: &SyntaxToken) -> SyntaxKind {
 /// (i.e. on its header line, before any nested node).
 fn header_tokens(node: &SyntaxNode) -> impl Iterator<Item = SyntaxToken> + '_ {
     node.children_with_tokens()
-        .filter_map(move |el| el.into_token().filter(|t| !token_kind(t).is_trivia()))
+        .filter_map(|el| el.into_token())
+        .take_while(|token| token_kind(token) != SyntaxKind::NEWLINE)
+        .filter(|token| !token_kind(token).is_trivia())
 }
 
 fn header_value_tokens(node: &SyntaxNode) -> Vec<SyntaxToken> {
@@ -59,6 +61,12 @@ impl Block {
         header_tokens(&self.0)
             .filter(|t| token_kind(t) == SyntaxKind::WORD)
             .nth(1)
+    }
+
+    pub fn parent_name(&self) -> Option<SyntaxToken> {
+        header_tokens(&self.0)
+            .filter(|t| token_kind(t) == SyntaxKind::WORD)
+            .nth(2)
     }
 
     pub fn fields(&self) -> impl Iterator<Item = Field> + '_ {

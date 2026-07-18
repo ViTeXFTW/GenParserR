@@ -6,9 +6,9 @@ Security fixes target the latest released version of ZeroSyntax v2.
 
 ## Reporting a vulnerability
 
-Please do not open a public issue for vulnerabilities. Report security issues by
-emailing the maintainer listed on the GitHub repository profile, or by using
-GitHub private vulnerability reporting if it is enabled for the repository.
+Please do not open a public issue for vulnerabilities. Use
+[GitHub private vulnerability reporting](https://github.com/ViTeXFTW/ZeroSyntaxV2/security/advisories/new)
+or email the maintainer listed on the GitHub repository profile.
 
 Include:
 

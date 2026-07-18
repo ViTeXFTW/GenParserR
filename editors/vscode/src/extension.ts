@@ -39,6 +39,12 @@ export function activate(context: vscode.ExtensionContext) {
         enable: setting<boolean>("format.enable", false),
       },
       baseIniRoots: setting<string[]>("baseIniRoots", []),
+      schemaPath: setting<string>("schema.path", ""),
+      analysis: {
+        modelMemberStrictness: setting<string>("analysis.modelMemberStrictness", "compatible"),
+        mapOrderingDiagnostics: setting<boolean>("analysis.mapOrderingDiagnostics", true),
+        debounceMs: setting<number>("analysis.debounceMs", 250),
+      },
       clientBaseIniHint: true,
     }),
   };
@@ -65,6 +71,18 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("zerosyntax.selectSchema", async () => {
+      const selected = await vscode.window.showOpenDialog({
+        canSelectMany: false,
+        filters: { JSON: ["json"] },
+        openLabel: "Use schema",
+      });
+      if (selected?.[0]) {
+        await vscode.workspace
+          .getConfiguration("zerosyntax")
+          .update("schema.path", selected[0].fsPath, vscode.ConfigurationTarget.Workspace);
+      }
+    }),
     vscode.workspace.onDidOpenTextDocument((document) => {
       void maybeShowBaseIniRootsHint(document);
     })

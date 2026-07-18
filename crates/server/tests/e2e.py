@@ -21,13 +21,13 @@ def frame(obj: dict) -> bytes:
 
 
 def reader(stream, q: "queue.Queue"):
-    buf = b""
+    buf = bytearray()
     while True:
-        chunk = stream.read1(4096) if hasattr(stream, "read1") else stream.read(1)
+        chunk = stream.read1(65536) if hasattr(stream, "read1") else stream.read(65536)
         if not chunk:
             q.put(None)
             return
-        buf += chunk
+        buf.extend(chunk)
         while True:
             sep = buf.find(b"\r\n\r\n")
             if sep == -1:
@@ -40,8 +40,8 @@ def reader(stream, q: "queue.Queue"):
             start = sep + 4
             if len(buf) < start + length:
                 break
-            body = buf[start : start + length]
-            buf = buf[start + length :]
+            body = bytes(buf[start : start + length])
+            del buf[: start + length]
             try:
                 q.put(json.loads(body.decode("utf-8")))
             except Exception as e:  # noqa
@@ -60,8 +60,10 @@ def main() -> int:
     (workspace / "Images.INI").write_text("MappedImage TestScanImage\nEnd\n")
     root_uri = workspace.as_uri()
 
+    # vscode-languageclient appends this conventional transport flag. The
+    # second server below remains a bare invocation so both entry paths stay pinned.
     proc = subprocess.Popen(
-        [exe],
+        [exe, "--stdio"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -95,7 +97,10 @@ def main() -> int:
     #    formatting checks below run, and step 10 verifies the default is off.
     send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
           "params": {"capabilities": {}, "workspaceFolders": None, "rootUri": root_uri,
-                     "initializationOptions": {"format": {"enable": True}}}})
+                     "initializationOptions": {
+                         "format": {"enable": True},
+                         "analysis": {"debounceMs": 50},
+                     }}})
     init = wait_for(lambda m: m.get("id") == 1 and "result" in m, "initialize result")
     assert init, "no initialize result"
     caps = init["result"]["capabilities"]
@@ -198,6 +203,66 @@ def main() -> int:
         )
         assert msg, f"no v{version} diagnostics for {doc_uri}"
         return msg["params"]
+
+    # A rapid edit burst must update the parse used by completion immediately,
+    # while whole-document diagnostics coalesce to the latest version.
+    burst_uri = "file:///test/burst.ini"
+    burst_tail = "".join(
+        f"Weapon Burst{i}\n  ScaleWeaponSpeed = Maybe\nEnd\n" for i in range(500)
+    )
+    burst_initial = "Weapon BurstHead\n  \nEnd\n" + burst_tail
+    open_doc(burst_uri, burst_initial)
+    for version, character in enumerate("Prim", start=2):
+        column = version
+        send({"jsonrpc": "2.0", "method": "textDocument/didChange",
+              "params": {"textDocument": {"uri": burst_uri, "version": version},
+                         "contentChanges": [{
+                             "range": {
+                                 "start": {"line": 1, "character": column},
+                                 "end": {"line": 1, "character": column},
+                             },
+                             "text": character,
+                         }]}})
+    send({"jsonrpc": "2.0", "id": 6, "method": "textDocument/completion",
+          "params": {"textDocument": {"uri": burst_uri},
+                     "position": {"line": 1, "character": 6}}})
+
+    published_before_completion = []
+
+    def completion_or_burst_diag(message):
+        if (message.get("method") == "textDocument/publishDiagnostics"
+                and message["params"]["uri"] == burst_uri):
+            published_before_completion.append(message["params"].get("version"))
+            return True
+        return message.get("id") == 6 and "result" in message
+
+    burst_completion = wait_for(completion_or_burst_diag, "burst completion")
+    assert burst_completion and burst_completion.get("id") == 6, (
+        f"diagnostics blocked completion: versions {published_before_completion}"
+    )
+    burst_items = burst_completion["result"]
+    if isinstance(burst_items, dict):
+        burst_items = burst_items.get("items", [])
+    burst_labels = [item["label"] for item in burst_items]
+    assert "PrimaryDamage" in burst_labels, "completion did not use the latest burst parse"
+
+    burst_versions = []
+
+    def latest_burst_diag(message):
+        if (message.get("method") != "textDocument/publishDiagnostics"
+                or message["params"]["uri"] != burst_uri):
+            return False
+        burst_versions.append(message["params"].get("version"))
+        return message["params"].get("version") == 5
+
+    burst_diag = wait_for(latest_burst_diag, "latest burst diagnostics")
+    assert burst_diag, "no diagnostics after burst"
+    assert burst_versions == [5], f"expected only latest diagnostics, got {burst_versions}"
+    burst_final = "Weapon BurstHead\n  Prim\nEnd\n" + burst_tail
+    burst_baseline = open_doc("file:///test/burst-baseline.ini", burst_final)
+    assert norm(burst_diag["params"]["diagnostics"]) == norm(burst_baseline["diagnostics"]), \
+        "debounced burst diagnostics differ from a full-text baseline"
+    print("OK: completion beats debounced diagnostics; burst publishes latest version only")
 
     cases = [
         # (name, initial text, [(range, newText)], final text)

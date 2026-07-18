@@ -1,0 +1,16 @@
+{
+  "format_version": 1,
+  "blocks": [
+    {
+      "name": "TestBlock",
+      "fields": [
+        {
+          "name": "CustomOnly",
+          "value_type": { "kind": "bool" }
+        }
+      ]
+    }
+  ],
+  "modules": [],
+  "value_sets": []
+}

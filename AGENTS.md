@@ -195,14 +195,14 @@ take `absent = true` to pin that a diagnostic is *not* emitted.
 ### Editor client
 
 `editors/vscode/` is a thin reference LSP client (claims the `generals-ini`
-language id). The server speaks stdio LSP, so Neovim/Helix/Zed configs are in
-the README. `GeneralsCode/` is the engine source the schema is modeled on (a
-reference for hand-authoring `schema.json`) — it is not part of any crate.
+language id). The server speaks stdio LSP; client setup is documented in
+`docs/language-server.md`. `GeneralsCode/` is the engine source the schema is
+modeled on (a reference for hand-authoring `schema.json`) — it is not part of
+any crate.
 
 ## Conventions
 
-- License is **GPL-3.0-or-later** (matches the engine source the schema
-  derives from); keep crate headers consistent.
+- License is **MIT**.
 - `schema.json` is hand-written — edit the JSON directly, modeling new entries
   on the engine's `FieldParse` tables in `GeneralsCode/`. Keep `value_type`s
   faithful and fall back to `Unknown { parse_fn }` when a type is unclear.

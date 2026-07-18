@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/schema", "crates/syntax", "crates/analysis", "crates/server"]
 
 [workspace.package]
-version = "1.0.5"
+version = "1.2.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ViTeXFTW/ZeroSyntaxV2"
@@ -34,6 +34,12 @@ dashmap = "6"
 
 # server (workspace indexing)
 walkdir = "2"
+clap = { version = "4", default-features = false, features = [
+    "std",
+    "help",
+    "usage",
+    "error-context",
+] }
 
 # benches
 criterion = "0.8"
