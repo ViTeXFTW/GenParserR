@@ -138,11 +138,14 @@ schema.json ──embedded──▶ schema ──▶ analysis ──▶ server
   `WorkspaceIndex`. `convert.rs` does byte-offset ↔ LSP position mapping in
   the position encoding negotiated at `initialize` (UTF-8 when the client
   offers it, else the UTF-16 baseline). Advertises `semanticTokens` `full`
-  **and** `range`. Formatting is **opt-in**: the capability is advertised
-  only when `initializationOptions` carries `{"format": {"enable": true}}`
-  (the VS Code setting `zerosyntax.format.enable`, default off — real game
-  files are wildly hand-indented, so format-on-save must never fire
-  unasked). Phase-3 numbers (`docs/phase3-incremental.md`): keystroke on the
+  **and** `range`. Runtime settings arrive through initialization options and
+  `workspace/didChangeConfiguration`; analysis switches refresh open docs,
+  while schema/base-root changes replace the complete index and reparse only
+  when the schema changes. Formatting is **opt-in** and dynamically registered
+  when supported (the VS Code setting `zerosyntax.format.enable`, default off —
+  real game files are wildly hand-indented, so format-on-save must never fire
+  unasked). Only the executable-path setting requires a client restart.
+  Phase-3 numbers (`docs/phase3-incremental.md`): keystroke on the
   61k-line ParticleSystem.ini ≈ 147 µs vs 44 ms full reparse.
 
 ### Two concepts worth understanding before editing

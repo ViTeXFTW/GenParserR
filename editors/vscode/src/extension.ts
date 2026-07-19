@@ -10,6 +10,7 @@ import {
 
 let client: LanguageClient | undefined;
 let baseIniRootsHintShown = false;
+const allowBarePercentagesSetting = "analysis.allowPercentagesWithoutSign";
 
 export function activate(context: vscode.ExtensionContext) {
   const serverPath = resolveServerPath(context);
@@ -31,9 +32,9 @@ export function activate(context: vscode.ExtensionContext) {
     synchronize: {
       // Re-index when any .ini in the workspace changes on disk.
       fileEvents: vscode.workspace.createFileSystemWatcher("**/*.ini"),
+      configurationSection: "zerosyntax",
     },
-    // Evaluated on every (re)start, so a settings-triggered restart picks up
-    // the current values. The server reads these once at `initialize`.
+    // Keep startup compatibility for clients that do not synchronize settings.
     initializationOptions: () => ({
       format: {
         enable: setting<boolean>("format.enable", false),
@@ -42,6 +43,7 @@ export function activate(context: vscode.ExtensionContext) {
       schemaPath: setting<string>("schema.path", ""),
       analysis: {
         modelMemberStrictness: setting<string>("analysis.modelMemberStrictness", "compatible"),
+        allowPercentagesWithoutSign: setting<boolean>(allowBarePercentagesSetting, false),
         mapOrderingDiagnostics: setting<boolean>("analysis.mapOrderingDiagnostics", true),
         debounceMs: setting<number>("analysis.debounceMs", 250),
       },
@@ -83,6 +85,41 @@ export function activate(context: vscode.ExtensionContext) {
           .update("schema.path", selected[0].fsPath, vscode.ConfigurationTarget.Workspace);
       }
     }),
+    vscode.commands.registerCommand("zerosyntax.allowBarePercentages", async (uri?: vscode.Uri) => {
+      const configuration = vscode.workspace.getConfiguration("zerosyntax", uri);
+      const inspected = configuration.inspect<boolean>(allowBarePercentagesSetting);
+      const target = inspected?.workspaceFolderValue !== undefined
+        ? vscode.ConfigurationTarget.WorkspaceFolder
+        : inspected?.workspaceValue !== undefined
+          ? vscode.ConfigurationTarget.Workspace
+          : vscode.ConfigurationTarget.Global;
+      await configuration.update(allowBarePercentagesSetting, true, target);
+    }),
+    vscode.languages.registerCodeActionsProvider(
+      { scheme: "file", language: "generals-ini" },
+      {
+        provideCodeActions(document, _range, actionContext) {
+          const diagnostics = actionContext.diagnostics.filter(
+            (diagnostic) => diagnostic.code === "bad-percent"
+          );
+          if (diagnostics.length === 0) {
+            return [];
+          }
+          const action = new vscode.CodeAction(
+            "Allow percentages without `%`",
+            vscode.CodeActionKind.QuickFix
+          );
+          action.diagnostics = diagnostics;
+          action.command = {
+            command: "zerosyntax.allowBarePercentages",
+            title: action.title,
+            arguments: [document.uri],
+          };
+          return [action];
+        },
+      },
+      { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }
+    ),
     vscode.workspace.onDidOpenTextDocument((document) => {
       void maybeShowBaseIniRootsHint(document);
     })
@@ -91,11 +128,11 @@ export function activate(context: vscode.ExtensionContext) {
     void maybeShowBaseIniRootsHint(editor.document);
   }
 
-  // Server settings (initializationOptions, server path) are read once at
-  // startup, so any zerosyntax.* change needs a clean restart to apply.
+  // Only another executable requires another process; synchronized runtime
+  // settings are applied by the existing client configuration notification.
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("zerosyntax")) {
+      if (e.affectsConfiguration("zerosyntax.server.path")) {
         void client?.restart();
       }
     })

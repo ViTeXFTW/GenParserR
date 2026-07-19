@@ -87,6 +87,7 @@ symbols.
   "schemaPath": "C:/Mods/MyMod/schema.json",
   "analysis": {
     "modelMemberStrictness": "compatible",
+    "allowPercentagesWithoutSign": false,
     "mapOrderingDiagnostics": true,
     "debounceMs": 250
   },
@@ -98,13 +99,15 @@ symbols.
 }
 ```
 
-- `format.enable` controls whether the server advertises document formatting.
-  It defaults to `false`.
+- `format.enable` controls document formatting. It defaults to `false` and is
+  dynamically registered when the client supports it.
 - `schemaPath` points to a custom schema JSON file. Unreadable or invalid files
   produce a warning and fall back to the built-in schema.
 - `analysis.modelMemberStrictness` is `off`, `compatible` (member exists in any
   applicable model), or `strict` (member exists in every applicable model). It
   defaults to `compatible`.
+- `analysis.allowPercentagesWithoutSign` accepts engine-compatible bare numbers
+  in percentage fields. It defaults to `false`, requiring the trailing `%`.
 - `analysis.mapOrderingDiagnostics` controls source-backed forward-order
   warnings in `map.ini` and `solo.ini`. It defaults to `true`.
 - `analysis.debounceMs` waits this many milliseconds after the latest edit
@@ -119,7 +122,17 @@ symbols.
   avoid warnings caused by a partial asset index. INI definitions are treated
   as loaded before `map.ini` and `solo.ini`.
 
-Restart the language server after changing initialization options.
+The same settings can be sent at runtime through
+`workspace/didChangeConfiguration`, either directly or nested under
+`{"zerosyntax": ...}`. Analysis, debounce, and formatting changes apply
+immediately. Schema and base-root changes rebuild the complete index, keep
+filesystem scanning on a blocking worker, and report indexing progress.
+Identical settings are ignored.
+
+Clients without dynamic formatting registration keep their startup formatting
+capability. If such a client starts with formatting disabled, it must restart
+to expose formatting; all other settings still hot-reload. Only selecting a
+different server executable inherently requires a new process.
 
 ## Supported LSP features
 

@@ -1536,12 +1536,10 @@ impl<'a> Ctx<'a> {
                     }
                 }
             }
-            // Stricter than the engine (which reads a bare real): require the
-            // `%` sign, because `Armor = X 2` almost never means 2 percent.
             ValueType::Percent => {
-                let ok = tok
-                    .text()
-                    .strip_suffix('%')
+                let value = tok.text().strip_suffix('%');
+                let ok = value
+                    .or_else(|| self.analyzer.allow_bare_percentages().then_some(tok.text()))
                     .is_some_and(|n| n.parse::<f64>().is_ok());
                 if !ok {
                     self.error(
@@ -1978,6 +1976,24 @@ mod tests {
     fn clean_weapon_has_no_diagnostics() {
         let src = "Weapon AK47\n  PrimaryDamage = 50.0\n  ClipSize = 30\nEnd\n";
         assert!(diags(src).is_empty(), "{:?}", diags(src));
+    }
+
+    #[test]
+    fn bare_percentages_are_opt_in() {
+        let src = "Armor A\n  Armor = ARMOR_PIERCING 2.5\nEnd\n";
+        assert!(codes(src).contains(&"bad-percent"));
+
+        let mut analyzer = Analyzer::embedded();
+        analyzer.set_allow_bare_percentages(true);
+        let parse = analyzer.parse(src);
+        assert!(!diagnose(&analyzer, &parse, None, None)
+            .iter()
+            .any(|d| d.code == "bad-percent"));
+
+        let malformed = analyzer.parse("Armor A\n  Armor = ARMOR_PIERCING nope\nEnd\n");
+        assert!(diagnose(&analyzer, &malformed, None, None)
+            .iter()
+            .any(|d| d.code == "bad-percent"));
     }
 
     #[test]
