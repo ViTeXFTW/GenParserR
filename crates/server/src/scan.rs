@@ -1,10 +1,14 @@
 //! Shared filesystem, BIG archive, and W3D workspace scanning.
 
+use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::UNIX_EPOCH;
 
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::Url;
 use zerosyntax_analysis::index::{
     definitions_in, module_tags_in, object_models_in, object_parents_in, references_in, Definition,
@@ -22,6 +26,91 @@ pub(crate) type ScanEntry = (
     Vec<ModelAsset>,
     Option<Arc<str>>,
 );
+
+const INDEX_CACHE_VERSION: u32 = 1;
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct Fingerprint {
+    len: u64,
+    modified_secs: u64,
+    modified_nanos: u32,
+}
+
+#[derive(Serialize, Deserialize)]
+struct CachedEntry {
+    file: String,
+    definitions: Vec<Definition>,
+    references: Vec<ReferenceSite>,
+    tags: Vec<(String, String)>,
+    object_models: Vec<(String, Vec<String>)>,
+    object_parents: Vec<(String, String)>,
+    models: Vec<ModelAsset>,
+    text: Option<String>,
+}
+
+impl From<&ScanEntry> for CachedEntry {
+    fn from(entry: &ScanEntry) -> Self {
+        Self {
+            file: entry.0.clone(), definitions: entry.1.clone(), references: entry.2.clone(),
+            tags: entry.3.clone(), object_models: entry.4.clone(), object_parents: entry.5.clone(),
+            models: entry.6.clone(), text: entry.7.as_deref().map(str::to_owned),
+        }
+    }
+}
+
+impl From<CachedEntry> for ScanEntry {
+    fn from(entry: CachedEntry) -> Self {
+        (entry.file, entry.definitions, entry.references, entry.tags, entry.object_models,
+         entry.object_parents, entry.models, entry.text.map(Arc::from))
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct CachedFile { fingerprint: Fingerprint, entries: Vec<CachedEntry> }
+
+#[derive(Serialize, Deserialize)]
+struct IndexCache { version: u32, schema_hash: u64, files: HashMap<String, CachedFile> }
+
+fn cache_dir() -> PathBuf {
+    #[cfg(windows)]
+    if let Some(path) = std::env::var_os("LOCALAPPDATA") { return PathBuf::from(path).join("zerosyntax"); }
+    #[cfg(not(windows))]
+    if let Some(path) = std::env::var_os("XDG_CACHE_HOME") { return PathBuf::from(path).join("zerosyntax"); }
+    std::env::temp_dir().join("zerosyntax")
+}
+
+fn path_key(path: &Path) -> String {
+    let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let key = path.to_string_lossy().replace('\\', "/");
+    if cfg!(windows) { key.to_ascii_lowercase() } else { key }
+}
+
+fn schema_hash() -> u64 {
+    let mut hasher = DefaultHasher::new();
+    zerosyntax_schema::EMBEDDED_SCHEMA_JSON.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn fingerprint(path: &Path) -> Option<Fingerprint> {
+    let metadata = std::fs::metadata(path).ok()?;
+    let modified = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
+    Some(Fingerprint { len: metadata.len(), modified_secs: modified.as_secs(), modified_nanos: modified.subsec_nanos() })
+}
+
+pub(crate) fn index_cache_path(workspace_roots: &[PathBuf], base_roots: &[PathBuf]) -> PathBuf {
+    let mut roots: Vec<_> = workspace_roots.iter().map(|root| format!("workspace:{}", path_key(root)))
+        .chain(base_roots.iter().map(|root| format!("base:{}", path_key(root)))).collect();
+    roots.sort_unstable();
+    let mut hasher = DefaultHasher::new();
+    roots.hash(&mut hasher);
+    cache_dir().join(format!("index-v{INDEX_CACHE_VERSION}-{:016x}.json", hasher.finish()))
+}
+
+pub(crate) fn clear_index_cache(workspace_roots: &[PathBuf], base_roots: &[PathBuf]) -> std::io::Result<bool> {
+    match std::fs::remove_file(index_cache_path(workspace_roots, base_roots)) {
+        Ok(()) => Ok(true), Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false), Err(error) => Err(error),
+    }
+}
 
 struct BigEntry {
     name: String,
@@ -335,6 +424,7 @@ fn collect_paths(roots: &[PathBuf], checked: bool) -> Result<Vec<PathBuf>> {
 }
 
 /// Best-effort indexing used by the interactive server.
+#[cfg(test)]
 pub(crate) fn scan_files(
     analyzer: &Analyzer,
     paths: &[PathBuf],
@@ -348,6 +438,55 @@ pub(crate) fn scan_files(
         progress(i + 1, paths.len());
     }
     out
+}
+
+/// Scan workspace and base roots, reusing unchanged files from the persistent
+/// asset index cache. Base entries stay first so workspace definitions retain
+/// their existing override order.
+pub(crate) fn scan_with_cache(
+    analyzer: &Analyzer,
+    workspace_roots: &[PathBuf],
+    base_roots: &[PathBuf],
+    progress: &mut impl FnMut(usize, usize),
+) -> Vec<(bool, ScanEntry)> {
+    let cache_path = index_cache_path(workspace_roots, base_roots);
+    let expected_schema_hash = schema_hash();
+    let mut cache = std::fs::read(&cache_path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<IndexCache>(&bytes).ok())
+        .filter(|cache| cache.version == INDEX_CACHE_VERSION && cache.schema_hash == expected_schema_hash)
+        .unwrap_or(IndexCache { version: INDEX_CACHE_VERSION, schema_hash: expected_schema_hash, files: HashMap::new() });
+
+    let mut seen = HashSet::new();
+    let mut paths = Vec::new();
+    for (roots, is_base) in [(base_roots, true), (workspace_roots, false)] {
+        for path in collect_scan_paths(roots) {
+            let key = path_key(&path);
+            if seen.insert(key.clone()) {
+                if let Some(fingerprint) = fingerprint(&path) { paths.push((path, key, fingerprint, is_base)); }
+            }
+        }
+    }
+
+    let mut next = HashMap::with_capacity(paths.len());
+    let mut scanned = Vec::new();
+    let total = paths.len();
+    for (done, (path, key, fingerprint, is_base)) in paths.into_iter().enumerate() {
+        let entries = match cache.files.remove(&key) {
+            Some(cached) if cached.fingerprint == fingerprint => cached.entries.into_iter().map(ScanEntry::from).collect(),
+            _ => scan_path(analyzer, &path).unwrap_or_default(),
+        };
+        next.insert(key, CachedFile { fingerprint, entries: entries.iter().map(CachedEntry::from).collect() });
+        scanned.extend(entries.into_iter().map(|entry| (is_base, entry)));
+        progress(done + 1, total);
+    }
+    let cache = IndexCache { version: INDEX_CACHE_VERSION, schema_hash: expected_schema_hash, files: next };
+    if let Some(parent) = cache_path.parent() {
+        if let Err(error) = std::fs::create_dir_all(parent).and_then(|()| serde_json::to_vec(&cache).map_err(std::io::Error::other).and_then(|bytes| std::fs::write(&cache_path, bytes))) {
+            tracing::warn!(%error, path = %cache_path.display(), "could not write asset index cache");
+        }
+    }
+    scanned
 }
 
 pub(crate) fn scan_files_checked(analyzer: &Analyzer, paths: &[PathBuf]) -> Result<Vec<ScanEntry>> {
