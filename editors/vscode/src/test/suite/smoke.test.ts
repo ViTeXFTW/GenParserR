@@ -12,6 +12,19 @@ suite("ZeroSyntax VS Code extension", () => {
 
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "zerosyntax-vscode-"));
     const uri = vscode.Uri.file(path.join(dir, "Smoke.ini"));
+    assert.ok(
+      vscode.workspace.updateWorkspaceFolders(0, 0, {
+        uri: vscode.Uri.file(dir),
+        name: "ZeroSyntax smoke",
+      }),
+      "expected a workspace folder for scoped settings"
+    );
+    const configuration = vscode.workspace.getConfiguration("zerosyntax", uri);
+    await configuration.update(
+      "analysis.allowPercentagesWithoutSign",
+      false,
+      vscode.ConfigurationTarget.WorkspaceFolder
+    );
     await vscode.workspace.fs.writeFile(
       uri,
       Buffer.from(
@@ -62,7 +75,12 @@ suite("ZeroSyntax VS Code extension", () => {
       (action) => action.title === "Allow percentages without `%`"
     );
     assert.ok(allow, "expected the bare-percentage settings quick fix");
-    await vscode.commands.executeCommand("zerosyntax.allowBarePercentages");
+    await vscode.commands.executeCommand("zerosyntax.allowBarePercentages", uri);
+    assert.strictEqual(
+      configuration.get("analysis.allowPercentagesWithoutSign"),
+      true,
+      "expected the quick fix to override the folder setting"
+    );
     await waitFor(
       () => vscode.languages.getDiagnostics(uri),
       (items) => items.every((diag) => diag.code !== "bad-percent"),

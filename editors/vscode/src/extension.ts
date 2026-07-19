@@ -85,15 +85,20 @@ export function activate(context: vscode.ExtensionContext) {
           .update("schema.path", selected[0].fsPath, vscode.ConfigurationTarget.Workspace);
       }
     }),
-    vscode.commands.registerCommand("zerosyntax.allowBarePercentages", async () => {
-      await vscode.workspace
-        .getConfiguration("zerosyntax")
-        .update(allowBarePercentagesSetting, true, vscode.ConfigurationTarget.Global);
+    vscode.commands.registerCommand("zerosyntax.allowBarePercentages", async (uri?: vscode.Uri) => {
+      const configuration = vscode.workspace.getConfiguration("zerosyntax", uri);
+      const inspected = configuration.inspect<boolean>(allowBarePercentagesSetting);
+      const target = inspected?.workspaceFolderValue !== undefined
+        ? vscode.ConfigurationTarget.WorkspaceFolder
+        : inspected?.workspaceValue !== undefined
+          ? vscode.ConfigurationTarget.Workspace
+          : vscode.ConfigurationTarget.Global;
+      await configuration.update(allowBarePercentagesSetting, true, target);
     }),
     vscode.languages.registerCodeActionsProvider(
       { scheme: "file", language: "generals-ini" },
       {
-        provideCodeActions(_document, _range, actionContext) {
+        provideCodeActions(document, _range, actionContext) {
           const diagnostics = actionContext.diagnostics.filter(
             (diagnostic) => diagnostic.code === "bad-percent"
           );
@@ -108,6 +113,7 @@ export function activate(context: vscode.ExtensionContext) {
           action.command = {
             command: "zerosyntax.allowBarePercentages",
             title: action.title,
+            arguments: [document.uri],
           };
           return [action];
         },
