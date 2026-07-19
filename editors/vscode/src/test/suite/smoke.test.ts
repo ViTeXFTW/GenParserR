@@ -19,6 +19,11 @@ suite("ZeroSyntax VS Code extension", () => {
       }),
       "expected a workspace folder for scoped settings"
     );
+    await waitFor(
+      () => vscode.workspace.getWorkspaceFolder(uri),
+      (folder) => folder !== undefined,
+      "workspace folder"
+    );
     const configuration = vscode.workspace.getConfiguration("zerosyntax", uri);
     await configuration.update(
       "analysis.allowPercentagesWithoutSign",
