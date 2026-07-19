@@ -70,12 +70,12 @@
         "zerosyntax.server.path": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Absolute path to the `zerosyntax-lsp` server binary. If empty, the extension uses the bundled binary under `server/`, then falls back to `zerosyntax-lsp` on your PATH."
+          "markdownDescription": "Absolute path to the `zerosyntax-lsp` server binary. If empty, the extension uses the bundled binary under `server/`, then falls back to `zerosyntax-lsp` on your PATH. This is the only ZeroSyntax setting whose change restarts the language server."
         },
         "zerosyntax.format.enable": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Enable document formatting (indentation normalization). When off — the default — the server does not advertise the formatting capability, so `#editor.formatOnSave#` will not invoke it for Generals INI files. Changing this restarts the language server."
+          "markdownDescription": "Enable document formatting (indentation normalization). When off — the default — `#editor.formatOnSave#` will not invoke it for Generals INI files."
         },
         "zerosyntax.baseIniRoots": {
           "type": "array",
@@ -83,18 +83,35 @@
           "items": {
             "type": "string"
           },
-          "markdownDescription": "Directories or `.big` archives containing base game/mod INI files and W3D assets. INI definitions are treated as already loaded before `map.ini`/`solo.ini`; W3D assets power model and bone completions/diagnostics. Changing this restarts the language server."
+          "markdownDescription": "Directories or `.big` archives containing base game/mod INI files and game assets. INI definitions are treated as already loaded before `map.ini`/`solo.ini`; W3D, WAV/MP3, and TGA/DDS assets power completions and diagnostics. Configure all loaded roots to avoid partial-index warnings. Changing this reindexes in the background."
         },
         "zerosyntax.schema.path": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Path to a custom ZeroSyntax schema JSON file. Use **ZeroSyntax: Select Custom Schema** to choose one. Invalid or unreadable files fall back to the built-in schema. Changing this restarts the language server."
+          "markdownDescription": "Path to a custom ZeroSyntax schema JSON file. Use **ZeroSyntax: Select Custom Schema** to choose one. Invalid or unreadable files fall back to the built-in schema. Changing this reparses open files and reindexes in the background."
         },
         "zerosyntax.analysis.modelMemberStrictness": {
           "type": "string",
           "enum": ["off", "compatible", "strict"],
           "default": "compatible",
-          "markdownDescription": "Model-member diagnostics: off disables warnings, compatible accepts a bone/subobject present in any applicable model, and strict requires it in every applicable model. Changing this restarts the language server."
+          "markdownDescription": "Model-member diagnostics: off disables warnings, compatible accepts a bone/subobject present in any applicable model, and strict requires it in every applicable model."
+        },
+        "zerosyntax.analysis.allowPercentagesWithoutSign": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Allow engine-compatible percentage values without a trailing `%` sign."
+        },
+        "zerosyntax.analysis.mapOrderingDiagnostics": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Warn when map.ini or solo.ini uses a definition before an engine parser resolves it."
+        },
+        "zerosyntax.analysis.debounceMs": {
+          "type": "integer",
+          "default": 250,
+          "minimum": 0,
+          "maximum": 5000,
+          "markdownDescription": "Milliseconds to wait after typing before refreshing whole-document indexes and diagnostics. Parsing and completions remain immediate. Use `0` to refresh as soon as possible."
         },
         "zerosyntax.trace.server": {
           "type": "string",
@@ -110,9 +127,9 @@
     }
   },
   "scripts": {
-    "compile": "tsc -p ./",
+    "compile": "tsc --noEmit && esbuild src/extension.ts --bundle --minify --legal-comments=linked --platform=node --external:vscode --outfile=out/extension.js",
     "compile:test": "tsc -p ./tsconfig.test.json",
-    "watch": "tsc -watch -p ./",
+    "watch": "esbuild src/extension.ts --bundle --platform=node --external:vscode --outfile=out/extension.js --watch",
     "vscode:prepublish": "node -e \"const fs=require('fs');fs.mkdirSync('icon',{recursive:true});fs.copyFileSync('../../icon/ZeroSyntaxLogo256.png','icon/ZeroSyntaxLogo256.png')\" && npm run compile",
     "package": "vsce package --allow-missing-repository",
     "test": "npm run compile && npm run compile:test && node ./out-test/src/test/runTest.js"
@@ -126,6 +143,7 @@
     "@types/vscode": "^1.84.0",
     "@vscode/test-electron": "^3.0.0",
     "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.1",
     "mocha": "^11.3.0",
     "typescript": "^6.0.3"
   }

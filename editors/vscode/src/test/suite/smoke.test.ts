@@ -1,6 +1,5 @@
 import * as assert from "assert";
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
 
@@ -10,11 +9,22 @@ suite("ZeroSyntax VS Code extension", () => {
       assert.ok(serverPath, "ZEROSYNTAX_LSP_PATH must point at ZeroSyntax-lsp");
     assert.ok(fs.existsSync(serverPath), `${serverPath} does not exist`);
 
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "zerosyntax-vscode-"));
+    const workspace = vscode.workspace.workspaceFolders?.[0];
+    assert.ok(workspace, "expected the test launcher to open a workspace");
+    const dir = workspace.uri.fsPath;
     const uri = vscode.Uri.file(path.join(dir, "Smoke.ini"));
+    const configuration = vscode.workspace.getConfiguration("zerosyntax", uri);
+    assert.strictEqual(
+      configuration.inspect<boolean>("analysis.allowPercentagesWithoutSign")?.workspaceValue,
+      false,
+      "expected the test workspace to disable bare percentages"
+    );
     await vscode.workspace.fs.writeFile(
       uri,
-      Buffer.from("Weapon SmokeGun\n  ScaleWeaponSpeed = Maybe\n  \nEnd\n")
+      Buffer.from(
+        "Weapon SmokeGun\n  ScaleWeaponSpeed = Maybe\n  \nEnd\n" +
+          "Armor SmokeArmor\n  Armor = ARMOR_PIERCING 2\nEnd\n"
+      )
     );
 
     const document = await vscode.workspace.openTextDocument(uri);
@@ -45,6 +55,30 @@ suite("ZeroSyntax VS Code extension", () => {
     assert.ok(
       labels.includes("PrimaryDamage"),
       `expected PrimaryDamage completion, got ${labels.slice(0, 10).join(", ")}`
+    );
+
+    const percentDiagnostic = diagnostics.find((diag) => diag.code === "bad-percent");
+    assert.ok(percentDiagnostic, "expected a bad-percent diagnostic");
+    const actions = await vscode.commands.executeCommand<(vscode.CodeAction | vscode.Command)[]>(
+      "vscode.executeCodeActionProvider",
+      uri,
+      percentDiagnostic.range,
+      vscode.CodeActionKind.QuickFix.value
+    );
+    const allow = actions.find(
+      (action) => action.title === "Allow percentages without `%`"
+    );
+    assert.ok(allow, "expected the bare-percentage settings quick fix");
+    await vscode.commands.executeCommand("zerosyntax.allowBarePercentages", uri);
+    assert.strictEqual(
+      configuration.inspect<boolean>("analysis.allowPercentagesWithoutSign")?.workspaceValue,
+      true,
+      "expected the quick fix to override the workspace setting"
+    );
+    await waitFor(
+      () => vscode.languages.getDiagnostics(uri),
+      (items) => items.every((diag) => diag.code !== "bad-percent"),
+      "hot-reloaded bare-percentage setting"
     );
   });
 });

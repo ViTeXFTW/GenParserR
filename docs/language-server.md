@@ -33,8 +33,8 @@ indexed together before diagnostics run, so references between them resolve.
 Overlapping targets are checked once.
 
 `--base-root` is repeatable and accepts directories or `.big` archives
-containing base/mod INIs and W3D assets. Base roots participate in reference,
-model, and bone checks but do not emit diagnostics themselves. For stdin,
+containing base/mod INIs and game assets. Base roots participate in reference,
+model, bone, audio, and texture checks but do not emit diagnostics themselves. For stdin,
 `--stdin-filename` supplies the displayed/indexed name and enables `map.ini` or
 `solo.ini` override semantics; it defaults to `<stdin>`.
 
@@ -85,7 +85,12 @@ symbols.
 {
   "format": { "enable": false },
   "schemaPath": "C:/Mods/MyMod/schema.json",
-  "analysis": { "modelMemberStrictness": "compatible" },
+  "analysis": {
+    "modelMemberStrictness": "compatible",
+    "allowPercentagesWithoutSign": false,
+    "mapOrderingDiagnostics": true,
+    "debounceMs": 250
+  },
   "baseIniRoots": [
     "C:/Games/Zero Hour",
     "C:/Mods/MyMod/Data/INI",
@@ -94,18 +99,40 @@ symbols.
 }
 ```
 
-- `format.enable` controls whether the server advertises document formatting.
-  It defaults to `false`.
+- `format.enable` controls document formatting. It defaults to `false` and is
+  dynamically registered when the client supports it.
 - `schemaPath` points to a custom schema JSON file. Unreadable or invalid files
   produce a warning and fall back to the built-in schema.
 - `analysis.modelMemberStrictness` is `off`, `compatible` (member exists in any
   applicable model), or `strict` (member exists in every applicable model). It
   defaults to `compatible`.
+- `analysis.allowPercentagesWithoutSign` accepts engine-compatible bare numbers
+  in percentage fields. It defaults to `false`, requiring the trailing `%`.
+- `analysis.mapOrderingDiagnostics` controls source-backed forward-order
+  warnings in `map.ini` and `solo.ini`. It defaults to `true`.
+- `analysis.debounceMs` waits this many milliseconds after the latest edit
+  before refreshing whole-document indexes and diagnostics. Parsing and
+  completions remain immediate. It defaults to `250`; valid values are
+  `0`–`5000`, where `0` refreshes as soon as possible.
 - `baseIniRoots` accepts directories and `.big` archives containing base game
-  or mod INI files and W3D assets. Those INI definitions are treated as loaded
-  before `map.ini` and `solo.ini`.
+  or mod INI files and game assets. WAV/MP3 filenames and TGA/DDS textures power
+  asset completion and warnings; DDS-only textures complete as the canonical
+  INI spelling `stem.tga`. Audio and texture warnings activate independently
+  only after that asset kind is indexed. Supply every loaded game/mod root to
+  avoid warnings caused by a partial asset index. INI definitions are treated
+  as loaded before `map.ini` and `solo.ini`.
 
-Restart the language server after changing initialization options.
+The same settings can be sent at runtime through
+`workspace/didChangeConfiguration`, either directly or nested under
+`{"zerosyntax": ...}`. Analysis, debounce, and formatting changes apply
+immediately. Schema and base-root changes rebuild the complete index, keep
+filesystem scanning on a blocking worker, and report indexing progress.
+Identical settings are ignored.
+
+Clients without dynamic formatting registration keep their startup formatting
+capability. If such a client starts with formatting disabled, it must restart
+to expose formatting; all other settings still hot-reload. Only selecting a
+different server executable inherently requires a new process.
 
 ## Supported LSP features
 

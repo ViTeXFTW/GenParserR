@@ -182,9 +182,24 @@ impl<'a> Sem<'a> {
         let active_ty = ty.as_ref().and_then(|ty| {
             ty.variant_for_first_token(value_tokens.first().map(|t| t.text().trim_matches('"')))
         });
+        let input = value_tokens
+            .iter()
+            .map(|token| token.text().trim_matches('"'))
+            .collect::<Vec<_>>();
         for (i, tok) in value_tokens.iter().enumerate() {
+            if matches!(active_ty, Some(ValueType::RandomVariable { .. })) {
+                self.set(
+                    tok,
+                    if i == 2 {
+                        SemKind::EnumMember
+                    } else {
+                        SemKind::Number
+                    },
+                );
+                continue;
+            }
             // Token lists classify each position by its own element type.
-            let elem = active_ty.and_then(|ty| ty.token_type_at(i));
+            let elem = active_ty.and_then(|ty| ty.token_type_at_input(&input, i));
             self.set(tok, value_token_kind(tok, elem));
         }
     }
@@ -226,12 +241,21 @@ fn value_token_kind(tok: &SyntaxToken, ty: Option<&ValueType>) -> SemKind {
         | Some(ValueType::Velocity)
         | Some(ValueType::Acceleration)
         | Some(ValueType::Color)
+        | Some(ValueType::RandomVariable { .. })
+        | Some(ValueType::RandomKeyframe)
+        | Some(ValueType::ColorKeyframe)
         | Some(ValueType::Coord2D)
         | Some(ValueType::Coord3D) => SemKind::Number,
         Some(ValueType::Reference { .. })
         | Some(ValueType::ReferenceList { .. })
         | Some(ValueType::W3dModel)
-        | Some(ValueType::W3dModelMember) => SemKind::Reference,
+        | Some(ValueType::W3dModelList)
+        | Some(ValueType::W3dModelMember)
+        | Some(ValueType::AudioFile { .. })
+        | Some(ValueType::AudioStemList)
+        | Some(ValueType::TextureFile)
+        | Some(ValueType::TextureStem)
+        | Some(ValueType::TextureSequenceStem) => SemKind::Reference,
         _ => SemKind::StringLit,
     }
 }
@@ -275,6 +299,19 @@ mod tests {
             .iter()
             .any(|(k, s)| *k == SemKind::Module && s == "ActiveBody"));
         assert!(t.iter().any(|(k, s)| *k == SemKind::Number && s == "100"));
+    }
+
+    #[test]
+    fn classifies_particle_keyframe_values_as_numbers() {
+        let src = "ParticleSystem Test\n  Alpha1 = 0 1 2\n  Color1 = R:0 G:1 B:2 3\nEnd\n";
+        let t = toks(src);
+        for value in ["0", "1", "2", "R:0", "G:1", "B:2", "3"] {
+            assert!(
+                t.iter()
+                    .any(|(kind, text)| *kind == SemKind::Number && text == value),
+                "{value} was not classified as a number"
+            );
+        }
     }
 
     #[test]
