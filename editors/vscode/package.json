@@ -19,10 +19,25 @@
   ],
   "main": "./out/extension.js",
   "activationEvents": [
-    "onLanguage:generals-ini"
+    "onLanguage:generals-ini",
+    "onCommand:zerosyntax.clearIndexCache",
+    "onCommand:zerosyntax.rebuildIndexCache",
+    "onCommand:zerosyntax.openIndexCacheLocation"
   ],
   "contributes": {
     "commands": [
+      {
+        "command": "zerosyntax.clearIndexCache",
+        "title": "ZeroSyntax: Clear Index Cache"
+      },
+      {
+        "command": "zerosyntax.rebuildIndexCache",
+        "title": "ZeroSyntax: Rebuild Index Cache"
+      },
+      {
+        "command": "zerosyntax.openIndexCacheLocation",
+        "title": "ZeroSyntax: Open Index Cache Location"
+      },
       {
         "command": "zerosyntax.selectSchema",
         "title": "ZeroSyntax: Select Custom Schema"

@@ -73,6 +73,18 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("zerosyntax.openIndexCacheLocation", async () => {
+      const cachePath = await client?.sendRequest<string>("zerosyntax/indexCachePath");
+      if (!cachePath) {
+        return;
+      }
+      const cacheUri = vscode.Uri.file(cachePath);
+      if (fs.existsSync(cachePath)) {
+        await vscode.commands.executeCommand("revealFileInOS", cacheUri);
+      } else {
+        vscode.window.showInformationMessage(`ZeroSyntax index cache will be created at ${cachePath}.`);
+      }
+    }),
     vscode.commands.registerCommand("zerosyntax.selectSchema", async () => {
       const selected = await vscode.window.showOpenDialog({
         canSelectMany: false,

@@ -26,9 +26,14 @@ use zerosyntax_analysis::{actions, completion, diagnostics, format, outline, sem
 use zerosyntax_syntax::{Edit, Parse};
 
 use crate::convert::{self, PositionEnc};
-use crate::scan::{collect_scan_paths, load_sibling_str_keys, read_lossy, scan_files};
+use crate::scan::{
+    clear_index_cache, index_cache_path, load_sibling_str_keys, read_lossy, scan_with_cache,
+};
 #[cfg(test)]
 use crate::scan::{parse_w3d_models, scan_big, scan_roots};
+
+const CLEAR_INDEX_CACHE_COMMAND: &str = "zerosyntax.clearIndexCache";
+const REBUILD_INDEX_CACHE_COMMAND: &str = "zerosyntax.rebuildIndexCache";
 
 /// An open document: its text (as both a rope for position math and a string
 /// for the parser) and the parse of that exact text. `did_open`/`did_change`
@@ -629,14 +634,11 @@ impl Backend {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(usize, usize)>();
         let scan_analyzer = analyzer.clone();
         let handle = tokio::task::spawn_blocking(move || {
-            let workspace_paths = collect_scan_paths(&roots);
-            let base_paths = collect_scan_paths(&base_roots);
-            let total = workspace_paths.len() + base_paths.len();
             let mut done = 0;
             let mut last_percent = u32::MAX;
             // Throttle to whole-percent changes (plus the final count) so a
             // 10k-file scan sends ~100 notifications, not 10k.
-            let mut progress = |_done_in_batch: usize, _batch_total: usize| {
+            let mut progress = |_done_in_batch: usize, total: usize| {
                 done += 1;
                 let percent = (done * 100 / total.max(1)) as u32;
                 if percent != last_percent || done == total {
@@ -644,16 +646,13 @@ impl Backend {
                     let _ = tx.send((done, total));
                 }
             };
-            let scanned = scan_files(&scan_analyzer, &workspace_paths, &mut progress);
-            let base_scanned = scan_files(&scan_analyzer, &base_paths, &mut progress);
-            (scanned, base_scanned)
+            scan_with_cache(&scan_analyzer, &roots, &base_roots, &mut progress)
         });
         while let Some((done, total)) = rx.recv().await {
             self.report_scan_progress(&progress_token, done, total)
                 .await;
         }
-        let (scanned, base_scanned) = handle.await.unwrap_or_default();
-
+        let scanned = handle.await.unwrap_or_default();
         if replace_analyzer {
             if let Ok(mut current) = self.analyzer.write() {
                 *current = analyzer.clone();
@@ -665,29 +664,28 @@ impl Backend {
             }
         }
 
-        let base_ini_count = base_scanned
+        let base_ini_count = scanned
             .iter()
-            .filter(|(_, _, _, _, _, _, models, assets, _)| models.is_empty() && assets.is_empty())
+            .filter(|(is_base, (_, _, _, _, _, _, models, assets, _))| {
+                *is_base && models.is_empty() && assets.is_empty()
+            })
             .count();
         self.base_indexed_count
             .store(base_ini_count, Ordering::Relaxed);
         self.scan_finished.store(true, Ordering::Relaxed);
-        let ini_total = base_ini_count
-            + scanned
-                .iter()
-                .filter(|(_, _, _, _, _, _, models, assets, _)| {
-                    models.is_empty() && assets.is_empty()
-                })
-                .count();
-        let model_total: usize = base_scanned
+        let ini_total = scanned
             .iter()
-            .chain(scanned.iter())
-            .map(|(_, _, _, _, _, _, models, _, _)| models.len())
+            .filter(|(_, (_, _, _, _, _, _, models, assets, _))| {
+                models.is_empty() && assets.is_empty()
+            })
+            .count();
+        let model_total: usize = scanned
+            .iter()
+            .map(|(_, (_, _, _, _, _, _, models, _, _))| models.len())
             .sum();
-        let (audio_total, texture_total) = base_scanned
+        let (audio_total, texture_total) = scanned
             .iter()
-            .chain(scanned.iter())
-            .flat_map(|(_, _, _, _, _, _, _, assets, _)| assets)
+            .flat_map(|(_, (_, _, _, _, _, _, _, assets, _))| assets)
             .fold((0, 0), |(audio, texture), asset| match asset.kind {
                 zerosyntax_analysis::index::AssetKind::Audio => (audio + 1, texture),
                 zerosyntax_analysis::index::AssetKind::Texture => (audio, texture + 1),
@@ -702,8 +700,8 @@ impl Backend {
         let mut replacement = WorkspaceIndex::new();
         replacement.set_model_member_strictness(model_member_strictness);
         self.virtual_files.clear();
-        for (uri, defs, refs, tags, object_models, object_parents, models, assets, text) in
-            base_scanned.into_iter().chain(scanned)
+        for (_, (uri, defs, refs, tags, object_models, object_parents, models, assets, text)) in
+            scanned
         {
             if let Some(text) = text {
                 self.virtual_files.insert(uri.clone(), text);
@@ -846,6 +844,22 @@ impl Backend {
             .virtual_files
             .get(&params.uri)
             .map(|text| text.to_string()))
+    }
+
+    pub async fn index_cache_path(&self) -> Result<String> {
+        let roots = self
+            .roots
+            .lock()
+            .map(|roots| roots.clone())
+            .unwrap_or_default();
+        let base_roots = self
+            .settings
+            .lock()
+            .map(|settings| settings.base_ini_roots.clone())
+            .unwrap_or_default();
+        Ok(index_cache_path(&roots, &base_roots)
+            .to_string_lossy()
+            .into_owned())
     }
 
     /// The (kind, name, span) under the cursor — a reference-typed value token
@@ -1019,6 +1033,13 @@ impl LanguageServer for Backend {
                         ..Default::default()
                     },
                 )),
+                execute_command_provider: Some(ExecuteCommandOptions {
+                    commands: vec![
+                        CLEAR_INDEX_CACHE_COMMAND.into(),
+                        REBUILD_INDEX_CACHE_COMMAND.into(),
+                    ],
+                    work_done_progress_options: Default::default(),
+                }),
                 ..Default::default()
             },
         })
@@ -1071,6 +1092,53 @@ impl LanguageServer for Backend {
                 ),
             )
             .await;
+    }
+
+    async fn execute_command(
+        &self,
+        params: ExecuteCommandParams,
+    ) -> Result<Option<serde_json::Value>> {
+        if params.command != CLEAR_INDEX_CACHE_COMMAND
+            && params.command != REBUILD_INDEX_CACHE_COMMAND
+        {
+            return Ok(None);
+        }
+        let roots = self
+            .roots
+            .lock()
+            .map(|roots| roots.clone())
+            .unwrap_or_default();
+        let base_roots = self
+            .settings
+            .lock()
+            .map(|settings| settings.base_ini_roots.clone())
+            .unwrap_or_default();
+        let cleared = clear_index_cache(&roots, &base_roots).map_err(|error| {
+            tracing::warn!(%error, "could not clear asset index cache");
+            tower_lsp::jsonrpc::Error::internal_error()
+        })?;
+        if params.command == REBUILD_INDEX_CACHE_COMMAND {
+            self.scan_finished.store(false, Ordering::Relaxed);
+            self.base_indexed_count.store(0, Ordering::Relaxed);
+            self.scan_workspace(self.analyzer(), false).await;
+            let open: Vec<Url> = self.docs.iter().map(|entry| entry.key().clone()).collect();
+            for uri in open {
+                self.refresh(&uri, None).await;
+            }
+            self.client
+                .show_message(MessageType::INFO, "ZeroSyntax index cache rebuilt.")
+                .await;
+            return Ok(Some(
+                serde_json::json!({ "rebuilt": true, "cleared": cleared }),
+            ));
+        }
+        let message = if cleared {
+            "ZeroSyntax index cache cleared. Restart the language server to rebuild it."
+        } else {
+            "ZeroSyntax index cache is already clear."
+        };
+        self.client.show_message(MessageType::INFO, message).await;
+        Ok(Some(serde_json::json!({ "cleared": cleared })))
     }
 
     async fn shutdown(&self) -> Result<()> {

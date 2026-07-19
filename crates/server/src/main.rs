@@ -29,6 +29,7 @@ async fn main() -> std::process::ExitCode {
     let stdout = tokio::io::stdout();
     let (service, socket) = LspService::build(Backend::new)
         .custom_method("zerosyntax/readVirtualFile", Backend::read_virtual_file)
+        .custom_method("zerosyntax/indexCachePath", Backend::index_cache_path)
         .finish();
     Server::new(stdin, stdout, socket).serve(service).await;
     std::process::ExitCode::SUCCESS
