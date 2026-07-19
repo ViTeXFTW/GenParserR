@@ -26,7 +26,9 @@ use zerosyntax_analysis::{actions, completion, diagnostics, format, outline, sem
 use zerosyntax_syntax::{Edit, Parse};
 
 use crate::convert::{self, PositionEnc};
-use crate::scan::{clear_index_cache, index_cache_path, load_sibling_str_keys, read_lossy, scan_with_cache};
+use crate::scan::{
+    clear_index_cache, index_cache_path, load_sibling_str_keys, read_lossy, scan_with_cache,
+};
 #[cfg(test)]
 use crate::scan::{parse_w3d_models, scan_big, scan_roots};
 
@@ -698,7 +700,8 @@ impl Backend {
         let mut replacement = WorkspaceIndex::new();
         replacement.set_model_member_strictness(model_member_strictness);
         self.virtual_files.clear();
-        for (_, (uri, defs, refs, tags, object_models, object_parents, models, assets, text)) in scanned
+        for (_, (uri, defs, refs, tags, object_models, object_parents, models, assets, text)) in
+            scanned
         {
             if let Some(text) = text {
                 self.virtual_files.insert(uri.clone(), text);
@@ -844,9 +847,19 @@ impl Backend {
     }
 
     pub async fn index_cache_path(&self) -> Result<String> {
-        let roots = self.roots.lock().map(|roots| roots.clone()).unwrap_or_default();
-        let base_roots = self.settings.lock().map(|settings| settings.base_ini_roots.clone()).unwrap_or_default();
-        Ok(index_cache_path(&roots, &base_roots).to_string_lossy().into_owned())
+        let roots = self
+            .roots
+            .lock()
+            .map(|roots| roots.clone())
+            .unwrap_or_default();
+        let base_roots = self
+            .settings
+            .lock()
+            .map(|settings| settings.base_ini_roots.clone())
+            .unwrap_or_default();
+        Ok(index_cache_path(&roots, &base_roots)
+            .to_string_lossy()
+            .into_owned())
     }
 
     /// The (kind, name, span) under the cursor — a reference-typed value token
@@ -1021,7 +1034,10 @@ impl LanguageServer for Backend {
                     },
                 )),
                 execute_command_provider: Some(ExecuteCommandOptions {
-                    commands: vec![CLEAR_INDEX_CACHE_COMMAND.into(), REBUILD_INDEX_CACHE_COMMAND.into()],
+                    commands: vec![
+                        CLEAR_INDEX_CACHE_COMMAND.into(),
+                        REBUILD_INDEX_CACHE_COMMAND.into(),
+                    ],
                     work_done_progress_options: Default::default(),
                 }),
                 ..Default::default()
@@ -1078,10 +1094,25 @@ impl LanguageServer for Backend {
             .await;
     }
 
-    async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<serde_json::Value>> {
-        if params.command != CLEAR_INDEX_CACHE_COMMAND && params.command != REBUILD_INDEX_CACHE_COMMAND { return Ok(None); }
-        let roots = self.roots.lock().map(|roots| roots.clone()).unwrap_or_default();
-        let base_roots = self.settings.lock().map(|settings| settings.base_ini_roots.clone()).unwrap_or_default();
+    async fn execute_command(
+        &self,
+        params: ExecuteCommandParams,
+    ) -> Result<Option<serde_json::Value>> {
+        if params.command != CLEAR_INDEX_CACHE_COMMAND
+            && params.command != REBUILD_INDEX_CACHE_COMMAND
+        {
+            return Ok(None);
+        }
+        let roots = self
+            .roots
+            .lock()
+            .map(|roots| roots.clone())
+            .unwrap_or_default();
+        let base_roots = self
+            .settings
+            .lock()
+            .map(|settings| settings.base_ini_roots.clone())
+            .unwrap_or_default();
         let cleared = clear_index_cache(&roots, &base_roots).map_err(|error| {
             tracing::warn!(%error, "could not clear asset index cache");
             tower_lsp::jsonrpc::Error::internal_error()
@@ -1091,11 +1122,21 @@ impl LanguageServer for Backend {
             self.base_indexed_count.store(0, Ordering::Relaxed);
             self.scan_workspace(self.analyzer(), false).await;
             let open: Vec<Url> = self.docs.iter().map(|entry| entry.key().clone()).collect();
-            for uri in open { self.refresh(&uri, None).await; }
-            self.client.show_message(MessageType::INFO, "ZeroSyntax index cache rebuilt.").await;
-            return Ok(Some(serde_json::json!({ "rebuilt": true, "cleared": cleared })));
+            for uri in open {
+                self.refresh(&uri, None).await;
+            }
+            self.client
+                .show_message(MessageType::INFO, "ZeroSyntax index cache rebuilt.")
+                .await;
+            return Ok(Some(
+                serde_json::json!({ "rebuilt": true, "cleared": cleared }),
+            ));
         }
-        let message = if cleared { "ZeroSyntax index cache cleared. Restart the language server to rebuild it." } else { "ZeroSyntax index cache is already clear." };
+        let message = if cleared {
+            "ZeroSyntax index cache cleared. Restart the language server to rebuild it."
+        } else {
+            "ZeroSyntax index cache is already clear."
+        };
         self.client.show_message(MessageType::INFO, message).await;
         Ok(Some(serde_json::json!({ "cleared": cleared })))
     }

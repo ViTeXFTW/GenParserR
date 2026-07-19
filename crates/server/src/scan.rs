@@ -53,38 +53,68 @@ struct CachedEntry {
 impl From<&ScanEntry> for CachedEntry {
     fn from(entry: &ScanEntry) -> Self {
         Self {
-            file: entry.0.clone(), definitions: entry.1.clone(), references: entry.2.clone(),
-            tags: entry.3.clone(), object_models: entry.4.clone(), object_parents: entry.5.clone(),
-            models: entry.6.clone(), assets: entry.7.clone(), text: entry.8.as_deref().map(str::to_owned),
+            file: entry.0.clone(),
+            definitions: entry.1.clone(),
+            references: entry.2.clone(),
+            tags: entry.3.clone(),
+            object_models: entry.4.clone(),
+            object_parents: entry.5.clone(),
+            models: entry.6.clone(),
+            assets: entry.7.clone(),
+            text: entry.8.as_deref().map(str::to_owned),
         }
     }
 }
 
 impl From<CachedEntry> for ScanEntry {
     fn from(entry: CachedEntry) -> Self {
-        (entry.file, entry.definitions, entry.references, entry.tags, entry.object_models,
-         entry.object_parents, entry.models, entry.assets, entry.text.map(Arc::from))
+        (
+            entry.file,
+            entry.definitions,
+            entry.references,
+            entry.tags,
+            entry.object_models,
+            entry.object_parents,
+            entry.models,
+            entry.assets,
+            entry.text.map(Arc::from),
+        )
     }
 }
 
 #[derive(Serialize, Deserialize)]
-struct CachedFile { fingerprint: Fingerprint, entries: Vec<CachedEntry> }
+struct CachedFile {
+    fingerprint: Fingerprint,
+    entries: Vec<CachedEntry>,
+}
 
 #[derive(Serialize, Deserialize)]
-struct IndexCache { version: u32, schema_hash: u64, files: HashMap<String, CachedFile> }
+struct IndexCache {
+    version: u32,
+    schema_hash: u64,
+    files: HashMap<String, CachedFile>,
+}
 
 fn cache_dir() -> PathBuf {
     #[cfg(windows)]
-    if let Some(path) = std::env::var_os("LOCALAPPDATA") { return PathBuf::from(path).join("zerosyntax"); }
+    if let Some(path) = std::env::var_os("LOCALAPPDATA") {
+        return PathBuf::from(path).join("zerosyntax");
+    }
     #[cfg(not(windows))]
-    if let Some(path) = std::env::var_os("XDG_CACHE_HOME") { return PathBuf::from(path).join("zerosyntax"); }
+    if let Some(path) = std::env::var_os("XDG_CACHE_HOME") {
+        return PathBuf::from(path).join("zerosyntax");
+    }
     std::env::temp_dir().join("zerosyntax")
 }
 
 fn path_key(path: &Path) -> String {
     let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let key = path.to_string_lossy().replace('\\', "/");
-    if cfg!(windows) { key.to_ascii_lowercase() } else { key }
+    if cfg!(windows) {
+        key.to_ascii_lowercase()
+    } else {
+        key
+    }
 }
 
 fn schema_hash() -> u64 {
@@ -96,21 +126,40 @@ fn schema_hash() -> u64 {
 fn fingerprint(path: &Path) -> Option<Fingerprint> {
     let metadata = std::fs::metadata(path).ok()?;
     let modified = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
-    Some(Fingerprint { len: metadata.len(), modified_secs: modified.as_secs(), modified_nanos: modified.subsec_nanos() })
+    Some(Fingerprint {
+        len: metadata.len(),
+        modified_secs: modified.as_secs(),
+        modified_nanos: modified.subsec_nanos(),
+    })
 }
 
 pub(crate) fn index_cache_path(workspace_roots: &[PathBuf], base_roots: &[PathBuf]) -> PathBuf {
-    let mut roots: Vec<_> = workspace_roots.iter().map(|root| format!("workspace:{}", path_key(root)))
-        .chain(base_roots.iter().map(|root| format!("base:{}", path_key(root)))).collect();
+    let mut roots: Vec<_> = workspace_roots
+        .iter()
+        .map(|root| format!("workspace:{}", path_key(root)))
+        .chain(
+            base_roots
+                .iter()
+                .map(|root| format!("base:{}", path_key(root))),
+        )
+        .collect();
     roots.sort_unstable();
     let mut hasher = DefaultHasher::new();
     roots.hash(&mut hasher);
-    cache_dir().join(format!("index-v{INDEX_CACHE_VERSION}-{:016x}.json", hasher.finish()))
+    cache_dir().join(format!(
+        "index-v{INDEX_CACHE_VERSION}-{:016x}.json",
+        hasher.finish()
+    ))
 }
 
-pub(crate) fn clear_index_cache(workspace_roots: &[PathBuf], base_roots: &[PathBuf]) -> std::io::Result<bool> {
+pub(crate) fn clear_index_cache(
+    workspace_roots: &[PathBuf],
+    base_roots: &[PathBuf],
+) -> std::io::Result<bool> {
     match std::fs::remove_file(index_cache_path(workspace_roots, base_roots)) {
-        Ok(()) => Ok(true), Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false), Err(error) => Err(error),
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
     }
 }
 
@@ -498,8 +547,14 @@ pub(crate) fn scan_with_cache(
     let mut cache = std::fs::read(&cache_path)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<IndexCache>(&bytes).ok())
-        .filter(|cache| cache.version == INDEX_CACHE_VERSION && cache.schema_hash == expected_schema_hash)
-        .unwrap_or(IndexCache { version: INDEX_CACHE_VERSION, schema_hash: expected_schema_hash, files: HashMap::new() });
+        .filter(|cache| {
+            cache.version == INDEX_CACHE_VERSION && cache.schema_hash == expected_schema_hash
+        })
+        .unwrap_or(IndexCache {
+            version: INDEX_CACHE_VERSION,
+            schema_hash: expected_schema_hash,
+            files: HashMap::new(),
+        });
 
     let mut seen = HashSet::new();
     let mut paths = Vec::new();
@@ -507,7 +562,9 @@ pub(crate) fn scan_with_cache(
         for path in collect_scan_paths(roots) {
             let key = path_key(&path);
             if seen.insert(key.clone()) {
-                if let Some(fingerprint) = fingerprint(&path) { paths.push((path, key, fingerprint, is_base)); }
+                if let Some(fingerprint) = fingerprint(&path) {
+                    paths.push((path, key, fingerprint, is_base));
+                }
             }
         }
     }
@@ -517,16 +574,32 @@ pub(crate) fn scan_with_cache(
     let total = paths.len();
     for (done, (path, key, fingerprint, is_base)) in paths.into_iter().enumerate() {
         let entries = match cache.files.remove(&key) {
-            Some(cached) if cached.fingerprint == fingerprint => cached.entries.into_iter().map(ScanEntry::from).collect(),
+            Some(cached) if cached.fingerprint == fingerprint => {
+                cached.entries.into_iter().map(ScanEntry::from).collect()
+            }
             _ => scan_path(analyzer, &path).unwrap_or_default(),
         };
-        next.insert(key, CachedFile { fingerprint, entries: entries.iter().map(CachedEntry::from).collect() });
+        next.insert(
+            key,
+            CachedFile {
+                fingerprint,
+                entries: entries.iter().map(CachedEntry::from).collect(),
+            },
+        );
         scanned.extend(entries.into_iter().map(|entry| (is_base, entry)));
         progress(done + 1, total);
     }
-    let cache = IndexCache { version: INDEX_CACHE_VERSION, schema_hash: expected_schema_hash, files: next };
+    let cache = IndexCache {
+        version: INDEX_CACHE_VERSION,
+        schema_hash: expected_schema_hash,
+        files: next,
+    };
     if let Some(parent) = cache_path.parent() {
-        if let Err(error) = std::fs::create_dir_all(parent).and_then(|()| serde_json::to_vec(&cache).map_err(std::io::Error::other).and_then(|bytes| std::fs::write(&cache_path, bytes))) {
+        if let Err(error) = std::fs::create_dir_all(parent).and_then(|()| {
+            serde_json::to_vec(&cache)
+                .map_err(std::io::Error::other)
+                .and_then(|bytes| std::fs::write(&cache_path, bytes))
+        }) {
             tracing::warn!(%error, path = %cache_path.display(), "could not write asset index cache");
         }
     }
