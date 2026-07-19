@@ -73,12 +73,6 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("zerosyntax.clearIndexCache", () =>
-      client?.sendRequest("workspace/executeCommand", { command: "zerosyntax.clearIndexCache" })
-    ),
-    vscode.commands.registerCommand("zerosyntax.rebuildIndexCache", () =>
-      client?.sendRequest("workspace/executeCommand", { command: "zerosyntax.rebuildIndexCache" })
-    ),
     vscode.commands.registerCommand("zerosyntax.openIndexCacheLocation", async () => {
       const cachePath = await client?.sendRequest<string>("zerosyntax/indexCachePath");
       if (!cachePath) {
