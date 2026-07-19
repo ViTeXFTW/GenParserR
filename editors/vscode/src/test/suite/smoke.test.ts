@@ -1,6 +1,5 @@
 import * as assert from "assert";
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
 
@@ -10,25 +9,15 @@ suite("ZeroSyntax VS Code extension", () => {
       assert.ok(serverPath, "ZEROSYNTAX_LSP_PATH must point at ZeroSyntax-lsp");
     assert.ok(fs.existsSync(serverPath), `${serverPath} does not exist`);
 
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "zerosyntax-vscode-"));
+    const workspace = vscode.workspace.workspaceFolders?.[0];
+    assert.ok(workspace, "expected the test launcher to open a workspace");
+    const dir = workspace.uri.fsPath;
     const uri = vscode.Uri.file(path.join(dir, "Smoke.ini"));
-    assert.ok(
-      vscode.workspace.updateWorkspaceFolders(0, 0, {
-        uri: vscode.Uri.file(dir),
-        name: "ZeroSyntax smoke",
-      }),
-      "expected a workspace folder for scoped settings"
-    );
-    await waitFor(
-      () => vscode.workspace.getWorkspaceFolder(uri),
-      (folder) => folder !== undefined,
-      "workspace folder"
-    );
     const configuration = vscode.workspace.getConfiguration("zerosyntax", uri);
     await configuration.update(
       "analysis.allowPercentagesWithoutSign",
       false,
-      vscode.ConfigurationTarget.WorkspaceFolder
+      vscode.ConfigurationTarget.Workspace
     );
     await vscode.workspace.fs.writeFile(
       uri,
@@ -82,9 +71,9 @@ suite("ZeroSyntax VS Code extension", () => {
     assert.ok(allow, "expected the bare-percentage settings quick fix");
     await vscode.commands.executeCommand("zerosyntax.allowBarePercentages", uri);
     assert.strictEqual(
-      configuration.get("analysis.allowPercentagesWithoutSign"),
+      configuration.inspect<boolean>("analysis.allowPercentagesWithoutSign")?.workspaceValue,
       true,
-      "expected the quick fix to override the folder setting"
+      "expected the quick fix to override the workspace setting"
     );
     await waitFor(
       () => vscode.languages.getDiagnostics(uri),
