@@ -56,7 +56,9 @@ fn command() -> Command {
                         .value_name("PATH")
                         .value_parser(value_parser!(PathBuf))
                         .action(ArgAction::Append)
-                        .help("INI/W3D directory or .big archive loaded before targets"),
+                        .help(
+                            "INI and game assets directory or .big archive loaded before targets",
+                        ),
                 )
                 .arg(
                     Arg::new("stdin-filename")
@@ -270,13 +272,16 @@ fn has_extension(path: &Path, extension: &str) -> bool {
 }
 
 fn apply_entries(index: &mut WorkspaceIndex, entries: Vec<ScanEntry>) {
-    for (file, definitions, references, tags, object_models, object_parents, models, _) in entries {
+    for (file, definitions, references, tags, object_models, object_parents, models, assets, _) in
+        entries
+    {
         index.set_file(&file, definitions);
         index.set_file_refs(&file, references);
         index.set_file_tags(&file, tags);
         index.set_file_object_models(&file, object_models);
         index.set_file_object_parents(&file, object_parents);
         index.set_file_models(&file, models);
+        index.set_file_assets(&file, assets);
     }
 }
 

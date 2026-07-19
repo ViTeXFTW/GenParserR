@@ -169,6 +169,14 @@ pub enum ModelSource {
     ObjectReferenceField { field: String },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioExtension {
+    Any,
+    Wav,
+    Mp3,
+}
+
 /// The type of a field's value, derived from its engine parse function.
 ///
 /// The variant determines how the value tokens are validated and which
@@ -205,14 +213,32 @@ pub enum ValueType {
     AsciiStringList,
     /// A W3D model asset name, backed by indexed `.w3d` files.
     W3dModel,
+    /// One or more W3D model asset names.
+    W3dModelList,
     /// A bone, subobject, mesh, or other member of a W3D model asset.
     W3dModelMember,
+    /// An indexed audio filename, optionally restricted by extension.
+    AudioFile { extension: AudioExtension },
+    /// A variadic list of extensionless indexed WAV names.
+    AudioStemList,
+    /// An indexed texture filename. DDS transparently aliases the same TGA stem.
+    TextureFile,
+    /// An extensionless indexed TGA/DDS texture name.
+    TextureStem,
+    /// A texture stem that may be backed by a numbered `0000` first frame.
+    TextureSequenceStem,
     /// `R:r G:g B:b [A:a]` color.
     Color,
     /// `X:x Y:y` coordinate.
     Coord2D,
     /// `X:x Y:y Z:z` coordinate.
     Coord3D,
+    /// Two real bounds followed by an optional distribution name.
+    RandomVariable { value_set: String },
+    /// Two real bounds followed by an unsigned frame number.
+    RandomKeyframe,
+    /// `R:r G:g B:b` followed by an unsigned frame number.
+    ColorKeyframe,
     /// One name drawn from a value set (an enum).
     Enum { value_set: String },
     /// One or more flag names from a value set, with optional `+`/`-` modifiers
@@ -309,7 +335,11 @@ impl ValueType {
                 };
             }
             return match active {
-                ValueType::BitFlags { .. } | ValueType::ReferenceList { .. } => Some(active),
+                ValueType::BitFlags { .. }
+                | ValueType::ReferenceList { .. }
+                | ValueType::RandomVariable { .. }
+                | ValueType::RandomKeyframe
+                | ValueType::ColorKeyframe => Some(active),
                 _ if index == 0 => Some(active),
                 _ => None,
             };
@@ -346,7 +376,12 @@ impl ValueType {
             return active.token_index_at_input(input, index);
         }
         let ValueType::TokenList { tokens } = active else {
-            return Some(0);
+            return match active {
+                ValueType::RandomVariable { .. }
+                | ValueType::RandomKeyframe
+                | ValueType::ColorKeyframe => Some(index),
+                _ => Some(0),
+            };
         };
         let mut raw = 0;
         for (logical, ty) in tokens.iter().enumerate() {
@@ -551,6 +586,16 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn structured_particle_values_type_every_raw_token() {
+        for (ty, input) in [
+            (ValueType::RandomKeyframe, vec!["0", "1", "2"]),
+            (ValueType::ColorKeyframe, vec!["R:0", "G:0", "B:0", "2"]),
+        ] {
+            assert!((0..input.len()).all(|index| ty.token_type_at_input(&input, index).is_some()));
+        }
+    }
+
     fn contains(ty: &ValueType, predicate: fn(&ValueType) -> bool) -> bool {
         predicate(ty)
             || match ty {
@@ -694,7 +739,9 @@ mod tests {
         definitions: &HashSet<RefKind>,
     ) {
         match value_type {
-            ValueType::Enum { value_set } | ValueType::BitFlags { value_set } => assert!(
+            ValueType::Enum { value_set }
+            | ValueType::BitFlags { value_set }
+            | ValueType::RandomVariable { value_set } => assert!(
                 value_sets.contains(value_set.as_str()),
                 "{path} uses missing value set `{value_set}`"
             ),
@@ -797,6 +844,25 @@ mod tests {
                     );
                 }
             });
+        }
+    }
+
+    #[test]
+    fn weapon_fields_have_concrete_value_types() {
+        let schema = embedded();
+        let weapon = schema
+            .index()
+            .block("Weapon")
+            .expect("Weapon block missing");
+        for field in &weapon.fields {
+            assert!(
+                !contains(&field.value_type, |ty| matches!(
+                    ty,
+                    ValueType::Unknown { .. }
+                )),
+                "Weapon.{} still has an unknown value type",
+                field.name
+            );
         }
     }
 
@@ -1480,7 +1546,7 @@ mod tests {
         }
 
         let decal_fields = [
-            ("Texture", ValueType::AsciiString),
+            ("Texture", ValueType::TextureStem),
             ("Style", bit_flags("shadow_type")),
             ("OpacityMin", ValueType::Percent),
             ("OpacityMax", ValueType::Percent),
@@ -1506,6 +1572,14 @@ mod tests {
         assert!(radius.fields.is_empty());
         assert!(radius.sub_blocks.is_empty());
 
+        let cursor_blocks = &schema.index().block("InGameUI").unwrap().sub_blocks;
+        assert_eq!(cursor_blocks.len(), 29);
+        assert!(cursor_blocks.iter().all(|cursor| cursor
+            .fields
+            .iter()
+            .map(|field| (field.name.as_str(), field.value_type.clone()))
+            .eq(decal_fields.iter().cloned())));
+
         let ai_data = schema.index().block("AIData").unwrap();
         let build_list = ai_data
             .sub_blocks
@@ -1523,6 +1597,44 @@ mod tests {
             schema.index().block("EvaEvent").unwrap().defines,
             Some(RefKind::EvaEvent)
         );
+        let eva_side_sounds = schema
+            .index()
+            .block("EvaEvent")
+            .unwrap()
+            .sub_blocks
+            .iter()
+            .find(|sub_block| sub_block.keyword == "SideSounds")
+            .unwrap();
+        assert_eq!(
+            eva_side_sounds
+                .fields
+                .iter()
+                .map(|field| (field.name.as_str(), field.value_type.clone()))
+                .collect::<Vec<_>>(),
+            [
+                ("Side", ValueType::AsciiString),
+                ("Sounds", ValueType::AudioStemList),
+            ]
+        );
+        for module in [
+            "W3DDependencyModelDraw",
+            "W3DModelDraw",
+            "W3DOverlordAircraftDraw",
+            "W3DOverlordTankDraw",
+            "W3DOverlordTruckDraw",
+            "W3DPoliceCarDraw",
+            "W3DScienceModelDraw",
+            "W3DSupplyDraw",
+            "W3DTankDraw",
+            "W3DTankTruckDraw",
+            "W3DTruckDraw",
+        ] {
+            assert_eq!(
+                module_field(&schema, module, "TrackMarks").value_type,
+                ValueType::TextureFile,
+                "{module}.TrackMarks"
+            );
+        }
         assert_eq!(
             schema.index().block("CrateData").unwrap().defines,
             Some(RefKind::CrateData)

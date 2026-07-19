@@ -6,10 +6,11 @@
 //! * after `=` -> enum/bitflag members, `Yes`/`No`, module names, or (with the
 //!   workspace index) names of the referenced definition kind.
 
-use zerosyntax_schema::ValueType;
+use zerosyntax_schema::{AudioExtension, ValueType};
 use zerosyntax_syntax::ast::{Block, Field, Module};
 use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode};
 
+use crate::index::AssetKind;
 use crate::model::{
     is_model_asset_type, is_model_member_type, model_member_ini_name, models_for_source,
     scope_schema,
@@ -494,7 +495,11 @@ fn type_snippet_placeholder(ty: &ValueType, n: usize) -> String {
         ValueType::AsciiString | ValueType::AsciiStringList | ValueType::QuotedString => {
             format!("${{{n}:Value}}")
         }
-        ValueType::W3dModel => format!("${{{n}:Model}}"),
+        ValueType::AudioFile { .. } => format!("${{{n}:Sound.wav}}"),
+        ValueType::AudioStemList => format!("${{{n}:Sound}}"),
+        ValueType::TextureFile => format!("${{{n}:Texture.tga}}"),
+        ValueType::TextureStem | ValueType::TextureSequenceStem => format!("${{{n}:Texture}}"),
+        ValueType::W3dModel | ValueType::W3dModelList => format!("${{{n}:Model}}"),
         ValueType::W3dModelMember => format!("${{{n}:Bone}}"),
         _ => format!("${{{n}:?}}"),
     }
@@ -502,6 +507,9 @@ fn type_snippet_placeholder(ty: &ValueType, n: usize) -> String {
 
 fn value_snippet(ty: &ValueType) -> Option<String> {
     match ty {
+        ValueType::RandomVariable { .. } => Some("${1:0} ${2:0}$0".into()),
+        ValueType::RandomKeyframe => Some("${1:0} ${2:0} ${3:0}$0".into()),
+        ValueType::ColorKeyframe => Some("R:${1:0} G:${2:0} B:${3:0} ${4:0}$0".into()),
         ValueType::TokenList { tokens } if tokens.len() > 1 => {
             let mut snippet = tokens
                 .iter()
@@ -526,6 +534,19 @@ fn completions_for_type(
     index: Option<&WorkspaceIndex>,
 ) -> Vec<Completion> {
     match ty {
+        ValueType::RandomVariable { value_set } if value_index == 2 => completions_for_type(
+            analyzer,
+            &ValueType::Enum {
+                value_set: value_set.clone(),
+            },
+            0,
+            current_token,
+            first_token,
+            index,
+        ),
+        ValueType::RandomVariable { .. } | ValueType::RandomKeyframe | ValueType::ColorKeyframe => {
+            Vec::new()
+        }
         ValueType::OneOf { variants } => {
             if current_token.is_some() || value_index > 0 {
                 return ty
@@ -662,9 +683,81 @@ fn completions_for_type(
             }));
             out
         }
-        ValueType::W3dModel | ValueType::W3dModelMember => Vec::new(),
+        ValueType::AudioFile { extension } => asset_completions(
+            index,
+            AssetKind::Audio,
+            "audio file",
+            |name| match extension {
+                AudioExtension::Any => Some(name.to_string()),
+                AudioExtension::Wav if has_extension(name, "wav") => Some(name.to_string()),
+                AudioExtension::Mp3 if has_extension(name, "mp3") => Some(name.to_string()),
+                _ => None,
+            },
+        ),
+        ValueType::AudioStemList => {
+            asset_completions(index, AssetKind::Audio, "sound stem", |name| {
+                has_extension(name, "wav").then(|| file_stem(name).to_string())
+            })
+        }
+        ValueType::TextureFile => asset_completions(index, AssetKind::Texture, "texture", |name| {
+            Some(format!("{}.tga", file_stem(name)))
+        }),
+        ValueType::TextureStem => asset_completions(index, AssetKind::Texture, "texture", |name| {
+            Some(file_stem(name).to_string())
+        }),
+        ValueType::TextureSequenceStem => {
+            asset_completions(index, AssetKind::Texture, "texture", |name| {
+                let stem = file_stem(name);
+                if let Some(base) = stem.strip_suffix("0000") {
+                    Some(base.to_string())
+                } else if stem
+                    .as_bytes()
+                    .get(stem.len().saturating_sub(4)..)
+                    .is_some_and(|suffix| {
+                        suffix.len() == 4 && suffix.iter().all(u8::is_ascii_digit)
+                    })
+                {
+                    None
+                } else {
+                    Some(stem.to_string())
+                }
+            })
+        }
+        ValueType::W3dModel | ValueType::W3dModelList | ValueType::W3dModelMember => Vec::new(),
         _ => Vec::new(),
     }
+}
+
+fn file_stem(name: &str) -> &str {
+    name.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(name)
+}
+
+fn has_extension(name: &str, extension: &str) -> bool {
+    name.rsplit_once('.')
+        .is_some_and(|(_, actual)| actual.eq_ignore_ascii_case(extension))
+}
+
+fn asset_completions(
+    index: Option<&WorkspaceIndex>,
+    kind: AssetKind,
+    detail: &str,
+    label: impl Fn(&str) -> Option<String>,
+) -> Vec<Completion> {
+    let Some(index) = index.filter(|index| index.has_assets(kind)) else {
+        return Vec::new();
+    };
+    let mut seen = std::collections::HashSet::new();
+    index
+        .asset_names(kind)
+        .filter_map(label)
+        .filter(|label| seen.insert(label.to_ascii_lowercase()))
+        .map(|label| Completion {
+            label,
+            kind: CompletionKind::Reference,
+            detail: Some(detail.to_string()),
+            insert: None,
+        })
+        .collect()
 }
 
 fn top_level_completions(analyzer: &Analyzer) -> Vec<Completion> {
@@ -775,7 +868,11 @@ fn type_label(ty: &ValueType) -> String {
         ValueType::BitFlags { value_set } => format!("flags {value_set}"),
         ValueType::Reference { ref_kind } => format!("ref {ref_kind:?}"),
         ValueType::W3dModel => "w3d model".into(),
+        ValueType::W3dModelList => "w3d models".into(),
         ValueType::W3dModelMember => "w3d model member".into(),
+        ValueType::RandomVariable { .. } => "real real [distribution]".into(),
+        ValueType::RandomKeyframe => "real real frame".into(),
+        ValueType::ColorKeyframe => "R: G: B: frame".into(),
         ValueType::Prefixed { prefix, value_type } => {
             format!("{prefix}:{}", type_label(value_type))
         }
@@ -965,6 +1062,27 @@ End
             .map(|item| item.label)
             .collect::<Vec<_>>();
         assert!(out.contains(&"WeaponA".to_string()), "{out:?}");
+    }
+
+    #[test]
+    fn ocl_model_list_completes_every_position() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        index.set_file_models(
+            "models/Good.w3d",
+            vec![crate::index::ModelAsset {
+                name: "Good".into(),
+                members: vec![],
+            }],
+        );
+        let src =
+            "ObjectCreationList Debris\n  CreateDebris\n    ModelNames = First \n  End\nEnd\n";
+        let offset = src.find("First ").unwrap() + "First ".len();
+        let out = complete(&a, &a.parse(src), offset as u32, Some(&index), None)
+            .into_iter()
+            .map(|item| item.label)
+            .collect::<Vec<_>>();
+        assert!(out.contains(&"Good".to_string()), "{out:?}");
     }
 
     #[test]

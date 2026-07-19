@@ -50,6 +50,7 @@ impl From<rowan::TextRange> for Span {
 /// it. Cheap to share; build once and reuse across documents.
 pub struct Analyzer {
     schema: Schema,
+    allow_bare_percentages: bool,
     block_by_name: HashMap<String, usize>,
     module_by_name: HashMap<String, usize>,
     value_set_by_id: HashMap<String, usize>,
@@ -88,6 +89,7 @@ impl Analyzer {
         let openers = SchemaOpeners::from_schema(&schema);
         Analyzer {
             schema,
+            allow_bare_percentages: false,
             block_by_name,
             module_by_name,
             value_set_by_id,
@@ -103,6 +105,15 @@ impl Analyzer {
 
     pub fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    /// Allow engine-compatible percentage values without a trailing `%`.
+    pub fn set_allow_bare_percentages(&mut self, allow: bool) {
+        self.allow_bare_percentages = allow;
+    }
+
+    pub fn allow_bare_percentages(&self) -> bool {
+        self.allow_bare_percentages
     }
 
     /// Parse `src` using the schema-derived opener oracle.

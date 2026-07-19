@@ -28,23 +28,31 @@ across its INI files.
 
 When editing `map.ini` or `solo.ini`, configure **ZeroSyntax v2: Base Ini Roots**
 with any game or mod folders and `.big` archives that load before the map. This
-prevents false unresolved-reference warnings and enables W3D model and bone
-checks.
+prevents false unresolved-reference warnings and enables W3D model, bone,
+WAV/MP3 audio, and TGA/DDS texture checks. Configure every loaded game/mod root;
+asset warnings activate per kind once any matching asset is indexed. DDS-only
+textures are offered using the engine-compatible `stem.tga` spelling.
 
 ## Settings
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `zerosyntax.baseIniRoots` | `[]` | Base game/mod directories and `.big` archives used for map and model checks. |
-| `zerosyntax.schema.path` | empty | Custom schema JSON; invalid files fall back to the built-in schema. |
-| `zerosyntax.analysis.modelMemberStrictness` | `compatible` | Disables member warnings, accepts any applicable model, or requires every model. |
-| `zerosyntax.analysis.mapOrderingDiagnostics` | `true` | Warns about source-proven forward-order problems in `map.ini` and `solo.ini`. |
-| `zerosyntax.format.enable` | `false` | Enables indentation formatting. Changing it restarts the server. |
-| `zerosyntax.server.path` | empty | Uses a custom `zerosyntax-lsp` binary instead of the bundled one. |
+| `zerosyntax.baseIniRoots` | `[]` | Base game/mod directories and `.big` archives used for INI and game-asset checks; changes reindex. |
+| `zerosyntax.schema.path` | empty | Custom schema JSON; changes reparse and reindex, with invalid files falling back to the built-in schema. |
+| `zerosyntax.analysis.modelMemberStrictness` | `compatible` | Disables member warnings, accepts any applicable model, or requires every model; applies immediately. |
+| `zerosyntax.analysis.allowPercentagesWithoutSign` | `false` | Allows engine-compatible percentage values without a trailing `%`; applies immediately. |
+| `zerosyntax.analysis.mapOrderingDiagnostics` | `true` | Warns about source-proven forward-order problems in `map.ini` and `solo.ini`; applies immediately. |
+| `zerosyntax.analysis.debounceMs` | `250` | Delay before diagnostics/index refresh after typing; applies to future edits immediately. |
+| `zerosyntax.format.enable` | `false` | Enables indentation formatting immediately when the client supports dynamic registration. |
+| `zerosyntax.server.path` | empty | Uses a custom `zerosyntax-lsp` binary instead of the bundled one; changing it restarts the server. |
 | `zerosyntax.trace.server` | `off` | Logs LSP traffic for troubleshooting. |
 
 Formatting is intentionally off by default. Enable it only when you want
 **Format Document** or format-on-save to normalize indentation.
+
+Runtime settings reload without restarting. Schema and base-root changes show
+indexing progress because they rebuild workspace state; only changing the
+server executable path requires a normal VS Code language-server restart.
 
 ## INI file association
 

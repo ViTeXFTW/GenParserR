@@ -16,11 +16,11 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use zerosyntax_schema::{Field as SchemaField, RefKind, ValueType};
+use zerosyntax_schema::{AudioExtension, Field as SchemaField, RefKind, ValueType};
 use zerosyntax_syntax::ast::{Block, Field, Module};
 use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode, SyntaxToken};
 
-use crate::index::ModelMemberStrictness;
+use crate::index::{AssetKind, ModelMemberStrictness};
 use crate::model::{
     is_model_asset_type, is_model_member_type, model_member_matches, models_for_source,
     module_fits_slot, scope_schema, ScopeSchema,
@@ -96,6 +96,8 @@ pub const KNOWN_CODES: &[&str] = &[
     "unresolved-reference",
     "unknown-model",
     "unknown-model-member",
+    "unknown-audio-file",
+    "unknown-texture",
     "unknown-suppression",
     "module-wrong-slot",
     "duplicate-module-tag",
@@ -989,6 +991,7 @@ impl<'a> Ctx<'a> {
         if let Some(schema_field) = scope.field(name) {
             self.validate_value(&field, &schema_field.value_type);
             self.validate_model_asset(&field, schema_field, scope_node);
+            self.validate_raw_asset(&field, &schema_field.value_type);
         } else if scope.has_field_schema()
             && !scope.module_slots().iter().any(|s| s.keyword == name)
         {
@@ -1012,6 +1015,16 @@ impl<'a> Ctx<'a> {
         }
         let tokens = field.value_tokens();
         match &schema_field.value_type {
+            ValueType::W3dModelList => {
+                for tok in &tokens {
+                    self.validate_model_asset_token(
+                        &schema_field.value_type,
+                        tok,
+                        scope_node,
+                        schema_field.model_source.as_ref(),
+                    );
+                }
+            }
             ValueType::TokenList { tokens: specs } => {
                 let mut i = 0;
                 for spec in specs {
@@ -1039,6 +1052,63 @@ impl<'a> Ctx<'a> {
                     );
                 }
             }
+        }
+    }
+
+    fn validate_raw_asset(&mut self, field: &Field, ty: &ValueType) {
+        let Some(index) = self.index else { return };
+        let tokens = field.value_tokens();
+        match ty {
+            ValueType::AudioFile { extension } if index.has_assets(AssetKind::Audio) => {
+                if let Some(token) = tokens.first() {
+                    let name = unquote(token.text());
+                    let allowed = match extension {
+                        AudioExtension::Any => {
+                            has_extension(name, "wav") || has_extension(name, "mp3")
+                        }
+                        AudioExtension::Wav => has_extension(name, "wav"),
+                        AudioExtension::Mp3 => has_extension(name, "mp3"),
+                    };
+                    if !name.eq_ignore_ascii_case("None")
+                        && (!allowed || !index.is_asset(AssetKind::Audio, name))
+                    {
+                        self.warning(
+                            token,
+                            "unknown-audio-file",
+                            format!("`{name}` is not a known audio file"),
+                        );
+                    }
+                }
+            }
+            ValueType::AudioStemList if index.has_assets(AssetKind::Audio) => {
+                for token in tokens {
+                    let name = unquote(token.text());
+                    if !name.eq_ignore_ascii_case("None")
+                        && !index.is_asset(AssetKind::Audio, &format!("{name}.wav"))
+                    {
+                        self.warning(
+                            &token,
+                            "unknown-audio-file",
+                            format!("`{name}` is not a known WAV sound stem"),
+                        );
+                    }
+                }
+            }
+            ValueType::TextureFile | ValueType::TextureStem | ValueType::TextureSequenceStem
+                if index.has_assets(AssetKind::Texture) =>
+            {
+                if let Some(token) = tokens.first() {
+                    let name = unquote(token.text());
+                    if !name.eq_ignore_ascii_case("None") && !texture_exists(index, ty, name) {
+                        self.warning(
+                            token,
+                            "unknown-texture",
+                            format!("`{name}` is not a known texture"),
+                        );
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
@@ -1326,6 +1396,50 @@ impl<'a> Ctx<'a> {
                     self.check_reference(*ref_kind, tok);
                 }
             }
+            ValueType::RandomVariable { value_set } => {
+                for tok in tokens.iter().take(2) {
+                    self.check_number(tok, NumKind::Real);
+                }
+                if tokens.len() < 2 {
+                    if let Some(key) = field.key() {
+                        self.warning(
+                            &key,
+                            "missing-value",
+                            format!("`{}` expects at least 2 values", key.text()),
+                        );
+                    }
+                }
+                if let Some(distribution) = tokens.get(2) {
+                    self.check_enum_member(value_set, distribution);
+                }
+            }
+            ValueType::RandomKeyframe => {
+                for tok in tokens.iter().take(2) {
+                    self.check_number(tok, NumKind::Real);
+                }
+                if let Some(frame) = tokens.get(2) {
+                    self.check_number(frame, NumKind::UInt);
+                } else if let Some(key) = field.key() {
+                    self.warning(
+                        &key,
+                        "missing-value",
+                        format!("`{}` expects 3 values", key.text()),
+                    );
+                }
+            }
+            ValueType::ColorKeyframe => {
+                if tokens.len() >= 4 {
+                    let (color, frame) = tokens.split_at(tokens.len() - 1);
+                    self.check_axes(field, color, &["R", "G", "B"], None, true);
+                    self.check_number(&frame[0], NumKind::UInt);
+                } else if let Some(key) = field.key() {
+                    self.warning(
+                        &key,
+                        "missing-value",
+                        format!("`{}` expects a color and frame", key.text()),
+                    );
+                }
+            }
             // A fixed sequence of typed tokens; each listed token is required
             // (the engine's parse function calls getNextToken for each).
             ValueType::TokenList { tokens: specs } => {
@@ -1422,12 +1536,10 @@ impl<'a> Ctx<'a> {
                     }
                 }
             }
-            // Stricter than the engine (which reads a bare real): require the
-            // `%` sign, because `Armor = X 2` almost never means 2 percent.
             ValueType::Percent => {
-                let ok = tok
-                    .text()
-                    .strip_suffix('%')
+                let value = tok.text().strip_suffix('%');
+                let ok = value
+                    .or_else(|| self.analyzer.allow_bare_percentages().then_some(tok.text()))
                     .is_some_and(|n| n.parse::<f64>().is_ok());
                 if !ok {
                     self.error(
@@ -1455,10 +1567,19 @@ impl<'a> Ctx<'a> {
             | ValueType::QuotedString
             | ValueType::AsciiStringList
             | ValueType::W3dModel
+            | ValueType::W3dModelList
             | ValueType::W3dModelMember
+            | ValueType::AudioFile { .. }
+            | ValueType::AudioStemList
+            | ValueType::TextureFile
+            | ValueType::TextureStem
+            | ValueType::TextureSequenceStem
             | ValueType::Color
             | ValueType::Coord2D
             | ValueType::Coord3D
+            | ValueType::RandomVariable { .. }
+            | ValueType::RandomKeyframe
+            | ValueType::ColorKeyframe
             | ValueType::TokenList { .. }
             | ValueType::OneOf { .. }
             | ValueType::Unknown { .. } => {}
@@ -1773,6 +1894,30 @@ impl<'a> Ctx<'a> {
     }
 }
 
+fn has_extension(name: &str, extension: &str) -> bool {
+    name.rsplit_once('.')
+        .is_some_and(|(_, actual)| actual.eq_ignore_ascii_case(extension))
+}
+
+fn texture_exists(index: &WorkspaceIndex, ty: &ValueType, name: &str) -> bool {
+    let exact = |candidate: &str| index.is_asset(AssetKind::Texture, candidate);
+    match ty {
+        ValueType::TextureFile if has_extension(name, "dds") => exact(name),
+        ValueType::TextureFile if has_extension(name, "tga") => {
+            exact(name) || exact(&format!("{}.dds", &name[..name.len() - 4]))
+        }
+        ValueType::TextureFile => false,
+        ValueType::TextureStem => exact(&format!("{name}.tga")) || exact(&format!("{name}.dds")),
+        ValueType::TextureSequenceStem => {
+            exact(&format!("{name}.tga"))
+                || exact(&format!("{name}.dds"))
+                || exact(&format!("{name}0000.tga"))
+                || exact(&format!("{name}0000.dds"))
+        }
+        _ => false,
+    }
+}
+
 enum NumKind {
     Int,
     UInt,
@@ -1831,6 +1976,24 @@ mod tests {
     fn clean_weapon_has_no_diagnostics() {
         let src = "Weapon AK47\n  PrimaryDamage = 50.0\n  ClipSize = 30\nEnd\n";
         assert!(diags(src).is_empty(), "{:?}", diags(src));
+    }
+
+    #[test]
+    fn bare_percentages_are_opt_in() {
+        let src = "Armor A\n  Armor = ARMOR_PIERCING 2.5\nEnd\n";
+        assert!(codes(src).contains(&"bad-percent"));
+
+        let mut analyzer = Analyzer::embedded();
+        analyzer.set_allow_bare_percentages(true);
+        let parse = analyzer.parse(src);
+        assert!(!diagnose(&analyzer, &parse, None, None)
+            .iter()
+            .any(|d| d.code == "bad-percent"));
+
+        let malformed = analyzer.parse("Armor A\n  Armor = ARMOR_PIERCING nope\nEnd\n");
+        assert!(diagnose(&analyzer, &malformed, None, None)
+            .iter()
+            .any(|d| d.code == "bad-percent"));
     }
 
     #[test]
@@ -2624,6 +2787,30 @@ End
     }
 
     #[test]
+    fn ocl_object_and_model_lists_validate_every_reference() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        let objects = a.parse("Object KnownObject\nEnd\n");
+        index.set_file(
+            "objects.ini",
+            crate::index::definitions_in(&a, &objects, "objects.ini"),
+        );
+        index.set_file_models(
+            "models/Good.w3d",
+            vec![crate::index::ModelAsset {
+                name: "Good".into(),
+                members: vec![],
+            }],
+        );
+        let src = "ObjectCreationList Test\n  CreateObject\n    ObjectNames = KnownObject MissingObject\n  End\n  CreateDebris\n    ModelNames = Good MissingModel\n  End\nEnd\n";
+        let diags = diagnose(&a, &a.parse(src), Some(&index), Some("ocl.ini"));
+        assert!(diags.iter().any(|d| d.code == "unresolved-reference"
+            && &src[d.span.start as usize..d.span.end as usize] == "MissingObject"));
+        assert!(diags.iter().any(|d| d.code == "unknown-model"
+            && &src[d.span.start as usize..d.span.end as usize] == "MissingModel"));
+    }
+
+    #[test]
     fn model_member_strictness_supports_off_compatible_and_strict() {
         let a = Analyzer::embedded();
         let mut index = WorkspaceIndex::new();
@@ -2654,5 +2841,40 @@ End
         assert!(!diagnose(&a, &parse, Some(&index), None)
             .iter()
             .any(|d| d.code == "unknown-model-member"));
+    }
+
+    #[test]
+    fn raw_asset_warnings_are_gated_per_kind() {
+        let a = Analyzer::embedded();
+        let src = "DialogEvent Dialog\n  Filename = Missing.wav\nEnd\nMappedImage Image\n  Texture = Missing.tga\nEnd\n";
+        let parse = a.parse(src);
+        let mut index = WorkspaceIndex::new();
+        let codes = |index: &WorkspaceIndex| {
+            diagnose(&a, &parse, Some(index), None)
+                .into_iter()
+                .map(|diagnostic| diagnostic.code)
+                .collect::<Vec<_>>()
+        };
+        assert!(!codes(&index)
+            .iter()
+            .any(|code| code.starts_with("unknown-")));
+        index.set_file_assets(
+            "audio",
+            vec![crate::index::FileAsset {
+                kind: AssetKind::Audio,
+                name: "Known.wav".into(),
+            }],
+        );
+        let audio_only = codes(&index);
+        assert!(audio_only.contains(&"unknown-audio-file"));
+        assert!(!audio_only.contains(&"unknown-texture"));
+        index.set_file_assets(
+            "texture",
+            vec![crate::index::FileAsset {
+                kind: AssetKind::Texture,
+                name: "Known.dds".into(),
+            }],
+        );
+        assert!(codes(&index).contains(&"unknown-texture"));
     }
 }
