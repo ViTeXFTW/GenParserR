@@ -7,12 +7,20 @@ async function main() {
   const extensionDevelopmentPath = path.resolve(__dirname, "../../..");
   const extensionTestsPath = path.resolve(__dirname, "suite/index");
   const testWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "zerosyntax-vscode-"));
+  const testWorkspaceFile = path.join(testWorkspace, "ZeroSyntax.code-workspace");
+  fs.writeFileSync(
+    testWorkspaceFile,
+    JSON.stringify({
+      folders: [{ path: "." }],
+      settings: { "zerosyntax.analysis.allowPercentagesWithoutSign": false },
+    })
+  );
 
   try {
     await runTests({
       extensionDevelopmentPath,
       extensionTestsPath,
-      launchArgs: [testWorkspace, "--disable-extensions"],
+      launchArgs: [testWorkspaceFile, "--disable-extensions"],
     });
   } finally {
     fs.rmSync(testWorkspace, { recursive: true, force: true });

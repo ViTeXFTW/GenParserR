@@ -14,10 +14,10 @@ suite("ZeroSyntax VS Code extension", () => {
     const dir = workspace.uri.fsPath;
     const uri = vscode.Uri.file(path.join(dir, "Smoke.ini"));
     const configuration = vscode.workspace.getConfiguration("zerosyntax", uri);
-    await configuration.update(
-      "analysis.allowPercentagesWithoutSign",
+    assert.strictEqual(
+      configuration.inspect<boolean>("analysis.allowPercentagesWithoutSign")?.workspaceValue,
       false,
-      vscode.ConfigurationTarget.Workspace
+      "expected the test workspace to disable bare percentages"
     );
     await vscode.workspace.fs.writeFile(
       uri,
