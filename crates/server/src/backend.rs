@@ -22,7 +22,10 @@ use zerosyntax_analysis::index::{
     definitions_in, module_tags_in, object_models_in, object_parents_in, references_in,
     ModelMemberStrictness, WorkspaceIndex,
 };
-use zerosyntax_analysis::nav::{definition_at, hover_at, reference_at, HoverInfo};
+use zerosyntax_analysis::nav::{
+    definition_at, hover_at, module_tag_definition_at, module_tag_reference_at, reference_at,
+    HoverInfo, ModuleTagReferenceAt, ReferenceAt,
+};
 use zerosyntax_analysis::{actions, completion, diagnostics, format, outline, semantic, Analyzer};
 use zerosyntax_syntax::{Edit, Parse};
 
@@ -51,6 +54,23 @@ struct DocumentState {
     /// The last `semanticTokens/full` response (result id + encoded data),
     /// kept so `full/delta` can answer with a splice instead of the world.
     last_semantic: Option<(u64, Vec<SemanticToken>)>,
+}
+
+enum SymbolAt {
+    Reference(ReferenceAt),
+    ModuleTag {
+        symbol: ModuleTagReferenceAt,
+        before: Option<u32>,
+    },
+}
+
+impl SymbolAt {
+    fn span(&self) -> zerosyntax_analysis::Span {
+        match self {
+            Self::Reference(symbol) => symbol.span,
+            Self::ModuleTag { symbol, .. } => symbol.span,
+        }
+    }
 }
 
 const DEFAULT_ANALYSIS_DEBOUNCE_MS: u64 = 250;
@@ -886,11 +906,25 @@ impl Backend {
     /// The (kind, name, span) under the cursor — a reference-typed value token
     /// or a definition's name token. The shared entry point for
     /// find-references and rename, which work from either end of an edge.
-    fn symbol_at(&self, uri: &Url, pos: Position) -> Option<zerosyntax_analysis::nav::ReferenceAt> {
+    fn symbol_at(&self, uri: &Url, pos: Position) -> Option<SymbolAt> {
         let (rope, parse) = self.doc(uri)?;
         let offset = convert::position_to_offset(&rope, pos, self.enc());
         let analyzer = self.analyzer();
-        reference_at(&analyzer, &parse, offset).or_else(|| definition_at(&analyzer, &parse, offset))
+        reference_at(&analyzer, &parse, offset)
+            .or_else(|| definition_at(&analyzer, &parse, offset))
+            .map(SymbolAt::Reference)
+            .or_else(|| {
+                module_tag_reference_at(&parse, offset).map(|symbol| SymbolAt::ModuleTag {
+                    before: Some(symbol.span.start),
+                    symbol,
+                })
+            })
+            .or_else(|| {
+                module_tag_definition_at(&parse, offset).map(|symbol| SymbolAt::ModuleTag {
+                    symbol,
+                    before: None,
+                })
+            })
     }
 
     /// Convert `(file uri, span)` pairs to LSP locations, reading each file's
@@ -1499,18 +1533,28 @@ impl LanguageServer for Backend {
         };
         let enc = self.enc();
         let offset = convert::position_to_offset(&rope, pos, enc);
-        let Some(reference) = reference_at(&self.analyzer(), &parse, offset) else {
-            return Ok(None);
-        };
-
         let locations: Vec<(String, zerosyntax_analysis::Span)> = {
             let Ok(idx) = self.index.read() else {
                 return Ok(None);
             };
-            idx.locations(reference.kind, &reference.name)
-                .iter()
-                .map(|l| (l.file.clone(), l.span))
+            if let Some(reference) = reference_at(&self.analyzer(), &parse, offset) {
+                idx.locations(reference.kind, &reference.name)
+                    .iter()
+                    .map(|location| (location.file.clone(), location.span))
+                    .collect()
+            } else if let Some(reference) = module_tag_reference_at(&parse, offset) {
+                idx.effective_module_tag_locations(
+                    &reference.object,
+                    &reference.name,
+                    Some(uri.as_str()),
+                    Some(reference.span.start),
+                )
+                .into_iter()
+                .map(|location| (location.file.clone(), location.span))
                 .collect()
+            } else {
+                return Ok(None);
+            }
         };
 
         let mut out = Vec::new();
@@ -1619,19 +1663,48 @@ impl LanguageServer for Backend {
             let Ok(idx) = self.index.read() else {
                 return Ok(None);
             };
-            let mut v: Vec<_> = idx
-                .reference_sites(sym.kind, &sym.name)
-                .iter()
-                .map(|l| (l.file.clone(), l.span))
-                .collect();
-            if params.context.include_declaration {
-                v.extend(
-                    idx.locations(sym.kind, &sym.name)
+            match &sym {
+                SymbolAt::Reference(sym) => {
+                    let mut locations = idx
+                        .reference_sites(sym.kind, &sym.name)
                         .iter()
-                        .map(|l| (l.file.clone(), l.span)),
-                );
+                        .map(|l| (l.file.clone(), l.span))
+                        .collect::<Vec<_>>();
+                    if params.context.include_declaration {
+                        locations.extend(
+                            idx.locations(sym.kind, &sym.name)
+                                .iter()
+                                .map(|l| (l.file.clone(), l.span)),
+                        );
+                    }
+                    locations
+                }
+                SymbolAt::ModuleTag { symbol, before } => {
+                    let mut locations = idx
+                        .module_tag_reference_locations(&symbol.object, &symbol.name)
+                        .into_iter()
+                        .map(|location| (location.file.clone(), location.span))
+                        .collect::<Vec<_>>();
+                    if params.context.include_declaration {
+                        let definitions = if before.is_some() {
+                            idx.effective_module_tag_locations(
+                                &symbol.object,
+                                &symbol.name,
+                                Some(uri.as_str()),
+                                *before,
+                            )
+                        } else {
+                            idx.module_tag_locations(&symbol.object, &symbol.name)
+                        };
+                        locations.extend(
+                            definitions
+                                .into_iter()
+                                .map(|location| (location.file.clone(), location.span)),
+                        );
+                    }
+                    locations
+                }
             }
-            v
         };
         raw.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.start.cmp(&b.1.start)));
         raw.dedup();
@@ -1652,7 +1725,7 @@ impl LanguageServer for Backend {
         };
         Ok(Some(PrepareRenameResponse::Range(convert::span_to_range(
             &rope,
-            sym.span,
+            sym.span(),
             self.enc(),
         ))))
     }
@@ -1674,11 +1747,31 @@ impl LanguageServer for Backend {
             let Ok(idx) = self.index.read() else {
                 return Ok(None);
             };
-            idx.reference_sites(sym.kind, &sym.name)
-                .iter()
-                .chain(idx.locations(sym.kind, &sym.name).iter())
-                .map(|l| (l.file.clone(), l.span))
-                .collect()
+            match &sym {
+                SymbolAt::Reference(sym) => idx
+                    .reference_sites(sym.kind, &sym.name)
+                    .iter()
+                    .chain(idx.locations(sym.kind, &sym.name).iter())
+                    .map(|location| (location.file.clone(), location.span))
+                    .collect(),
+                SymbolAt::ModuleTag { symbol, before } => {
+                    let definitions = if before.is_some() {
+                        idx.effective_module_tag_locations(
+                            &symbol.object,
+                            &symbol.name,
+                            Some(uri.as_str()),
+                            *before,
+                        )
+                    } else {
+                        idx.module_tag_locations(&symbol.object, &symbol.name)
+                    };
+                    idx.module_tag_reference_locations(&symbol.object, &symbol.name)
+                        .into_iter()
+                        .chain(definitions)
+                        .map(|location| (location.file.clone(), location.span))
+                        .collect()
+                }
+            }
         };
         raw.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.start.cmp(&b.1.start)));
         raw.dedup();

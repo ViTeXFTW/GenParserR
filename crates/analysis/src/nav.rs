@@ -2,7 +2,7 @@
 //! go-to-definition and hover.
 
 use zerosyntax_schema::{RefKind, ValueType};
-use zerosyntax_syntax::ast::{Block, Field};
+use zerosyntax_syntax::ast::{Block, Field, Module};
 use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode, SyntaxToken};
 
 use crate::model::scope_schema;
@@ -11,6 +11,12 @@ use crate::{Analyzer, Span};
 /// A reference occurrence: the referenced kind, the name, and its span.
 pub struct ReferenceAt {
     pub kind: RefKind,
+    pub name: String,
+    pub span: Span,
+}
+
+pub struct ModuleTagReferenceAt {
+    pub object: String,
     pub name: String,
     pub span: Span,
 }
@@ -98,6 +104,67 @@ pub fn reference_at(analyzer: &Analyzer, parse: &Parse, offset: u32) -> Option<R
         kind: ref_kind,
         name,
         span,
+    })
+}
+
+/// Resolve a `RemoveModule <tag>` value to its owning object and tag name.
+pub fn module_tag_reference_at(parse: &Parse, offset: u32) -> Option<ModuleTagReferenceAt> {
+    let root = parse.syntax();
+    let tok = token_at(&root, offset)?;
+    let field_node = tok
+        .parent()
+        .filter(|parent| parent.kind() == SyntaxKind::FIELD)?;
+    let field = Field(field_node.clone());
+    if !field
+        .key()
+        .is_some_and(|key| key.text().eq_ignore_ascii_case("RemoveModule"))
+        || field.value_tokens().first() != Some(&tok)
+    {
+        return None;
+    }
+    let object = field_node
+        .ancestors()
+        .skip(1)
+        .find(|node| node.kind() == SyntaxKind::BLOCK)
+        .map(Block)?;
+    if !object
+        .keyword()
+        .is_some_and(|keyword| keyword.text().eq_ignore_ascii_case("Object"))
+    {
+        return None;
+    }
+    Some(ModuleTagReferenceAt {
+        object: object.name()?.text().to_string(),
+        name: tok.text().trim_matches('"').to_string(),
+        span: tok.text_range().into(),
+    })
+}
+
+/// Resolve a module declaration tag to its owning object and tag name.
+pub fn module_tag_definition_at(parse: &Parse, offset: u32) -> Option<ModuleTagReferenceAt> {
+    let root = parse.syntax();
+    let tok = token_at(&root, offset)?;
+    let module_node = tok
+        .parent()
+        .filter(|parent| parent.kind() == SyntaxKind::MODULE)?;
+    if Module(module_node.clone()).tag().as_ref() != Some(&tok) {
+        return None;
+    }
+    let object = module_node
+        .ancestors()
+        .skip(1)
+        .find(|node| node.kind() == SyntaxKind::BLOCK)
+        .map(Block)?;
+    if !object
+        .keyword()
+        .is_some_and(|keyword| keyword.text().eq_ignore_ascii_case("Object"))
+    {
+        return None;
+    }
+    Some(ModuleTagReferenceAt {
+        object: object.name()?.text().to_string(),
+        name: tok.text().trim_matches('"').to_string(),
+        span: tok.text_range().into(),
     })
 }
 
@@ -191,5 +258,25 @@ mod tests {
             &src[reference.span.start as usize..reference.span.end as usize],
             "MissingParticle"
         );
+    }
+
+    #[test]
+    fn remove_module_value_is_a_scoped_module_tag_reference() {
+        let a = Analyzer::embedded();
+        let src = "Object Tank\n  RemoveModule ModuleTag_01\nEnd\n";
+        let offset = src.find("ModuleTag_01").unwrap() as u32;
+        let reference = module_tag_reference_at(&a.parse(src), offset).unwrap();
+        assert_eq!(reference.object, "Tank");
+        assert_eq!(reference.name, "ModuleTag_01");
+    }
+
+    #[test]
+    fn module_declaration_tag_is_scoped_to_its_object() {
+        let a = Analyzer::embedded();
+        let src = "Object Tank\n  Behavior = DestroyDie ModuleTag_01\n  End\nEnd\n";
+        let offset = src.find("ModuleTag_01").unwrap() as u32;
+        let definition = module_tag_definition_at(&a.parse(src), offset).unwrap();
+        assert_eq!(definition.object, "Tank");
+        assert_eq!(definition.name, "ModuleTag_01");
     }
 }

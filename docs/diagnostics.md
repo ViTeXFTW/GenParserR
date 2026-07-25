@@ -33,6 +33,7 @@ error-level syntax and schema problems when possible.
 | `unknown-field` | A field is not valid in the current block or module. |
 | `missing-module-tag` | A module is missing its required `ModuleTag_*` name. |
 | `unknown-module` | A module type is not known for the current module slot. |
+| `unknown-module-tag` | A map or solo INI tries to remove a module tag not found on the existing object. |
 | `missing-condition` | A conditional state block is missing its condition token. |
 | `missing-value` | A field requires a value but none was provided. |
 | `bad-bool` | A boolean is not `Yes` or `No`. |
@@ -53,6 +54,7 @@ error-level syntax and schema problems when possible.
 | `module-wrong-slot` | A module type is used under the wrong slot. |
 | `duplicate-module-tag` | Two modules in one object use the same module tag. |
 | `editor-default-module` | A placeholder module value should be replaced before shipping. |
+| `default-modules-not-removed` | A newly created map or solo object still inherits modules from `DefaultThingTemplate`. |
 
 ## Quick fixes
 

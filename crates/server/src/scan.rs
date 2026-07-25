@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::Url;
 use zerosyntax_analysis::index::{
     definitions_in, module_tags_in, object_models_in, object_parents_in, references_in, AssetKind,
-    Definition, FileAsset, ModelAsset, ReferenceSite,
+    Definition, FileAsset, ModelAsset, ModuleTagDefinition, ReferenceSite,
 };
 use zerosyntax_analysis::Analyzer;
 
@@ -20,7 +20,7 @@ pub(crate) type ScanEntry = (
     String,
     Vec<Definition>,
     Vec<ReferenceSite>,
-    Vec<(String, String)>,
+    Vec<ModuleTagDefinition>,
     Vec<(String, Vec<String>)>,
     Vec<(String, String)>,
     Vec<ModelAsset>,
@@ -28,7 +28,7 @@ pub(crate) type ScanEntry = (
     Option<Arc<str>>,
 );
 
-const INDEX_CACHE_VERSION: u32 = 2;
+const INDEX_CACHE_VERSION: u32 = 4;
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct Fingerprint {
@@ -42,7 +42,7 @@ struct CachedEntry {
     file: String,
     definitions: Vec<Definition>,
     references: Vec<ReferenceSite>,
-    tags: Vec<(String, String)>,
+    tags: Vec<ModuleTagDefinition>,
     object_models: Vec<(String, Vec<String>)>,
     object_parents: Vec<(String, String)>,
     models: Vec<ModelAsset>,
