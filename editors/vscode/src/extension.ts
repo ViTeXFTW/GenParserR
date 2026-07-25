@@ -28,7 +28,10 @@ export function activate(context: vscode.ExtensionContext) {
   };
 
   const clientOptions: LanguageClientOptions = {
-    documentSelector: [{ scheme: "file", language: "generals-ini" }],
+    documentSelector: [
+      { scheme: "file", language: "generals-ini" },
+      { scheme: "big", language: "generals-ini" },
+    ],
     synchronize: {
       // Re-index when any .ini in the workspace changes on disk.
       fileEvents: vscode.workspace.createFileSystemWatcher("**/*.ini"),

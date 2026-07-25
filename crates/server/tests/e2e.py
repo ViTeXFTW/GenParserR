@@ -14,6 +14,7 @@ import sys
 import threading
 import queue
 import struct
+import urllib.parse
 
 
 def frame(obj: dict) -> bytes:
@@ -70,6 +71,33 @@ def main() -> int:
 
     (base / "A.w3d").write_bytes(w3d_pivot("Bone01"))
     (base / "B.w3d").write_bytes(w3d_pivot("Other"))
+    archived_text = (
+        "CommandButton ArchivedButton\n"
+        "  Command = UNIT_BUILD\n"
+        "End\n"
+        "CommandSet ArchivedSet\n"
+        "  1 = ArchivedButton\n"
+        "End\n"
+    )
+    archive = base / "Base Cache #.big"
+
+    def write_big(path, entries):
+        data_offset = 0x10 + sum(8 + len(name.encode("ascii")) + 1 for name in entries)
+        archive_size = data_offset + sum(len(data) for data in entries.values())
+        data = bytearray(b"BIGF")
+        data.extend(struct.pack(">III", archive_size, len(entries), 0))
+        offset = data_offset
+        for name, content in entries.items():
+            encoded_name = name.encode("ascii")
+            data.extend(struct.pack(">II", offset, len(content)))
+            data.extend(encoded_name + b"\0")
+            offset += len(content)
+        for content in entries.values():
+            data.extend(content)
+        path.write_bytes(data)
+
+    archive_entry = "Data/INI/Archived.ini"
+    write_big(archive, {archive_entry: archived_text.encode("utf-8")})
     root_uri = workspace.as_uri()
 
     # vscode-languageclient appends this conventional transport flag. The
@@ -511,14 +539,16 @@ def main() -> int:
     print("OK: debounce hot-reloads and publishes the current document version")
 
     progress_before = len(indexing_begins)
-    runtime_settings["baseIniRoots"] = [str(base)]
+    runtime_settings["baseIniRoots"] = [str(base), str(archive)]
     configure()
     wait_for(
         lambda m: m.get("method") == "$/progress"
         and m.get("params", {}).get("value", {}).get("kind") == "end",
         "base-root indexing",
     )
-    assert len(indexing_begins) == progress_before + 1
+    assert len(indexing_begins) == progress_before + 1, (
+        f"expected one base-root scan, got {len(indexing_begins) - progress_before}"
+    )
 
     asset_uri = "file:///test/hot-assets.ini"
     open_doc(asset_uri, ("Object HotAssetObject\n  ButtonImage = \nEnd\n"
@@ -540,9 +570,105 @@ def main() -> int:
             items = items.get("items", [])
         return [item["label"] for item in items]
 
-    assert "HotBaseImage" in completion_labels(asset_uri, 1, 16)
-    assert "HotSound.wav" in completion_labels(asset_uri, 4, 13)
-    assert "HotTexture.tga" in completion_labels(asset_uri, 7, 12)
+    assert "HotBaseImage" in completion_labels(asset_uri, 1, 16), \
+        "loose base INI definition missing"
+    assert "HotSound.wav" in completion_labels(asset_uri, 4, 13), \
+        "base audio asset missing"
+    assert "HotTexture.tga" in completion_labels(asset_uri, 7, 12), \
+        "base texture asset missing"
+
+    archive_path = archive.resolve().as_posix()
+    if not archive_path.startswith("/"):
+        archive_path = "/" + archive_path
+    archived_uri = "big://" + urllib.parse.quote(
+        f"{archive_path}!/{archive_entry}", safe="/:!"
+    )
+    send({"jsonrpc": "2.0", "id": 34, "method": "zerosyntax/readVirtualFile",
+          "params": {"uri": archived_uri}})
+    canonical_virtual_file = wait_for(
+        lambda m: m.get("id") == 34 and "result" in m,
+        "canonical virtual file",
+    )
+    assert canonical_virtual_file["result"] == archived_text, (
+        archived_uri, canonical_virtual_file["result"]
+    )
+    workspace_ref_uri = "file:///test/archive-reference.ini"
+    workspace_ref = open_doc(
+        workspace_ref_uri,
+        "Object ArchiveUser\n  CommandSet = ArchivedSet\nEnd\n",
+    )
+    assert "unresolved-reference" not in [
+        diagnostic.get("code") for diagnostic in workspace_ref["diagnostics"]
+    ], workspace_ref["diagnostics"]
+    send({"jsonrpc": "2.0", "id": 35, "method": "textDocument/definition",
+          "params": {"textDocument": {"uri": workspace_ref_uri},
+                     "position": {"line": 1, "character": 20}}})
+    archived_definition = wait_for(
+        lambda m: m.get("id") == 35 and "result" in m,
+        "workspace definition into BIG archive",
+    )
+    assert archived_definition["result"] == [{
+        "uri": archived_uri,
+        "range": {
+            "start": {"line": 3, "character": 11},
+            "end": {"line": 3, "character": 22},
+        },
+    }], archived_definition["result"]
+
+    parsed = urllib.parse.urlsplit(archived_uri)
+    vscode_path = urllib.parse.unquote(parsed.path)
+    if len(vscode_path) > 2 and vscode_path[2] == ":":
+        vscode_path = vscode_path[:1] + vscode_path[1].lower() + vscode_path[2:]
+    vscode_uri = "big:" + urllib.parse.quote(vscode_path, safe="/")
+    send({"jsonrpc": "2.0", "id": 36, "method": "zerosyntax/readVirtualFile",
+          "params": {"uri": vscode_uri}})
+    virtual_file = wait_for(
+        lambda m: m.get("id") == 36 and "result" in m,
+        "VS Code-encoded virtual file",
+    )
+    assert virtual_file["result"] == archived_text, virtual_file["result"]
+
+    send({"jsonrpc": "2.0", "id": 37, "method": "zerosyntax/readVirtualFile",
+          "params": {"uri": archived_uri.replace("Archived.ini", "Unknown.ini")}})
+    unknown_virtual = wait_for(
+        lambda m: m.get("id") == 37 and "result" in m,
+        "unknown virtual file",
+    )
+    assert unknown_virtual["result"] is None
+    send({"jsonrpc": "2.0", "id": 38, "method": "zerosyntax/readVirtualFile",
+          "params": {"uri": "big:///C%3A/Game%FF/Base.big!/Data/INI/Archived.ini"}})
+    malformed_virtual = wait_for(
+        lambda m: m.get("id") == 38 and "result" in m,
+        "malformed virtual file",
+    )
+    assert malformed_virtual["result"] is None
+
+    send({"jsonrpc": "2.0", "method": "textDocument/didOpen",
+          "params": {"textDocument": {"uri": vscode_uri, "languageId": "generals-ini",
+                                      "version": 1, "text": archived_text}}})
+    virtual_diag = wait_for(
+        lambda m: m.get("method") == "textDocument/publishDiagnostics"
+        and m["params"]["uri"] == archived_uri,
+        "virtual document diagnostics",
+    )
+    assert virtual_diag
+    send({"jsonrpc": "2.0", "id": 39, "method": "textDocument/definition",
+          "params": {"textDocument": {"uri": vscode_uri},
+                     "position": {"line": 4, "character": 10}}})
+    nested_definition = wait_for(
+        lambda m: m.get("id") == 39 and "result" in m,
+        "definition from inside BIG archive",
+    )
+    assert nested_definition["result"] == [{
+        "uri": archived_uri,
+        "range": {
+            "start": {"line": 0, "character": 14},
+            "end": {"line": 0, "character": 28},
+        },
+    }], nested_definition["result"]
+    send({"jsonrpc": "2.0", "method": "textDocument/didClose",
+          "params": {"textDocument": {"uri": vscode_uri}}})
+    print("OK: BIG definitions open through encoded read-only URIs and navigate")
 
     model_uri = "file:///test/hot-model.ini"
     model_text = ("Object HotModelObject\n"

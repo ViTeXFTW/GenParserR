@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Duration;
 
 use dashmap::DashMap;
+use percent_encoding::percent_decode_str;
 use ropey::Rope;
 use serde::Deserialize;
 use tower_lsp::lsp_types::*;
@@ -220,7 +221,7 @@ pub struct VirtualFileParams {
 /// makes the same file land in the `WorkspaceIndex` under two different keys,
 /// so every definition appears duplicated. Round-tripping through the file-path
 /// canonicalises both percent-encoding and drive-letter casing. Non-`file:`
-/// schemes are returned unchanged.
+/// schemes other than `big:` are returned unchanged.
 fn canonical_uri(uri: Url) -> Url {
     if uri.scheme() == "file" {
         if let Ok(path) = uri.to_file_path() {
@@ -228,6 +229,22 @@ fn canonical_uri(uri: Url) -> Url {
                 return canonical;
             }
         }
+    } else if uri.scheme() == "big" {
+        let Ok(mut path) = percent_decode_str(uri.path())
+            .decode_utf8()
+            .map(|path| path.into_owned())
+        else {
+            return uri;
+        };
+        if path.as_bytes().get(1).is_some_and(u8::is_ascii_lowercase)
+            && path.as_bytes().get(2) == Some(&b':')
+        {
+            let drive = char::from(path.as_bytes()[1].to_ascii_uppercase()).to_string();
+            path.replace_range(1..2, &drive);
+        }
+        let mut canonical = Url::parse("big:///").expect("static BIG URI is valid");
+        canonical.set_path(&path);
+        return canonical;
     }
     uri
 }
@@ -826,7 +843,8 @@ impl Backend {
     /// Resolve a URI's text to a rope, preferring open documents and falling
     /// back to disk (for go-to-definition into unopened files).
     fn rope_for(&self, uri: &Url) -> Option<Rope> {
-        if let Some(doc) = self.docs.get(uri) {
+        let uri = canonical_uri(uri.clone());
+        if let Some(doc) = self.docs.get(&uri) {
             return Some(doc.rope.clone());
         }
         if uri.scheme() == "big" {
@@ -840,9 +858,12 @@ impl Backend {
     }
 
     pub async fn read_virtual_file(&self, params: VirtualFileParams) -> Result<Option<String>> {
+        let Some(uri) = Url::parse(&params.uri).ok().map(canonical_uri) else {
+            return Ok(None);
+        };
         Ok(self
             .virtual_files
-            .get(&params.uri)
+            .get(uri.as_str())
             .map(|text| text.to_string()))
     }
 
@@ -1933,9 +1954,43 @@ mod tests {
     }
 
     #[test]
-    fn canonical_uri_pass_through_non_file() {
+    fn canonical_uri_pass_through_other_schemes() {
         let u = Url::parse("untitled:///buffer").unwrap();
         assert_eq!(canonical_uri(u.clone()), u);
+    }
+
+    #[test]
+    fn canonical_uri_normalises_big_uri_path() {
+        let scanner =
+            Url::parse("big:///C:/Game%20Folder/Base%23.big!/Data/INI/Object.ini").unwrap();
+        for client in [
+            "big:///C%3A/Game%20Folder/Base%23.big!/Data/INI/Object.ini",
+            "big:/c%3A/Game%20Folder/Base%23.big%21/Data/INI/Object.ini",
+        ] {
+            assert_eq!(canonical_uri(Url::parse(client).unwrap()), scanner);
+        }
+    }
+
+    #[test]
+    fn canonical_uri_keeps_scanner_big_uri() {
+        let scanner =
+            Url::parse("big:///C:/Game%20Folder/Base%23.big!/Data/INI/Object.ini").unwrap();
+        assert_eq!(canonical_uri(scanner.clone()), scanner);
+    }
+
+    #[test]
+    fn malformed_or_unknown_big_uri_has_no_virtual_content() {
+        let files = DashMap::new();
+        files.insert(
+            "big:///C:/Game%20Folder/Base.big!/Data/INI/Object.ini".to_string(),
+            Arc::<str>::from("Object Known\nEnd\n"),
+        );
+        let malformed = Url::parse("big:///C%3A/Game%FF/Base.big!/Data/INI/Object.ini").unwrap();
+        let unknown =
+            Url::parse("big:///C%3A/Game%20Folder/Base.big!/Data/INI/Unknown.ini").unwrap();
+        assert_eq!(canonical_uri(malformed.clone()), malformed);
+        assert!(!files.contains_key(canonical_uri(malformed).as_str()));
+        assert!(!files.contains_key(canonical_uri(unknown).as_str()));
     }
 
     #[test]
@@ -1948,7 +2003,7 @@ mod tests {
     #[test]
     fn scans_ini_w3d_audio_and_texture_from_big_archive() {
         let dir = std::env::temp_dir();
-        let path = dir.join(format!("zerosyntax-test-{}.big", std::process::id()));
+        let path = dir.join(format!("zerosyntax test #-{}.big", std::process::id()));
         let entries: Vec<(&str, &[u8])> = vec![
             ("Data\\INI\\Test.ini", b"Object BigArchiveObject\nEnd\n"),
             ("Art\\Good.w3d", b""),
