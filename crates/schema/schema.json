@@ -5551,7 +5551,8 @@
             {
               "name": "Name",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "reference",
+                "ref_kind": "audio_event"
               },
               "parse_fn": "INI::parseAsciiString"
             }
@@ -5563,7 +5564,8 @@
             {
               "name": "Name",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "reference",
+                "ref_kind": "object"
               },
               "parse_fn": "INI::parseAsciiString"
             },
@@ -5589,7 +5591,8 @@
             {
               "name": "TracerName",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "reference",
+                "ref_kind": "object"
               },
               "parse_fn": "INI::parseAsciiString",
               "doc": null
@@ -5731,7 +5734,8 @@
             {
               "name": "Name",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "reference",
+                "ref_kind": "particle_system"
               },
               "parse_fn": "INI::parseAsciiString"
             },
