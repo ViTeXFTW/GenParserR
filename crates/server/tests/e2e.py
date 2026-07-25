@@ -308,9 +308,9 @@ def main() -> int:
     print("OK: completion beats debounced diagnostics; burst publishes latest version only")
 
     # RemoveModule tags navigate to the matching module tag on the same object.
-    map_uri = "file:///test/map.ini"
+    module_map_uri = "file:///test/remove-module/map.ini"
     open_doc(
-        map_uri,
+        module_map_uri,
         "Object GotoTank\n"
         "  Behavior = DestroyDie ModuleTag_Target\n"
         "  End\n"
@@ -318,7 +318,7 @@ def main() -> int:
         "End\n",
     )
     send({"jsonrpc": "2.0", "id": 30, "method": "textDocument/definition",
-          "params": {"textDocument": {"uri": map_uri},
+          "params": {"textDocument": {"uri": module_map_uri},
                      "position": {"line": 3, "character": 16}}})
     definition = wait_for(
         lambda m: m.get("id") == 30 and "result" in m,
@@ -328,9 +328,32 @@ def main() -> int:
     targets = definition["result"]
     if isinstance(targets, dict):
         targets = [targets]
-    assert targets[0]["uri"] == map_uri, targets
+    assert targets[0]["uri"] == module_map_uri, targets
     assert targets[0]["range"]["start"]["line"] == 1, targets
     print("OK: RemoveModule tag resolves to its module definition")
+
+    send({"jsonrpc": "2.0", "id": 70, "method": "textDocument/references",
+          "params": {"textDocument": {"uri": module_map_uri},
+                     "position": {"line": 3, "character": 16},
+                     "context": {"includeDeclaration": True}}})
+    tag_refs = wait_for(
+        lambda m: m.get("id") == 70 and "result" in m,
+        "RemoveModule references result",
+    )
+    assert sorted(location["range"]["start"]["line"] for location in tag_refs["result"]) == [1, 3]
+    send({"jsonrpc": "2.0", "id": 71, "method": "textDocument/rename",
+          "params": {"textDocument": {"uri": module_map_uri},
+                     "position": {"line": 1, "character": 30},
+                     "newName": "ModuleTag_Renamed"}})
+    tag_rename = wait_for(
+        lambda m: m.get("id") == 71 and "result" in m,
+        "module tag rename result",
+    )
+    tag_edits = tag_rename["result"]["changes"][module_map_uri]
+    assert len(tag_edits) == 2 and all(
+        edit["newText"] == "ModuleTag_Renamed" for edit in tag_edits
+    ), tag_edits
+    print("OK: module tag references and rename include declarations and removals")
 
     cases = [
         # (name, initial text, [(range, newText)], final text)

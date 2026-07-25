@@ -68,7 +68,7 @@ pub fn complete(
             value_index,
             (current_token.as_deref(), first_token.as_deref()),
             index,
-            file,
+            (file, offset),
         ),
         PosContext::ModuleName { slot_accepts } => module_name_completions(analyzer, &slot_accepts),
         PosContext::SubBlockArg { argument_type } => {
@@ -331,9 +331,10 @@ fn field_value_completions(
     value_index: usize,
     tokens: (Option<&str>, Option<&str>),
     index: Option<&WorkspaceIndex>,
-    file: Option<&str>,
+    position: (Option<&str>, u32),
 ) -> Vec<Completion> {
     let (current_token, first_token) = tokens;
+    let (file, offset) = position;
     // RemoveModule / ReplaceModule: suggest module tags from the origin object.
     if key.eq_ignore_ascii_case("RemoveModule") || key.eq_ignore_ascii_case("ReplaceModule") {
         if let Some(idx) = index {
@@ -343,7 +344,7 @@ fn field_value_completions(
                 .unwrap_or_default();
             if !obj_name.is_empty() {
                 let tags: Vec<Completion> = idx
-                    .effective_module_tags_for_object(&obj_name, file)
+                    .effective_module_tags_for_object(&obj_name, file, Some(offset))
                     .into_iter()
                     .map(|tag| Completion {
                         label: tag.to_string(),
@@ -973,6 +974,19 @@ mod tests {
                 .any(|item| item.label == "ModuleTag_DefaultDestroyDie"),
             "{out:?}"
         );
+    }
+
+    #[test]
+    fn remove_module_completion_excludes_later_declarations() {
+        let a = Analyzer::embedded();
+        let src =
+            "Object Tank\n  RemoveModule \n  Behavior = DestroyDie ModuleTag_Later\n  End\nEnd\n";
+        let parse = a.parse(src);
+        let mut index = WorkspaceIndex::new();
+        index.set_file_tags("map.ini", crate::index::module_tags_in(&a, &parse));
+        let offset = "Object Tank\n  RemoveModule ".len() as u32;
+        let out = complete(&a, &parse, offset, Some(&index), Some("map.ini"));
+        assert!(!out.iter().any(|item| item.label == "ModuleTag_Later"));
     }
 
     #[test]

@@ -62,6 +62,8 @@ pub struct ModuleTagDefinition {
     pub object: String,
     pub name: String,
     pub span: Span,
+    #[serde(default)]
+    pub is_reference: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -108,8 +110,10 @@ pub struct WorkspaceIndex {
     /// Module tags per object (case-insensitive object name key).
     /// Populated from all indexed files. Powers RemoveModule completions.
     object_tags: HashMap<String, Vec<ModuleTagEntry>>,
-    /// Reverse map: file → (object_lower, tag) for removal on re-index.
-    file_tags: HashMap<String, Vec<(String, String)>>,
+    /// RemoveModule value sites, keyed by (object_lower, tag_lower).
+    object_tag_sites: HashMap<(String, String), Vec<Location>>,
+    /// Reverse map: file → (object_lower, tag, is_reference) for re-indexing.
+    file_tags: HashMap<String, Vec<(String, String, bool)>>,
     /// String table keys from companion `.str` files, keyed by the INI file URI.
     /// Powers DisplayName completions when a map.str is present.
     ini_str_keys: HashMap<String, Vec<String>>,
@@ -468,13 +472,32 @@ impl WorkspaceIndex {
     pub fn set_file_tags(&mut self, file: &str, tags: Vec<ModuleTagDefinition>) {
         let entries = tags
             .iter()
-            .map(|tag| (tag.object.to_ascii_lowercase(), tag.name.clone()))
+            .map(|tag| {
+                (
+                    tag.object.to_ascii_lowercase(),
+                    tag.name.clone(),
+                    tag.is_reference,
+                )
+            })
             .collect::<Vec<_>>();
-        let normalized = normalize_object_tags(&entries);
+        let normalized = normalize_object_tags(
+            &entries
+                .iter()
+                .filter(|(_, _, is_reference)| !is_reference)
+                .map(|(object, name, _)| (object.clone(), name.clone()))
+                .collect::<Vec<_>>(),
+        );
         if self
             .file_tags
             .get(file)
-            .map(|old| normalize_object_tags(old))
+            .map(|old| {
+                normalize_object_tags(
+                    &old.iter()
+                        .filter(|(_, _, is_reference)| !is_reference)
+                        .map(|(object, name, _)| (object.clone(), name.clone()))
+                        .collect::<Vec<_>>(),
+                )
+            })
             .unwrap_or_default()
             != normalized
         {
@@ -482,16 +505,25 @@ impl WorkspaceIndex {
         }
         self.remove_tag_entries(file);
         for tag in tags {
-            self.object_tags
-                .entry(tag.object.to_ascii_lowercase())
-                .or_default()
-                .push(ModuleTagEntry {
-                    name: tag.name,
-                    location: Location {
-                        file: file.to_string(),
-                        span: tag.span,
-                    },
-                });
+            let object = tag.object.to_ascii_lowercase();
+            let location = Location {
+                file: file.to_string(),
+                span: tag.span,
+            };
+            if tag.is_reference {
+                self.object_tag_sites
+                    .entry((object, tag.name.to_ascii_lowercase()))
+                    .or_default()
+                    .push(location);
+            } else {
+                self.object_tags
+                    .entry(object)
+                    .or_default()
+                    .push(ModuleTagEntry {
+                        name: tag.name,
+                        location,
+                    });
+            }
         }
         if !entries.is_empty() {
             self.file_tags.insert(file.to_string(), entries);
@@ -500,11 +532,18 @@ impl WorkspaceIndex {
 
     fn remove_tag_entries(&mut self, file: &str) {
         if let Some(old) = self.file_tags.remove(file) {
-            for (object, _) in old {
+            for (object, name, _) in old {
                 if let Some(tags) = self.object_tags.get_mut(&object) {
                     tags.retain(|tag| tag.location.file != file);
                     if tags.is_empty() {
                         self.object_tags.remove(&object);
+                    }
+                }
+                let key = (object, name.to_ascii_lowercase());
+                if let Some(sites) = self.object_tag_sites.get_mut(&key) {
+                    sites.retain(|site| site.file != file);
+                    if sites.is_empty() {
+                        self.object_tag_sites.remove(&key);
                     }
                 }
             }
@@ -530,6 +569,18 @@ impl WorkspaceIndex {
             .collect()
     }
 
+    pub fn module_tag_reference_locations<'a>(
+        &'a self,
+        object: &str,
+        tag: &str,
+    ) -> Vec<&'a Location> {
+        self.object_tag_sites
+            .get(&(object.to_ascii_lowercase(), tag.to_ascii_lowercase()))
+            .into_iter()
+            .flatten()
+            .collect()
+    }
+
     pub fn is_new_override_object(&self, name: &str, file: &str) -> bool {
         is_override_layer(file)
             && !self
@@ -544,8 +595,20 @@ impl WorkspaceIndex {
         &'a self,
         name: &str,
         file: Option<&str>,
+        before: Option<u32>,
     ) -> Vec<&'a str> {
-        let mut out = self.module_tags_for_object(name).collect::<Vec<_>>();
+        let mut out = self
+            .object_tags
+            .get(&name.to_ascii_lowercase())
+            .into_iter()
+            .flatten()
+            .filter(|tag| {
+                !file.zip(before).is_some_and(|(file, before)| {
+                    tag.location.file == file && tag.location.span.start >= before
+                })
+            })
+            .map(|tag| tag.name.as_str())
+            .collect::<Vec<_>>();
         let is_new_override = file.is_some_and(|file| self.is_new_override_object(name, file));
         if is_new_override {
             out.extend(self.module_tags_for_object("DefaultThingTemplate"));
@@ -560,8 +623,17 @@ impl WorkspaceIndex {
         object: &str,
         tag: &str,
         file: Option<&str>,
+        before: Option<u32>,
     ) -> Vec<&'a Location> {
-        let mut out = self.module_tag_locations(object, tag);
+        let mut out = self
+            .module_tag_locations(object, tag)
+            .into_iter()
+            .filter(|location| {
+                !file.zip(before).is_some_and(|(file, before)| {
+                    location.file == file && location.span.start >= before
+                })
+            })
+            .collect::<Vec<_>>();
         if out.is_empty() && file.is_some_and(|file| self.is_new_override_object(object, file)) {
             out = self.module_tag_locations("DefaultThingTemplate", tag);
         }
@@ -964,8 +1036,8 @@ pub fn definitions_in(analyzer: &Analyzer, parse: &Parse, _file: &str) -> Vec<De
     out
 }
 
-/// Collect `(object_name_lower, module_tag)` pairs from all Object blocks in
-/// a parsed file. Used to populate the RemoveModule completion index.
+/// Collect module-tag declarations and RemoveModule reference sites from all
+/// Object blocks in a parsed file.
 pub fn module_tags_in(_analyzer: &Analyzer, parse: &Parse) -> Vec<ModuleTagDefinition> {
     let mut out = Vec::new();
     for node in parse.syntax().children() {
@@ -985,6 +1057,23 @@ pub fn module_tags_in(_analyzer: &Analyzer, parse: &Parse) -> Vec<ModuleTagDefin
                     object: name_lower.clone(),
                     name: tag.text().to_string(),
                     span: tag.text_range().into(),
+                    is_reference: false,
+                });
+            }
+        }
+        for field in block.fields() {
+            if !field
+                .key()
+                .is_some_and(|key| key.text().eq_ignore_ascii_case("RemoveModule"))
+            {
+                continue;
+            }
+            if let Some(tag) = field.value_tokens().first() {
+                out.push(ModuleTagDefinition {
+                    object: name_lower.clone(),
+                    name: tag.text().trim_matches('"').to_string(),
+                    span: tag.text_range().into(),
+                    is_reference: true,
                 });
             }
         }
@@ -1056,6 +1145,7 @@ mod tests {
             object: "tank".into(),
             name: "ModuleTag_Physics".into(),
             span: Span::new(0, 17),
+            is_reference: false,
         }];
         let g0 = idx.generation();
         idx.set_file_tags("base.ini", tag.clone());

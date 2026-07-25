@@ -1063,7 +1063,11 @@ impl<'a> Ctx<'a> {
         };
         let tag_name = unquote(tag.text());
         if !index
-            .effective_module_tags_for_object(object.text(), self.file)
+            .effective_module_tags_for_object(
+                object.text(),
+                self.file,
+                Some(tag.text_range().start().into()),
+            )
             .iter()
             .any(|known| known.eq_ignore_ascii_case(tag_name))
         {
@@ -2425,6 +2429,7 @@ End
                 "NewMapObject",
                 "ModuleTag_DefaultDestroyDie",
                 Some("maps/solo.ini"),
+                None,
             )[0]
             .file,
             "data/INI/Default/Object.ini"
@@ -2455,6 +2460,20 @@ End
             diags
                 .iter()
                 .any(|diag| diag.code == "default-modules-not-removed"),
+            "{diags:?}"
+        );
+    }
+
+    #[test]
+    fn remove_module_rejects_tags_declared_later_in_the_same_map() {
+        let a = Analyzer::embedded();
+        let src = "Object Tank\n  RemoveModule ModuleTag_Later\n  Behavior = DestroyDie ModuleTag_Later\n  End\nEnd\n";
+        let parse = a.parse(src);
+        let mut index = WorkspaceIndex::new();
+        index.set_file_tags("maps/map.ini", crate::index::module_tags_in(&a, &parse));
+        let diags = diagnose(&a, &parse, Some(&index), Some("maps/map.ini"));
+        assert!(
+            diags.iter().any(|diag| diag.code == "unknown-module-tag"),
             "{diags:?}"
         );
     }

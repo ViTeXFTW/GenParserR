@@ -28,7 +28,7 @@ pub(crate) type ScanEntry = (
     Option<Arc<str>>,
 );
 
-const INDEX_CACHE_VERSION: u32 = 3;
+const INDEX_CACHE_VERSION: u32 = 4;
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct Fingerprint {
