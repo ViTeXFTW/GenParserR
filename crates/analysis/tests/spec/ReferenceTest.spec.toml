@@ -20,6 +20,27 @@ severity = "warning"
 code = "unresolved-reference"
 on = "NoSuchCommandSet"
 
+# FXList nuggets resolve their named assets through the workspace index.
+[[diag]]
+severity = "warning"
+code = "unresolved-reference"
+on = "NoSuchFXSound"
+
+[[diag]]
+severity = "warning"
+code = "unresolved-reference"
+on = "NoSuchRayObject"
+
+[[diag]]
+severity = "warning"
+code = "unresolved-reference"
+on = "NoSuchTracerObject"
+
+[[diag]]
+severity = "warning"
+code = "unresolved-reference"
+on = "NoSuchParticleSystem"
+
 # `ButtonImage =` offers the workspace's mapped images.
 [[complete]]
 at = "$1"
@@ -64,3 +85,19 @@ includes = ["RefTestCommandSet"]
 [[complete]]
 at = "$10"
 includes = ["SET_NORMAL"]
+
+[[complete]]
+at = "$11"
+includes = ["TestFireSound"]
+
+[[complete]]
+at = "$12"
+includes = ["RefTestObject"]
+
+[[complete]]
+at = "$13"
+includes = ["RefTestObject"]
+
+[[complete]]
+at = "$14"
+includes = ["TestParticleSystem"]
