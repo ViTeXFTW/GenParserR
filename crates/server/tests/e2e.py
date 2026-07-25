@@ -577,7 +577,7 @@ def main() -> int:
     assert "HotTexture.tga" in completion_labels(asset_uri, 7, 12), \
         "base texture asset missing"
 
-    archive_path = archive.resolve().as_posix()
+    archive_path = archive.as_posix()
     if not archive_path.startswith("/"):
         archive_path = "/" + archive_path
     archived_uri = "big://" + urllib.parse.quote(
