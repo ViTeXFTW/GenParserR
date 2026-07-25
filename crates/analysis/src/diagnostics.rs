@@ -82,6 +82,7 @@ pub const KNOWN_CODES: &[&str] = &[
     "unknown-field",
     "missing-module-tag",
     "unknown-module",
+    "unknown-module-tag",
     "missing-condition",
     "missing-value",
     "bad-bool",
@@ -102,6 +103,7 @@ pub const KNOWN_CODES: &[&str] = &[
     "module-wrong-slot",
     "duplicate-module-tag",
     "editor-default-module",
+    "default-modules-not-removed",
 ];
 
 /// The head word of the in-file suppression pragma comment.
@@ -783,6 +785,9 @@ impl<'a> Ctx<'a> {
                 );
             }
             let is_override_redefinition = self.check_redefinition(node);
+            if keyword.text().eq_ignore_ascii_case("Object") {
+                self.check_default_module_removals(node);
+            }
             // Only plain `Object`s: an ObjectReskin inherits its parent's
             // modules and sets, so neither side of the pairing is visible —
             // and a map.ini override redefinition inherits the base object's
@@ -792,6 +797,45 @@ impl<'a> Ctx<'a> {
             }
         }
         self.walk(node, &schema);
+    }
+
+    fn check_default_module_removals(&mut self, node: &SyntaxNode) {
+        let (Some(index), Some(file), Some(name)) =
+            (self.index, self.file, Block(node.clone()).name())
+        else {
+            return;
+        };
+        if name.text().eq_ignore_ascii_case("DefaultThingTemplate")
+            || !index.is_new_override_object(name.text(), file)
+        {
+            return;
+        }
+        let removed = Block(node.clone())
+            .fields()
+            .filter(|field| {
+                field
+                    .key()
+                    .is_some_and(|key| key.text().eq_ignore_ascii_case("RemoveModule"))
+            })
+            .filter_map(|field| field.value_tokens().first().cloned())
+            .map(|tag| unquote(tag.text()).to_ascii_lowercase())
+            .collect::<HashSet<_>>();
+        let mut seen = HashSet::new();
+        let remaining = index
+            .module_tags_for_object("DefaultThingTemplate")
+            .filter(|tag| !removed.contains(&tag.to_ascii_lowercase()))
+            .filter(|tag| seen.insert(tag.to_ascii_lowercase()))
+            .collect::<Vec<_>>();
+        if !remaining.is_empty() {
+            self.hint(
+                &name,
+                "default-modules-not-removed",
+                format!(
+                    "new map object inherits default modules {}; remove them with `RemoveModule <tag>`",
+                    remaining.join(", ")
+                ),
+            );
+        }
     }
 
     /// Cross-file redefinition handling for named definition blocks, driven
@@ -990,6 +1034,9 @@ impl<'a> Ctx<'a> {
 
         if let Some(schema_field) = scope.field(name) {
             self.validate_value(&field, &schema_field.value_type);
+            if name.eq_ignore_ascii_case("RemoveModule") {
+                self.validate_remove_module(&field, scope_node);
+            }
             self.validate_model_asset(&field, schema_field, scope_node);
             self.validate_raw_asset(&field, &schema_field.value_type);
         } else if scope.has_field_schema()
@@ -999,6 +1046,34 @@ impl<'a> Ctx<'a> {
                 &key,
                 "unknown-field",
                 format!("unknown field `{name}` in {}", scope.label()),
+            );
+        }
+    }
+
+    fn validate_remove_module(&mut self, field: &Field, scope_node: &SyntaxNode) {
+        if !self.file.is_some_and(is_override_layer) {
+            return;
+        }
+        let (Some(index), Some(tag), Some(object)) = (
+            self.index,
+            field.value_tokens().first().cloned(),
+            Block(scope_node.clone()).name(),
+        ) else {
+            return;
+        };
+        let tag_name = unquote(tag.text());
+        if !index
+            .effective_module_tags_for_object(object.text(), self.file)
+            .iter()
+            .any(|known| known.eq_ignore_ascii_case(tag_name))
+        {
+            self.error(
+                &tag,
+                "unknown-module-tag",
+                format!(
+                    "`{tag_name}` is not a known module tag on `{}`",
+                    object.text()
+                ),
             );
         }
     }
@@ -2332,6 +2407,55 @@ End
                 .iter()
                 .any(|d| d.code == "overrides" || d.code == "duplicate-definition"),
             "base definition must stay clean: {base_diags:?}"
+        );
+    }
+
+    #[test]
+    fn solo_remove_module_includes_default_object_tags() {
+        let a = Analyzer::embedded();
+        let mut index = WorkspaceIndex::new();
+        let base = "Object DefaultThingTemplate\n  Behavior = DestroyDie ModuleTag_DefaultDestroyDie\n  End\nEnd\n";
+        let base_parse = a.parse(base);
+        index.set_file_tags(
+            "data/INI/Default/Object.ini",
+            crate::index::module_tags_in(&a, &base_parse),
+        );
+        assert_eq!(
+            index.effective_module_tag_locations(
+                "NewMapObject",
+                "ModuleTag_DefaultDestroyDie",
+                Some("maps/solo.ini"),
+            )[0]
+            .file,
+            "data/INI/Default/Object.ini"
+        );
+
+        let src = "Object NewMapObject\n  RemoveModule ModuleTag_DefaultDestroyDie\n  RemoveModule ModuleTag_Missing\nEnd\n";
+        let parse = a.parse(src);
+        let diags = diagnose(&a, &parse, Some(&index), Some("maps/solo.ini"));
+        let unknown: Vec<_> = diags
+            .iter()
+            .filter(|d| d.code == "unknown-module-tag")
+            .collect();
+        assert_eq!(unknown.len(), 1, "{diags:?}");
+        assert_eq!(
+            &src[unknown[0].span.start as usize..unknown[0].span.end as usize],
+            "ModuleTag_Missing"
+        );
+        assert!(
+            !diags
+                .iter()
+                .any(|diag| diag.code == "default-modules-not-removed"),
+            "{diags:?}"
+        );
+
+        let unremoved = a.parse("Object AnotherMapObject\nEnd\n");
+        let diags = diagnose(&a, &unremoved, Some(&index), Some("maps/solo.ini"));
+        assert!(
+            diags
+                .iter()
+                .any(|diag| diag.code == "default-modules-not-removed"),
+            "{diags:?}"
         );
     }
 

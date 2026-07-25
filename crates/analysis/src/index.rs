@@ -57,6 +57,13 @@ pub struct ReferenceSite {
     pub span: Span,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModuleTagDefinition {
+    pub object: String,
+    pub name: String,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ModelMemberStrictness {
     Off,
@@ -70,6 +77,11 @@ struct NameEntry {
     /// The name as first written (for completion display).
     display: String,
     locations: Vec<Location>,
+}
+
+struct ModuleTagEntry {
+    name: String,
+    location: Location,
 }
 
 /// Workspace-wide symbol table, grouped by reference kind then name.
@@ -95,7 +107,7 @@ pub struct WorkspaceIndex {
     generation: u64,
     /// Module tags per object (case-insensitive object name key).
     /// Populated from all indexed files. Powers RemoveModule completions.
-    object_tags: HashMap<String, Vec<String>>,
+    object_tags: HashMap<String, Vec<ModuleTagEntry>>,
     /// Reverse map: file → (object_lower, tag) for removal on re-index.
     file_tags: HashMap<String, Vec<(String, String)>>,
     /// String table keys from companion `.str` files, keyed by the INI file URI.
@@ -203,6 +215,7 @@ impl WorkspaceIndex {
                 .file_object_parents
                 .get(file)
                 .is_some_and(|v| !v.is_empty())
+            || self.file_tags.get(file).is_some_and(|v| !v.is_empty())
         {
             self.generation += 1;
         }
@@ -212,6 +225,7 @@ impl WorkspaceIndex {
         self.set_file_assets(file, Vec::new());
         self.remove_object_model_entries(file);
         self.remove_object_parent_entries(file);
+        self.remove_tag_entries(file);
     }
 
     fn remove_site_entries(&mut self, file: &str) {
@@ -451,27 +465,49 @@ impl WorkspaceIndex {
 
     /// Replace module-tag entries contributed by `file`.
     /// Called alongside `set_file` so RemoveModule completions stay current.
-    pub fn set_file_tags(&mut self, file: &str, tags: Vec<(String, String)>) {
-        if let Some(old) = self.file_tags.remove(file) {
-            for (obj_lower, tag) in old {
-                if let Some(list) = self.object_tags.get_mut(&obj_lower) {
-                    list.retain(|t| !t.eq_ignore_ascii_case(&tag));
-                    if list.is_empty() {
-                        self.object_tags.remove(&obj_lower);
-                    }
-                }
-            }
+    pub fn set_file_tags(&mut self, file: &str, tags: Vec<ModuleTagDefinition>) {
+        let entries = tags
+            .iter()
+            .map(|tag| (tag.object.to_ascii_lowercase(), tag.name.clone()))
+            .collect::<Vec<_>>();
+        let normalized = normalize_object_tags(&entries);
+        if self
+            .file_tags
+            .get(file)
+            .map(|old| normalize_object_tags(old))
+            .unwrap_or_default()
+            != normalized
+        {
+            self.generation += 1;
         }
-        let mut entries = Vec::with_capacity(tags.len());
-        for (obj_lower, tag) in &tags {
+        self.remove_tag_entries(file);
+        for tag in tags {
             self.object_tags
-                .entry(obj_lower.clone())
+                .entry(tag.object.to_ascii_lowercase())
                 .or_default()
-                .push(tag.clone());
-            entries.push((obj_lower.clone(), tag.clone()));
+                .push(ModuleTagEntry {
+                    name: tag.name,
+                    location: Location {
+                        file: file.to_string(),
+                        span: tag.span,
+                    },
+                });
         }
         if !entries.is_empty() {
             self.file_tags.insert(file.to_string(), entries);
+        }
+    }
+
+    fn remove_tag_entries(&mut self, file: &str) {
+        if let Some(old) = self.file_tags.remove(file) {
+            for (object, _) in old {
+                if let Some(tags) = self.object_tags.get_mut(&object) {
+                    tags.retain(|tag| tag.location.file != file);
+                    if tags.is_empty() {
+                        self.object_tags.remove(&object);
+                    }
+                }
+            }
         }
     }
 
@@ -481,7 +517,55 @@ impl WorkspaceIndex {
         self.object_tags
             .get(&name.to_ascii_lowercase())
             .into_iter()
-            .flat_map(|tags| tags.iter().map(|t| t.as_str()))
+            .flat_map(|tags| tags.iter().map(|tag| tag.name.as_str()))
+    }
+
+    pub fn module_tag_locations<'a>(&'a self, object: &str, tag: &str) -> Vec<&'a Location> {
+        self.object_tags
+            .get(&object.to_ascii_lowercase())
+            .into_iter()
+            .flatten()
+            .filter(|entry| entry.name.eq_ignore_ascii_case(tag))
+            .map(|entry| &entry.location)
+            .collect()
+    }
+
+    pub fn is_new_override_object(&self, name: &str, file: &str) -> bool {
+        is_override_layer(file)
+            && !self
+                .locations(RefKind::Object, name)
+                .iter()
+                .any(|location| !is_override_layer(&location.file))
+    }
+
+    /// Module tags visible to RemoveModule. New map/solo objects start as a
+    /// copy of DefaultThingTemplate, while existing objects use their own tags.
+    pub fn effective_module_tags_for_object<'a>(
+        &'a self,
+        name: &str,
+        file: Option<&str>,
+    ) -> Vec<&'a str> {
+        let mut out = self.module_tags_for_object(name).collect::<Vec<_>>();
+        let is_new_override = file.is_some_and(|file| self.is_new_override_object(name, file));
+        if is_new_override {
+            out.extend(self.module_tags_for_object("DefaultThingTemplate"));
+            let mut seen = std::collections::HashSet::new();
+            out.retain(|tag| seen.insert(tag.to_ascii_lowercase()));
+        }
+        out
+    }
+
+    pub fn effective_module_tag_locations<'a>(
+        &'a self,
+        object: &str,
+        tag: &str,
+        file: Option<&str>,
+    ) -> Vec<&'a Location> {
+        let mut out = self.module_tag_locations(object, tag);
+        if out.is_empty() && file.is_some_and(|file| self.is_new_override_object(object, file)) {
+            out = self.module_tag_locations("DefaultThingTemplate", tag);
+        }
+        out
     }
 
     /// Store string table keys parsed from the `.str` file co-located with `ini_file`.
@@ -632,6 +716,21 @@ fn normalize_object_models(objects: &[(String, Vec<String>)]) -> Vec<(String, Ve
         .collect::<Vec<_>>();
     out.sort();
     out
+}
+
+fn normalize_object_tags(tags: &[(String, String)]) -> Vec<(String, String)> {
+    let mut out = tags
+        .iter()
+        .map(|(object, tag)| (object.to_ascii_lowercase(), tag.to_ascii_lowercase()))
+        .collect::<Vec<_>>();
+    out.sort();
+    out
+}
+
+fn is_override_layer(file: &str) -> bool {
+    file.rsplit(['/', '\\']).next().is_some_and(|name| {
+        name.eq_ignore_ascii_case("map.ini") || name.eq_ignore_ascii_case("solo.ini")
+    })
 }
 
 /// Collect the W3D models declared below every Object definition.
@@ -867,7 +966,7 @@ pub fn definitions_in(analyzer: &Analyzer, parse: &Parse, _file: &str) -> Vec<De
 
 /// Collect `(object_name_lower, module_tag)` pairs from all Object blocks in
 /// a parsed file. Used to populate the RemoveModule completion index.
-pub fn module_tags_in(_analyzer: &Analyzer, parse: &Parse) -> Vec<(String, String)> {
+pub fn module_tags_in(_analyzer: &Analyzer, parse: &Parse) -> Vec<ModuleTagDefinition> {
     let mut out = Vec::new();
     for node in parse.syntax().children() {
         if node.kind() != SyntaxKind::BLOCK {
@@ -882,7 +981,11 @@ pub fn module_tags_in(_analyzer: &Analyzer, parse: &Parse) -> Vec<(String, Strin
         let name_lower = name.text().to_ascii_lowercase();
         for child in node.children().filter(|n| n.kind() == SyntaxKind::MODULE) {
             if let Some(tag) = Module(child).tag() {
-                out.push((name_lower.clone(), tag.text().to_string()));
+                out.push(ModuleTagDefinition {
+                    object: name_lower.clone(),
+                    name: tag.text().to_string(),
+                    span: tag.text_range().into(),
+                });
             }
         }
     }
@@ -944,6 +1047,32 @@ mod tests {
         assert_eq!(idx.generation(), g2);
         idx.remove_file("empty.ini");
         assert_eq!(idx.generation(), g2);
+    }
+
+    #[test]
+    fn module_tags_invalidate_diagnostics_and_remove_per_file() {
+        let mut idx = WorkspaceIndex::new();
+        let tag = vec![ModuleTagDefinition {
+            object: "tank".into(),
+            name: "ModuleTag_Physics".into(),
+            span: Span::new(0, 17),
+        }];
+        let g0 = idx.generation();
+        idx.set_file_tags("base.ini", tag.clone());
+        assert_ne!(idx.generation(), g0);
+
+        idx.set_file_tags("patch.ini", tag);
+        idx.remove_file("base.ini");
+        assert_eq!(
+            idx.module_tags_for_object("Tank").collect::<Vec<_>>(),
+            vec!["ModuleTag_Physics"]
+        );
+        assert_eq!(
+            idx.module_tag_locations("Tank", "ModuleTag_Physics")[0].file,
+            "patch.ini"
+        );
+        idx.remove_file("patch.ini");
+        assert_eq!(idx.module_tags_for_object("Tank").count(), 0);
     }
 
     #[test]

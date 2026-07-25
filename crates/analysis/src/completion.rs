@@ -113,8 +113,11 @@ fn classify_position(analyzer: &Analyzer, root: &SyntaxNode, offset: u32) -> Pos
     // Are we on a FIELD line? (most common while typing `Key = value`)
     if let Some(field_node) = ancestor_of_kind(&node, SyntaxKind::FIELD) {
         let scope_node = enclosing_scope(&field_node);
-        if after_equals(&field_node, offset) {
-            let field = Field(field_node.clone());
+        let field = Field(field_node.clone());
+        let after_key = field
+            .key()
+            .is_some_and(|key| u32::from(key.text_range().end()) < offset);
+        if after_equals(&field_node, offset) || after_key {
             let key = field
                 .key()
                 .map(|k| k.text().to_string())
@@ -340,7 +343,8 @@ fn field_value_completions(
                 .unwrap_or_default();
             if !obj_name.is_empty() {
                 let tags: Vec<Completion> = idx
-                    .module_tags_for_object(&obj_name)
+                    .effective_module_tags_for_object(&obj_name, file)
+                    .into_iter()
                     .map(|tag| Completion {
                         label: tag.to_string(),
                         kind: CompletionKind::Reference,
@@ -946,6 +950,27 @@ mod tests {
         let out = labels(src, offset);
         assert!(
             out.contains(&"Yes".to_string()) && out.contains(&"No".to_string()),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn new_map_object_suggests_default_module_tags() {
+        let a = Analyzer::embedded();
+        let defaults = a.parse(
+            "Object DefaultThingTemplate\n  Behavior = DestroyDie ModuleTag_DefaultDestroyDie\n  End\nEnd\n",
+        );
+        let mut index = WorkspaceIndex::new();
+        index.set_file_tags(
+            "data/INI/Default/Object.ini",
+            crate::index::module_tags_in(&a, &defaults),
+        );
+        let src = "Object NewMapObject\n  RemoveModule \nEnd\n";
+        let offset = "Object NewMapObject\n  RemoveModule ".len() as u32;
+        let out = complete(&a, &a.parse(src), offset, Some(&index), Some("map.ini"));
+        assert!(
+            out.iter()
+                .any(|item| item.label == "ModuleTag_DefaultDestroyDie"),
             "{out:?}"
         );
     }

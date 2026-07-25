@@ -142,6 +142,11 @@ impl<'a> Sem<'a> {
                 },
             );
         }
+        if is_real_module {
+            if let Some(tag) = module.tag() {
+                self.set(&tag, SemKind::Reference);
+            }
+        }
     }
 
     fn walk(&mut self, node: &SyntaxNode, scope: &ScopeSchema) {
@@ -171,8 +176,18 @@ impl<'a> Sem<'a> {
     }
 
     fn field(&mut self, field: &Field, scope: &ScopeSchema) {
+        let is_remove_module = field
+            .key()
+            .is_some_and(|key| key.text().eq_ignore_ascii_case("RemoveModule"));
         if let Some(key) = field.key() {
-            self.set(&key, SemKind::Field);
+            self.set(
+                &key,
+                if is_remove_module {
+                    SemKind::Keyword
+                } else {
+                    SemKind::Field
+                },
+            );
         }
         let ty = field
             .key()
@@ -187,6 +202,10 @@ impl<'a> Sem<'a> {
             .map(|token| token.text().trim_matches('"'))
             .collect::<Vec<_>>();
         for (i, tok) in value_tokens.iter().enumerate() {
+            if is_remove_module {
+                self.set(tok, SemKind::Reference);
+                continue;
+            }
             if matches!(active_ty, Some(ValueType::RandomVariable { .. })) {
                 self.set(
                     tok,
@@ -312,6 +331,21 @@ mod tests {
                 "{value} was not classified as a number"
             );
         }
+    }
+
+    #[test]
+    fn remove_module_is_keyword_and_tag_is_reference() {
+        let src = "Object Tank\n  Behavior = DestroyDie ModuleTag_01\n  End\n  RemoveModule ModuleTag_01\nEnd\n";
+        let t = toks(src);
+        assert!(t
+            .iter()
+            .any(|(kind, text)| *kind == SemKind::Keyword && text == "RemoveModule"));
+        assert_eq!(
+            t.iter()
+                .filter(|(kind, text)| *kind == SemKind::Reference && text == "ModuleTag_01")
+                .count(),
+            2
+        );
     }
 
     #[test]

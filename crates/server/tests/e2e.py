@@ -307,6 +307,31 @@ def main() -> int:
         "debounced burst diagnostics differ from a full-text baseline"
     print("OK: completion beats debounced diagnostics; burst publishes latest version only")
 
+    # RemoveModule tags navigate to the matching module tag on the same object.
+    map_uri = "file:///test/map.ini"
+    open_doc(
+        map_uri,
+        "Object GotoTank\n"
+        "  Behavior = DestroyDie ModuleTag_Target\n"
+        "  End\n"
+        "  RemoveModule ModuleTag_Target\n"
+        "End\n",
+    )
+    send({"jsonrpc": "2.0", "id": 30, "method": "textDocument/definition",
+          "params": {"textDocument": {"uri": map_uri},
+                     "position": {"line": 3, "character": 16}}})
+    definition = wait_for(
+        lambda m: m.get("id") == 30 and "result" in m,
+        "RemoveModule definition result",
+    )
+    assert definition and definition["result"], "module tag did not resolve"
+    targets = definition["result"]
+    if isinstance(targets, dict):
+        targets = [targets]
+    assert targets[0]["uri"] == map_uri, targets
+    assert targets[0]["range"]["start"]["line"] == 1, targets
+    print("OK: RemoveModule tag resolves to its module definition")
+
     cases = [
         # (name, initial text, [(range, newText)], final text)
         ("value edit + field insert (multi-change batch)",

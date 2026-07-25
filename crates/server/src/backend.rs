@@ -21,7 +21,9 @@ use zerosyntax_analysis::index::{
     definitions_in, module_tags_in, object_models_in, object_parents_in, references_in,
     ModelMemberStrictness, WorkspaceIndex,
 };
-use zerosyntax_analysis::nav::{definition_at, hover_at, reference_at, HoverInfo};
+use zerosyntax_analysis::nav::{
+    definition_at, hover_at, module_tag_reference_at, reference_at, HoverInfo,
+};
 use zerosyntax_analysis::{actions, completion, diagnostics, format, outline, semantic, Analyzer};
 use zerosyntax_syntax::{Edit, Parse};
 
@@ -1478,18 +1480,27 @@ impl LanguageServer for Backend {
         };
         let enc = self.enc();
         let offset = convert::position_to_offset(&rope, pos, enc);
-        let Some(reference) = reference_at(&self.analyzer(), &parse, offset) else {
-            return Ok(None);
-        };
-
         let locations: Vec<(String, zerosyntax_analysis::Span)> = {
             let Ok(idx) = self.index.read() else {
                 return Ok(None);
             };
-            idx.locations(reference.kind, &reference.name)
-                .iter()
-                .map(|l| (l.file.clone(), l.span))
+            if let Some(reference) = reference_at(&self.analyzer(), &parse, offset) {
+                idx.locations(reference.kind, &reference.name)
+                    .iter()
+                    .map(|location| (location.file.clone(), location.span))
+                    .collect()
+            } else if let Some(reference) = module_tag_reference_at(&parse, offset) {
+                idx.effective_module_tag_locations(
+                    &reference.object,
+                    &reference.name,
+                    Some(uri.as_str()),
+                )
+                .into_iter()
+                .map(|location| (location.file.clone(), location.span))
                 .collect()
+            } else {
+                return Ok(None);
+            }
         };
 
         let mut out = Vec::new();

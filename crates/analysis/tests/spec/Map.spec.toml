@@ -102,3 +102,12 @@ code = "map-forward-reference"
 on = "LateStoredUpgrade"
 nth = 1
 absent = true
+
+[[complete]]
+at = "$1"
+includes = ["ModuleTag_Flash"]
+
+[[diag]]
+severity = "hint"
+code = "default-modules-not-removed"
+on = "NewMapObject"
