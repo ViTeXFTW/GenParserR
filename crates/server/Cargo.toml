@@ -16,6 +16,7 @@ tower-lsp.workspace = true
 tokio.workspace = true
 ropey.workspace = true
 dashmap.workspace = true
+percent-encoding.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true

@@ -1553,6 +1553,7 @@ dependencies = [
  "anyhow",
  "clap",
  "dashmap 6.2.1",
+ "percent-encoding",
  "ropey",
  "serde",
  "serde_json",

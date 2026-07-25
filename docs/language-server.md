@@ -120,7 +120,10 @@ symbols.
   INI spelling `stem.tga`. Audio and texture warnings activate independently
   only after that asset kind is indexed. Supply every loaded game/mod root to
   avoid warnings caused by a partial asset index. INI definitions are treated
-  as loaded before `map.ini` and `solo.ini`.
+  as loaded before `map.ini` and `solo.ini`. Definitions in loose files open
+  through native `file:` URIs. Definitions inside `.big` archives open as
+  read-only virtual INIs with navigation and inspection support when the client
+  selects the `big` URI scheme.
 
 The same settings can be sent at runtime through
 `workspace/didChangeConfiguration`, either directly or nested under
