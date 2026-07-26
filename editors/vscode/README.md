@@ -37,6 +37,8 @@ While completing `Model =`, move the active selection with the keyboard or
 mouse to see a textured W3D thumbnail in VS Code's suggestion-details pane.
 The preview is loaded only for the selected entry. If the pane is collapsed,
 press `Ctrl+Space` again or use the suggestion widget's details control.
+Use `zerosyntax.preview.imageWidth` to change the thumbnail/pane content width
+and `zerosyntax.preview.zoomPercent` to change the model framing.
 
 ## Settings
 
@@ -48,6 +50,8 @@ press `Ctrl+Space` again or use the suggestion widget's details control.
 | `zerosyntax.analysis.allowPercentagesWithoutSign` | `false` | Allows engine-compatible percentage values without a trailing `%`; applies immediately. |
 | `zerosyntax.analysis.mapOrderingDiagnostics` | `true` | Warns about source-proven forward-order problems in `map.ini` and `solo.ini`; applies immediately. |
 | `zerosyntax.analysis.debounceMs` | `250` | Delay before diagnostics/index refresh after typing; applies to future edits immediately. |
+| `zerosyntax.preview.imageWidth` | `160` | Displayed W3D thumbnail width in pixels; applies to newly resolved previews immediately. |
+| `zerosyntax.preview.zoomPercent` | `100` | Default W3D preview camera zoom; applies to newly resolved previews immediately. |
 | `zerosyntax.format.enable` | `false` | Enables indentation formatting immediately when the client supports dynamic registration. |
 | `zerosyntax.server.path` | empty | Uses a custom `zerosyntax-lsp` binary instead of the bundled one; changing it restarts the server. |
 | `zerosyntax.trace.server` | `off` | Logs LSP traffic for troubleshooting. |

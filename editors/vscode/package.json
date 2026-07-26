@@ -77,6 +77,20 @@
           "default": false,
           "markdownDescription": "Enable document formatting (indentation normalization). When off — the default — `#editor.formatOnSave#` will not invoke it for Generals INI files."
         },
+        "zerosyntax.preview.imageWidth": {
+          "type": "integer",
+          "default": 160,
+          "minimum": 80,
+          "maximum": 640,
+          "markdownDescription": "Width in pixels of the W3D model image in completion details. VS Code sizes the details pane around the image within the available editor space."
+        },
+        "zerosyntax.preview.zoomPercent": {
+          "type": "integer",
+          "default": 100,
+          "minimum": 25,
+          "maximum": 400,
+          "markdownDescription": "Default camera zoom for W3D completion previews, as a percentage. Values above 100 show the model closer; values below 100 add space around it."
+        },
         "zerosyntax.baseIniRoots": {
           "type": "array",
           "default": [],

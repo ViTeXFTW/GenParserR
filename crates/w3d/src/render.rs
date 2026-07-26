@@ -40,6 +40,7 @@ struct Texture {
 pub(crate) fn thumbnail(
     file: &W3dFile,
     model: &str,
+    zoom: f32,
     mut load_texture: impl FnMut(&str) -> Option<Vec<u8>>,
 ) -> Result<RenderedThumbnail, W3dError> {
     let hierarchy = selected_hierarchy(file, model);
@@ -76,7 +77,13 @@ pub(crate) fn thumbnail(
 
     let mut pixels = checkerboard();
     let mut depth = vec![f32::INFINITY; (WIDTH * HEIGHT) as usize];
-    rasterize(&triangles, &textures, &mut pixels, &mut depth)?;
+    rasterize(
+        &triangles,
+        &textures,
+        zoom.clamp(0.25, 4.0),
+        &mut pixels,
+        &mut depth,
+    )?;
     let pixels = DynamicImage::ImageRgba8(pixels).into_rgb8();
     let mut png = Vec::new();
     image::codecs::png::PngEncoder::new(&mut png)
@@ -315,6 +322,7 @@ fn checkerboard() -> RgbaImage {
 fn rasterize(
     triangles: &[DrawTriangle],
     textures: &HashMap<String, Texture>,
+    zoom: f32,
     pixels: &mut RgbaImage,
     depth: &mut [f32],
 ) -> Result<(), W3dError> {
@@ -357,7 +365,7 @@ fn rasterize(
         let projected = triangle
             .vertices
             .clone()
-            .map(|vertex| project(vertex, view_projection));
+            .map(|vertex| project(vertex, view_projection, zoom));
         if projected.iter().any(|vertex| vertex.clip_w <= 0.0) {
             continue;
         }
@@ -383,14 +391,14 @@ struct Projected {
     clip_w: f32,
 }
 
-fn project(vertex: Vertex, view_projection: Mat4) -> Projected {
+fn project(vertex: Vertex, view_projection: Mat4, zoom: f32) -> Projected {
     let clip = view_projection * vertex.position.extend(1.0);
     let inv_w = 1.0 / clip.w;
     let ndc = clip.truncate() * inv_w;
     Projected {
         screen: Vec2::new(
-            (ndc.x * 0.5 + 0.5) * (WIDTH - 1) as f32,
-            (1.0 - (ndc.y * 0.5 + 0.5)) * (HEIGHT - 1) as f32,
+            (ndc.x * zoom * 0.5 + 0.5) * (WIDTH - 1) as f32,
+            (1.0 - (ndc.y * zoom * 0.5 + 0.5)) * (HEIGHT - 1) as f32,
         ),
         depth: ndc.z,
         inv_w,
@@ -563,10 +571,22 @@ mod tests {
             }],
             ..W3dFile::default()
         };
-        let rendered = thumbnail(&file, "Triangle", |_| None).unwrap();
+        let rendered = thumbnail(&file, "Triangle", 1.0, |_| None).unwrap();
         let image = image::load_from_memory(&rendered.png).unwrap();
         assert_eq!((image.width(), image.height()), (WIDTH, HEIGHT));
         assert_eq!(rendered.missing_textures, vec!["missing.tga"]);
+
+        let zoomed_out = thumbnail(&file, "Triangle", 0.5, |_| None).unwrap();
+        let zoomed_in = thumbnail(&file, "Triangle", 2.0, |_| None).unwrap();
+        let colored_pixels = |png: &[u8]| {
+            image::load_from_memory(png)
+                .unwrap()
+                .to_rgb8()
+                .pixels()
+                .filter(|pixel| pixel[0] != pixel[1] || pixel[1] != pixel[2])
+                .count()
+        };
+        assert!(colored_pixels(&zoomed_in.png) > colored_pixels(&zoomed_out.png));
     }
 
     #[test]
@@ -604,7 +624,7 @@ mod tests {
             }
         }
 
-        let rendered = thumbnail(&file, "Square", |_| Some(tga.clone())).unwrap();
+        let rendered = thumbnail(&file, "Square", 1.0, |_| Some(tga.clone())).unwrap();
         let base64_len = rendered.png.len().div_ceil(3) * 4;
         assert!(
             base64_len + 2_048 < 100_000,

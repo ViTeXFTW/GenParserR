@@ -28,7 +28,8 @@ VS Code extension with the server bundled.
   never reformatted without your consent.
 - Base-game and mod indexing for `map.ini` and `solo.ini`, including W3D model
   and bone checks. Selecting a `Model =` completion shows a textured W3D
-  thumbnail when the indexed asset is available.
+  thumbnail when the indexed asset is available, with configurable size and
+  zoom.
 
 ## Install the VS Code extension
 

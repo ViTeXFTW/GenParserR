@@ -118,6 +118,12 @@ impl SymbolAt {
 
 const DEFAULT_ANALYSIS_DEBOUNCE_MS: u64 = 250;
 const MAX_ANALYSIS_DEBOUNCE_MS: u64 = 5_000;
+const DEFAULT_PREVIEW_IMAGE_WIDTH: u32 = 160;
+const MIN_PREVIEW_IMAGE_WIDTH: u32 = 80;
+const MAX_PREVIEW_IMAGE_WIDTH: u32 = 640;
+const DEFAULT_PREVIEW_ZOOM_PERCENT: u32 = 100;
+const MIN_PREVIEW_ZOOM_PERCENT: u32 = 25;
+const MAX_PREVIEW_ZOOM_PERCENT: u32 = 400;
 const FORMATTING_REGISTRATION_ID: &str = "zerosyntax-formatting";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,6 +135,8 @@ struct RuntimeSettings {
     allow_bare_percentages: bool,
     map_ordering_diagnostics: bool,
     debounce_ms: u64,
+    preview_image_width: u32,
+    preview_zoom_percent: u32,
 }
 
 impl Default for RuntimeSettings {
@@ -141,6 +149,8 @@ impl Default for RuntimeSettings {
             allow_bare_percentages: false,
             map_ordering_diagnostics: true,
             debounce_ms: DEFAULT_ANALYSIS_DEBOUNCE_MS,
+            preview_image_width: DEFAULT_PREVIEW_IMAGE_WIDTH,
+            preview_zoom_percent: DEFAULT_PREVIEW_ZOOM_PERCENT,
         }
     }
 }
@@ -152,6 +162,7 @@ impl RuntimeSettings {
         };
         let value = value.get("zerosyntax").unwrap_or(value);
         let analysis = value.get("analysis");
+        let preview = value.get("preview");
         let debounce_ms =
             normalized_debounce_ms(analysis.and_then(|analysis| analysis.get("debounceMs")));
         Self {
@@ -197,6 +208,18 @@ impl RuntimeSettings {
                 .and_then(|value| value.as_bool())
                 .unwrap_or(true),
             debounce_ms,
+            preview_image_width: normalized_u32(
+                preview.and_then(|preview| preview.get("imageWidth")),
+                DEFAULT_PREVIEW_IMAGE_WIDTH,
+                MIN_PREVIEW_IMAGE_WIDTH,
+                MAX_PREVIEW_IMAGE_WIDTH,
+            ),
+            preview_zoom_percent: normalized_u32(
+                preview.and_then(|preview| preview.get("zoomPercent")),
+                DEFAULT_PREVIEW_ZOOM_PERCENT,
+                MIN_PREVIEW_ZOOM_PERCENT,
+                MAX_PREVIEW_ZOOM_PERCENT,
+            ),
         }
     }
 }
@@ -209,6 +232,21 @@ fn normalized_debounce_ms(value: Option<&serde_json::Value>) -> u64 {
                 .or_else(|| v.as_u64().map(|n| n.min(MAX_ANALYSIS_DEBOUNCE_MS)))
         })
         .unwrap_or(DEFAULT_ANALYSIS_DEBOUNCE_MS)
+}
+
+fn normalized_u32(value: Option<&serde_json::Value>, default: u32, min: u32, max: u32) -> u32 {
+    value
+        .and_then(|value| {
+            value
+                .as_i64()
+                .map(|value| value.clamp(i64::from(min), i64::from(max)) as u32)
+                .or_else(|| {
+                    value
+                        .as_u64()
+                        .map(|value| value.clamp(min.into(), max.into()) as u32)
+                })
+        })
+        .unwrap_or(default)
 }
 
 fn markdown_text(value: &str) -> String {
@@ -616,6 +654,14 @@ impl Backend {
             previous.model_member_strictness != settings.model_member_strictness;
         let map_ordering_changed =
             previous.map_ordering_diagnostics != settings.map_ordering_diagnostics;
+        let preview_changed = previous.preview_image_width != settings.preview_image_width
+            || previous.preview_zoom_percent != settings.preview_zoom_percent;
+
+        if preview_changed {
+            if let Ok(mut cache) = self.preview_cache.lock() {
+                cache.clear();
+            }
+        }
 
         if schema_changed || roots_changed {
             let (mut analyzer, warning) = if schema_changed {
@@ -1030,6 +1076,7 @@ impl LanguageServer for Backend {
 
         // Editor-facing settings arrive as `initializationOptions`. Shape:
         // `{ "format": {"enable": bool}, "schemaPath": "schema.json",
+        //    "preview": {"imageWidth": 160, "zoomPercent": 100},
         //    "analysis": {"modelMemberStrictness": "compatible",
         //                 "allowPercentagesWithoutSign": false,
         //                 "mapOrderingDiagnostics": true, "debounceMs": 250},
@@ -1409,7 +1456,16 @@ impl LanguageServer for Backend {
         let Some(source) = source else {
             return Ok(item);
         };
-        let cache_key = format!("{}\0{}", data.model.to_ascii_lowercase(), source);
+        let (image_width, zoom_percent) = self
+            .settings
+            .lock()
+            .map(|settings| (settings.preview_image_width, settings.preview_zoom_percent))
+            .unwrap_or((DEFAULT_PREVIEW_IMAGE_WIDTH, DEFAULT_PREVIEW_ZOOM_PERCENT));
+        let cache_key = format!(
+            "{}\0{}\0{image_width}\0{zoom_percent}",
+            data.model.to_ascii_lowercase(),
+            source
+        );
         if let Some(markdown) = self
             .preview_cache
             .lock()
@@ -1425,10 +1481,11 @@ impl LanguageServer for Backend {
 
         let index = self.index.clone();
         let model = data.model.clone();
+        let zoom = zoom_percent as f32 / 100.0;
         let rendered = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
             let bytes = read_asset_uri(&source)?;
             let file = zerosyntax_w3d::W3dFile::parse(&bytes)?;
-            file.render_thumbnail(&model, |texture| {
+            file.render_thumbnail(&model, zoom, |texture| {
                 let uri = index.read().ok().and_then(|index| {
                     index
                         .effective_texture_source(texture)
@@ -1446,7 +1503,7 @@ impl LanguageServer for Backend {
                     base64::engine::general_purpose::STANDARD.encode(rendered.png.as_slice());
                 let label = markdown_text(&data.model);
                 let mut markdown = format!(
-                    "![{label} model preview](data:image/png;base64,{encoded})\n\n`{label}`"
+                    "![{label} model preview](data:image/png;base64,{encoded}|width={image_width})\n\n`{label}`"
                 );
                 if !rendered.missing_textures.is_empty() {
                     let shown = rendered
@@ -2151,11 +2208,25 @@ mod tests {
     }
 
     #[test]
+    fn preview_settings_default_and_clamp() {
+        let defaults = RuntimeSettings::default();
+        assert_eq!(defaults.preview_image_width, 160);
+        assert_eq!(defaults.preview_zoom_percent, 100);
+
+        let settings = RuntimeSettings::from_value(Some(&serde_json::json!({
+            "preview": {"imageWidth": 10_000, "zoomPercent": 0}
+        })));
+        assert_eq!(settings.preview_image_width, 640);
+        assert_eq!(settings.preview_zoom_percent, 25);
+    }
+
+    #[test]
     fn runtime_settings_accept_startup_and_vscode_shapes() {
         let startup = RuntimeSettings::from_value(Some(&serde_json::json!({
             "format": {"enable": true},
             "schemaPath": "schema.json",
             "baseIniRoots": ["base"],
+            "preview": {"imageWidth": 320, "zoomPercent": 150},
             "analysis": {"modelMemberStrictness": "strict", "debounceMs": 9000}
         })));
         let notification = RuntimeSettings::from_value(Some(&serde_json::json!({
@@ -2163,11 +2234,14 @@ mod tests {
                 "format": {"enable": true},
                 "schema": {"path": "schema.json"},
                 "baseIniRoots": ["base"],
+                "preview": {"imageWidth": 320, "zoomPercent": 150},
                 "analysis": {"modelMemberStrictness": "strict", "debounceMs": 9000}
             }
         })));
         assert_eq!(startup, notification);
         assert_eq!(startup.debounce_ms, 5000);
+        assert_eq!(startup.preview_image_width, 320);
+        assert_eq!(startup.preview_zoom_percent, 150);
     }
 
     #[test]

@@ -170,6 +170,7 @@ def main() -> int:
 
     runtime_settings = {
         "format": {"enable": False},
+        "preview": {"imageWidth": 240, "zoomPercent": 150},
         "baseIniRoots": [],
         "schema": {"path": ""},
         "analysis": {
@@ -192,6 +193,7 @@ def main() -> int:
                      }, "workspaceFolders": None, "rootUri": root_uri,
                      "initializationOptions": {
                          "format": {"enable": False},
+                         "preview": {"imageWidth": 240, "zoomPercent": 150},
                          "analysis": {"debounceMs": 50},
                      }}})
     init = wait_for(lambda m: m.get("id") == 1 and "result" in m, "initialize result")
@@ -281,7 +283,8 @@ def main() -> int:
         lambda m: m.get("id") == 101 and "result" in m, "model completion resolve")
     markdown = resolved["result"]["documentation"]["value"]
     assert len(markdown) < 100_000, "VS Code truncates longer Markdown payloads"
-    encoded_png = markdown.split("data:image/png;base64,", 1)[1].split(")", 1)[0]
+    assert "|width=240)" in markdown
+    encoded_png = markdown.split("data:image/png;base64,", 1)[1].split("|", 1)[0]
     assert base64.b64decode(encoded_png).startswith(b"\x89PNG\r\n\x1a\n")
     print("OK: model completion resolves lazily to a textured PNG preview")
 
@@ -610,6 +613,19 @@ def main() -> int:
         timeout=2.0,
     )
     assert "bad-percent" not in [d.get("code") for d in delayed["params"]["diagnostics"]]
+
+    runtime_settings["preview"] = {"imageWidth": 320, "zoomPercent": 200}
+    configure()
+    send({"jsonrpc": "2.0", "id": 102, "method": "completionItem/resolve",
+          "params": preview_item})
+    resized = wait_for(
+        lambda m: m.get("id") == 102 and "result" in m, "resized model preview")
+    resized_markdown = resized["result"]["documentation"]["value"]
+    resized_png = resized_markdown.split("data:image/png;base64,", 1)[1].split("|", 1)[0]
+    assert "|width=320)" in resized_markdown
+    assert resized_png != encoded_png, "zoom change reused the previous preview"
+    print("OK: model preview size and zoom hot-reload")
+
     runtime_settings["analysis"]["allowPercentagesWithoutSign"] = False
     configure()
     percent = wait_for(

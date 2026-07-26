@@ -92,9 +92,10 @@ impl W3dFile {
     pub fn render_thumbnail(
         &self,
         model: &str,
+        zoom: f32,
         load_texture: impl FnMut(&str) -> Option<Vec<u8>>,
     ) -> Result<RenderedThumbnail, W3dError> {
-        render::thumbnail(self, model, load_texture)
+        render::thumbnail(self, model, zoom, load_texture)
     }
 }
 
@@ -179,7 +180,7 @@ mod tests {
         let file = W3dFile::parse(&mesh).unwrap();
         assert_eq!(file.meshes[0].material_diffuse, [255, 255, 255, 255]);
         let rendered = file
-            .render_thumbnail("Preview", |name| {
+            .render_thumbnail("Preview", 1.0, |name| {
                 name.eq_ignore_ascii_case("Preview.tga")
                     .then(|| tga.clone())
             })
