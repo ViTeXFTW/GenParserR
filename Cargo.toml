@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/schema", "crates/syntax", "crates/analysis", "crates/server"]
+members = ["crates/schema", "crates/syntax", "crates/analysis", "crates/w3d", "crates/server"]
 
 [workspace.package]
 version = "1.2.3"
@@ -13,6 +13,7 @@ rust-version = "1.75"
 zerosyntax-schema = { path = "crates/schema" }
 zerosyntax-syntax = { path = "crates/syntax" }
 zerosyntax-analysis = { path = "crates/analysis" }
+zerosyntax-w3d = { path = "crates/w3d" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -32,6 +33,9 @@ tokio = { version = "1", features = ["full"] }
 ropey = "1"
 dashmap = "6"
 percent-encoding = "2"
+base64 = "0.22"
+glam = "0.27"
+image = { version = "0.24.9", default-features = false, features = ["dds", "png", "tga"] }
 
 # server (workspace indexing)
 walkdir = "2"

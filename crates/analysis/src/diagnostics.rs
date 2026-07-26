@@ -3006,6 +3006,7 @@ End
             vec![crate::index::FileAsset {
                 kind: AssetKind::Audio,
                 name: "Known.wav".into(),
+                uri: "file:///Known.wav".into(),
             }],
         );
         let audio_only = codes(&index);
@@ -3016,6 +3017,7 @@ End
             vec![crate::index::FileAsset {
                 kind: AssetKind::Texture,
                 name: "Known.dds".into(),
+                uri: "file:///Known.dds".into(),
             }],
         );
         assert!(codes(&index).contains(&"unknown-texture"));

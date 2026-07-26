@@ -84,6 +84,7 @@ symbols.
 ```json
 {
   "format": { "enable": false },
+  "preview": { "imageWidth": 160, "zoomPercent": 100 },
   "schemaPath": "C:/Mods/MyMod/schema.json",
   "analysis": {
     "modelMemberStrictness": "compatible",
@@ -101,6 +102,12 @@ symbols.
 
 - `format.enable` controls document formatting. It defaults to `false` and is
   dynamically registered when the client supports it.
+- `preview.imageWidth` controls the displayed W3D thumbnail width in pixels
+  (`80`–`640`, default `160`). The client still owns the outer details-pane
+  bounds.
+- `preview.zoomPercent` controls the default W3D camera zoom (`25`–`400`,
+  default `100`). Both preview settings apply to newly resolved completions
+  without restarting the server.
 - `schemaPath` points to a custom schema JSON file. Unreadable or invalid files
   produce a warning and fall back to the built-in schema.
 - `analysis.modelMemberStrictness` is `off`, `compatible` (member exists in any
@@ -142,6 +149,17 @@ different server executable inherently requires a new process.
 ZeroSyntax supports incremental document sync, diagnostics, completion, hover,
 go to definition, references, rename, semantic tokens, document and workspace
 symbols, folding ranges, quick fixes, and optional document formatting.
+
+W3D model completion items support `completionItem/resolve`. Clients that render
+Markdown completion documentation can show a lazy textured thumbnail
+for the active `Model =` suggestion. The initial completion list contains no
+image data. Previews use indexed loose or BIG-contained W3D/TGA/DDS assets and
+cover mesh geometry, base materials, HLOD composition, and hierarchy bind pose.
+`preview.imageWidth` changes its displayed size and `preview.zoomPercent`
+changes the model framing.
+Malformed or unsupported assets leave completion functional and show a short
+preview-unavailable message. Rebuild the asset index or reload the server after
+changing binary assets.
 
 ## Build from source
 

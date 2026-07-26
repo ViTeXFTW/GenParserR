@@ -42,6 +42,10 @@ export function activate(context: vscode.ExtensionContext) {
       format: {
         enable: setting<boolean>("format.enable", false),
       },
+      preview: {
+        imageWidth: setting<number>("preview.imageWidth", 160),
+        zoomPercent: setting<number>("preview.zoomPercent", 100),
+      },
       baseIniRoots: setting<string[]>("baseIniRoots", []),
       schemaPath: setting<string>("schema.path", ""),
       analysis: {

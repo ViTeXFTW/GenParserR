@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
 use anyhow::{Context, Result};
+use percent_encoding::percent_decode_str;
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::Url;
 use zerosyntax_analysis::index::{
@@ -15,6 +16,7 @@ use zerosyntax_analysis::index::{
     Definition, FileAsset, ModelAsset, ModuleTagDefinition, ReferenceSite,
 };
 use zerosyntax_analysis::Analyzer;
+use zerosyntax_w3d::W3dFile;
 
 pub(crate) type ScanEntry = (
     String,
@@ -28,7 +30,8 @@ pub(crate) type ScanEntry = (
     Option<Arc<str>>,
 );
 
-const INDEX_CACHE_VERSION: u32 = 4;
+const INDEX_CACHE_VERSION: u32 = 5;
+const MAX_PREVIEW_ASSET_BYTES: u64 = 128 * 1024 * 1024;
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct Fingerprint {
@@ -274,7 +277,7 @@ fn file_stem_str(path: &str) -> String {
         .to_string()
 }
 
-fn raw_asset(path: &str) -> Option<FileAsset> {
+fn raw_asset(path: &str, uri: &str) -> Option<FileAsset> {
     let name = path.rsplit(['/', '\\']).next()?;
     let (_, extension) = name.rsplit_once('.')?;
     let kind = if extension.eq_ignore_ascii_case("wav") || extension.eq_ignore_ascii_case("mp3") {
@@ -287,121 +290,26 @@ fn raw_asset(path: &str) -> Option<FileAsset> {
     Some(FileAsset {
         kind,
         name: name.to_string(),
+        uri: uri.to_string(),
     })
 }
 
 pub(crate) fn parse_w3d_models(bytes: &[u8], fallback_name: &str) -> Vec<ModelAsset> {
-    let mut names = Vec::new();
-    let mut members = Vec::new();
-    if !fallback_name.is_empty() {
-        names.push(fallback_name.to_string());
+    match W3dFile::parse(bytes) {
+        Ok(file) => file
+            .catalog(fallback_name)
+            .into_iter()
+            .map(|model| ModelAsset {
+                name: model.name,
+                members: model.members,
+            })
+            .collect(),
+        Err(_) if !fallback_name.trim().is_empty() => vec![ModelAsset {
+            name: fallback_name.trim().to_string(),
+            members: Vec::new(),
+        }],
+        Err(_) => Vec::new(),
     }
-    walk_w3d_chunks(bytes, 0, bytes.len(), 0, &mut |kind, payload| match kind {
-        0x0000_001F if payload.len() >= 40 => {
-            push_name(&mut members, read_fixed_name(&payload[8..24]));
-            push_name(&mut names, read_fixed_name(&payload[24..40]));
-        }
-        0x0000_0101 | 0x0000_0501 | 0x0000_0601 if payload.len() >= 20 => {
-            push_name(&mut names, read_fixed_name(&payload[4..20]));
-        }
-        0x0000_0102 => {
-            for pivot in payload.chunks_exact(60) {
-                push_name(&mut members, read_fixed_name(&pivot[..16]));
-            }
-        }
-        0x0000_0701 if payload.len() >= 40 => {
-            push_name(&mut names, read_fixed_name(&payload[8..24]));
-            push_name(&mut names, read_fixed_name(&payload[24..40]));
-        }
-        0x0000_0704 if payload.len() >= 36 => {
-            push_name(&mut members, read_fixed_name(&payload[4..36]));
-        }
-        0x0000_0740 if payload.len() >= 40 => {
-            push_name(&mut members, read_fixed_name(&payload[8..40]));
-        }
-        0x0000_0750 if payload.len() >= 48 => {
-            push_name(&mut members, read_fixed_name(&payload[16..48]));
-        }
-        _ => {}
-    });
-    dedup_case_insensitive(&mut names);
-    dedup_case_insensitive(&mut members);
-    names
-        .into_iter()
-        .filter(|name| !name.is_empty())
-        .map(|name| ModelAsset {
-            name,
-            members: members.clone(),
-        })
-        .collect()
-}
-
-const MAX_W3D_CHUNK_DEPTH: usize = 16;
-
-fn walk_w3d_chunks(
-    bytes: &[u8],
-    mut pos: usize,
-    end: usize,
-    depth: usize,
-    f: &mut impl FnMut(u32, &[u8]),
-) {
-    if depth > MAX_W3D_CHUNK_DEPTH {
-        return;
-    }
-    while pos + 8 <= end && pos + 8 <= bytes.len() {
-        let kind = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap());
-        let size_raw = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap());
-        let has_children = (size_raw & 0x8000_0000) != 0 || is_w3d_container(kind);
-        let size = (size_raw & 0x7fff_ffff) as usize;
-        let payload_start = pos + 8;
-        let Some(payload_end) = payload_start.checked_add(size) else {
-            break;
-        };
-        if payload_end > end || payload_end > bytes.len() {
-            break;
-        }
-        let payload = &bytes[payload_start..payload_end];
-        f(kind, payload);
-        if has_children {
-            walk_w3d_chunks(bytes, payload_start, payload_end, depth + 1, f);
-        }
-        pos = payload_end;
-    }
-}
-
-fn is_w3d_container(kind: u32) -> bool {
-    matches!(
-        kind,
-        0x0000_0000
-            | 0x0000_0100
-            | 0x0000_0500
-            | 0x0000_0600
-            | 0x0000_0700
-            | 0x0000_0702
-            | 0x0000_0705
-    )
-}
-
-fn read_fixed_name(bytes: &[u8]) -> &str {
-    let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
-    std::str::from_utf8(&bytes[..end]).unwrap_or("").trim()
-}
-
-fn push_name(out: &mut Vec<String>, name: &str) {
-    if name.is_empty() {
-        return;
-    }
-    out.push(name.to_string());
-    if let Some((_, short)) = name.rsplit_once('.') {
-        if !short.is_empty() {
-            out.push(short.to_string());
-        }
-    }
-}
-
-fn dedup_case_insensitive(values: &mut Vec<String>) {
-    let mut seen = std::collections::HashSet::new();
-    values.retain(|value| seen.insert(value.to_ascii_lowercase()));
 }
 
 pub(crate) fn scan_big(analyzer: &Analyzer, path: &Path) -> Result<Vec<ScanEntry>> {
@@ -448,10 +356,28 @@ pub(crate) fn scan_big(analyzer: &Analyzer, path: &Path) -> Result<Vec<ScanEntry
                     None,
                 ));
             }
-        } else if let Some(asset) = raw_asset(&entry.name) {
+        } else if let Some(asset) = raw_asset(&entry.name, &file) {
             assets.push(asset);
         }
     }
+    assets.sort_by(|left, right| {
+        file_stem_str(&left.name)
+            .to_ascii_lowercase()
+            .cmp(&file_stem_str(&right.name).to_ascii_lowercase())
+            .then_with(|| {
+                let rank = |name: &str| {
+                    if name
+                        .rsplit_once('.')
+                        .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case("dds"))
+                    {
+                        1
+                    } else {
+                        0
+                    }
+                };
+                rank(&left.name).cmp(&rank(&right.name))
+            })
+    });
     if !assets.is_empty() {
         out.push((
             big_uri(path, "__assets__"),
@@ -481,6 +407,7 @@ pub(crate) fn collect_scan_paths_checked(roots: &[PathBuf]) -> Result<Vec<PathBu
 fn collect_paths(roots: &[PathBuf], checked: bool) -> Result<Vec<PathBuf>> {
     let mut out = Vec::new();
     for root in roots {
+        let root_start = out.len();
         if root.is_file()
             && root
                 .extension()
@@ -512,6 +439,30 @@ fn collect_paths(roots: &[PathBuf], checked: bool) -> Result<Vec<PathBuf>> {
                 out.push(path.to_path_buf());
             }
         }
+        out[root_start..].sort_by(|left, right| {
+            let left_stem = left
+                .with_extension("")
+                .to_string_lossy()
+                .to_ascii_lowercase();
+            let right_stem = right
+                .with_extension("")
+                .to_string_lossy()
+                .to_ascii_lowercase();
+            left_stem.cmp(&right_stem).then_with(|| {
+                let rank = |path: &Path| {
+                    path.extension()
+                        .and_then(|value| value.to_str())
+                        .map_or(0, |extension| {
+                            if extension.eq_ignore_ascii_case("dds") {
+                                1
+                            } else {
+                                0
+                            }
+                        })
+                };
+                rank(left).cmp(&rank(right))
+            })
+        });
     }
     Ok(out)
 }
@@ -658,7 +609,7 @@ fn scan_path(analyzer: &Analyzer, path: &Path) -> Result<Vec<ScanEntry>> {
             ))
             .into_iter()
             .collect())
-    } else if let Some(asset) = raw_asset(&path.to_string_lossy()) {
+    } else if let Some(asset) = raw_asset(&path.to_string_lossy(), uri.as_str()) {
         Ok(vec![(
             uri.to_string(),
             Vec::new(),
@@ -673,6 +624,43 @@ fn scan_path(analyzer: &Analyzer, path: &Path) -> Result<Vec<ScanEntry>> {
     } else {
         Ok(Vec::new())
     }
+}
+
+pub(crate) fn read_asset_uri(uri: &str) -> Result<Vec<u8>> {
+    let url = Url::parse(uri).with_context(|| format!("invalid asset URI `{uri}`"))?;
+    if url.scheme() == "file" {
+        let path = url
+            .to_file_path()
+            .map_err(|_| anyhow::anyhow!("invalid file asset URI `{uri}`"))?;
+        let len = std::fs::metadata(&path)?.len();
+        if len > MAX_PREVIEW_ASSET_BYTES {
+            anyhow::bail!("asset exceeds 128 MiB");
+        }
+        return std::fs::read(&path)
+            .with_context(|| format!("failed to read asset {}", path.display()));
+    }
+    if url.scheme() != "big" {
+        anyhow::bail!("unsupported asset URI scheme `{}`", url.scheme());
+    }
+    let decoded = percent_decode_str(url.path()).decode_utf8_lossy();
+    let (archive, entry_name) = decoded
+        .split_once("!/")
+        .ok_or_else(|| anyhow::anyhow!("invalid BIG asset URI `{uri}`"))?;
+    let archive =
+        if cfg!(windows) && archive.as_bytes().get(2) == Some(&b':') && archive.starts_with('/') {
+            &archive[1..]
+        } else {
+            archive
+        };
+    let path = Path::new(archive);
+    let entry = big_entries(path)?
+        .into_iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case(entry_name))
+        .ok_or_else(|| anyhow::anyhow!("asset `{entry_name}` not found in {}", path.display()))?;
+    if entry.size as u64 > MAX_PREVIEW_ASSET_BYTES {
+        anyhow::bail!("asset exceeds 128 MiB");
+    }
+    read_big_entry_bytes(path, &entry)
 }
 
 #[cfg(test)]

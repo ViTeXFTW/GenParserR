@@ -6,11 +6,13 @@
 //! `didChange` deltas are applied to the rope and the document is re-parsed
 //! once per change batch; read-only requests reuse the cached parse.
 
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Duration;
 
+use base64::Engine;
 use dashmap::DashMap;
 use percent_encoding::percent_decode_str;
 use ropey::Rope;
@@ -31,13 +33,59 @@ use zerosyntax_syntax::{Edit, Parse};
 
 use crate::convert::{self, PositionEnc};
 use crate::scan::{
-    clear_index_cache, index_cache_path, load_sibling_str_keys, read_lossy, scan_with_cache,
+    clear_index_cache, index_cache_path, load_sibling_str_keys, read_asset_uri, read_lossy,
+    scan_with_cache,
 };
 #[cfg(test)]
 use crate::scan::{parse_w3d_models, scan_big, scan_roots};
 
 const CLEAR_INDEX_CACHE_COMMAND: &str = "zerosyntax.clearIndexCache";
 const REBUILD_INDEX_CACHE_COMMAND: &str = "zerosyntax.rebuildIndexCache";
+const PREVIEW_CACHE_SIZE: usize = 64;
+
+#[derive(Default)]
+struct PreviewCache {
+    items: HashMap<String, Arc<str>>,
+    order: VecDeque<String>,
+    generation: u64,
+}
+
+impl PreviewCache {
+    fn get(&self, key: &str) -> Option<Arc<str>> {
+        self.items.get(key).cloned()
+    }
+
+    fn insert(&mut self, generation: u64, key: String, markdown: Arc<str>) {
+        if self.generation != generation {
+            return;
+        }
+        if let Some(existing) = self.items.get_mut(&key) {
+            *existing = markdown;
+            return;
+        }
+        // ponytail: FIFO is enough for 64 completion thumbnails; use an LRU
+        // only if measured model-switching churn makes eviction visible.
+        if self.items.len() == PREVIEW_CACHE_SIZE {
+            if let Some(oldest) = self.order.pop_front() {
+                self.items.remove(&oldest);
+            }
+        }
+        self.order.push_back(key.clone());
+        self.items.insert(key, markdown);
+    }
+
+    fn clear(&mut self) {
+        self.items.clear();
+        self.order.clear();
+        self.generation = self.generation.wrapping_add(1);
+    }
+}
+
+#[derive(Deserialize)]
+struct CompletionResolveData {
+    zerosyntax: String,
+    model: String,
+}
 
 /// An open document: its text (as both a rope for position math and a string
 /// for the parser) and the parse of that exact text. `did_open`/`did_change`
@@ -75,6 +123,12 @@ impl SymbolAt {
 
 const DEFAULT_ANALYSIS_DEBOUNCE_MS: u64 = 250;
 const MAX_ANALYSIS_DEBOUNCE_MS: u64 = 5_000;
+const DEFAULT_PREVIEW_IMAGE_WIDTH: u32 = 160;
+const MIN_PREVIEW_IMAGE_WIDTH: u32 = 80;
+const MAX_PREVIEW_IMAGE_WIDTH: u32 = 640;
+const DEFAULT_PREVIEW_ZOOM_PERCENT: u32 = 100;
+const MIN_PREVIEW_ZOOM_PERCENT: u32 = 25;
+const MAX_PREVIEW_ZOOM_PERCENT: u32 = 400;
 const FORMATTING_REGISTRATION_ID: &str = "zerosyntax-formatting";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,6 +140,8 @@ struct RuntimeSettings {
     allow_bare_percentages: bool,
     map_ordering_diagnostics: bool,
     debounce_ms: u64,
+    preview_image_width: u32,
+    preview_zoom_percent: u32,
 }
 
 impl Default for RuntimeSettings {
@@ -98,6 +154,8 @@ impl Default for RuntimeSettings {
             allow_bare_percentages: false,
             map_ordering_diagnostics: true,
             debounce_ms: DEFAULT_ANALYSIS_DEBOUNCE_MS,
+            preview_image_width: DEFAULT_PREVIEW_IMAGE_WIDTH,
+            preview_zoom_percent: DEFAULT_PREVIEW_ZOOM_PERCENT,
         }
     }
 }
@@ -109,6 +167,7 @@ impl RuntimeSettings {
         };
         let value = value.get("zerosyntax").unwrap_or(value);
         let analysis = value.get("analysis");
+        let preview = value.get("preview");
         let debounce_ms =
             normalized_debounce_ms(analysis.and_then(|analysis| analysis.get("debounceMs")));
         Self {
@@ -154,6 +213,18 @@ impl RuntimeSettings {
                 .and_then(|value| value.as_bool())
                 .unwrap_or(true),
             debounce_ms,
+            preview_image_width: normalized_u32(
+                preview.and_then(|preview| preview.get("imageWidth")),
+                DEFAULT_PREVIEW_IMAGE_WIDTH,
+                MIN_PREVIEW_IMAGE_WIDTH,
+                MAX_PREVIEW_IMAGE_WIDTH,
+            ),
+            preview_zoom_percent: normalized_u32(
+                preview.and_then(|preview| preview.get("zoomPercent")),
+                DEFAULT_PREVIEW_ZOOM_PERCENT,
+                MIN_PREVIEW_ZOOM_PERCENT,
+                MAX_PREVIEW_ZOOM_PERCENT,
+            ),
         }
     }
 }
@@ -166,6 +237,29 @@ fn normalized_debounce_ms(value: Option<&serde_json::Value>) -> u64 {
                 .or_else(|| v.as_u64().map(|n| n.min(MAX_ANALYSIS_DEBOUNCE_MS)))
         })
         .unwrap_or(DEFAULT_ANALYSIS_DEBOUNCE_MS)
+}
+
+fn normalized_u32(value: Option<&serde_json::Value>, default: u32, min: u32, max: u32) -> u32 {
+    value
+        .and_then(|value| {
+            value
+                .as_i64()
+                .map(|value| value.clamp(i64::from(min), i64::from(max)) as u32)
+                .or_else(|| {
+                    value
+                        .as_u64()
+                        .map(|value| value.clamp(min.into(), max.into()) as u32)
+                })
+        })
+        .unwrap_or(default)
+}
+
+fn markdown_text(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
+        .replace('`', "\\`")
 }
 
 pub struct Backend {
@@ -210,6 +304,7 @@ pub struct Backend {
     analysis_debounce_ms: AtomicU64,
     /// Monotonic id source for semantic-token results (delta bookkeeping).
     semantic_result_id: AtomicU64,
+    preview_cache: Mutex<PreviewCache>,
 }
 
 fn load_schema(path: &str) -> std::result::Result<Analyzer, String> {
@@ -404,6 +499,7 @@ impl Backend {
             progress_support: OnceLock::new(),
             analysis_debounce_ms: AtomicU64::new(DEFAULT_ANALYSIS_DEBOUNCE_MS),
             semantic_result_id: AtomicU64::new(1),
+            preview_cache: Mutex::new(PreviewCache::default()),
         }
     }
 
@@ -563,6 +659,14 @@ impl Backend {
             previous.model_member_strictness != settings.model_member_strictness;
         let map_ordering_changed =
             previous.map_ordering_diagnostics != settings.map_ordering_diagnostics;
+        let preview_changed = previous.preview_image_width != settings.preview_image_width
+            || previous.preview_zoom_percent != settings.preview_zoom_percent;
+
+        if preview_changed {
+            if let Ok(mut cache) = self.preview_cache.lock() {
+                cache.clear();
+            }
+        }
 
         if schema_changed || roots_changed {
             let (mut analyzer, warning) = if schema_changed {
@@ -769,6 +873,9 @@ impl Backend {
         if let Ok(mut index) = self.index.write() {
             *index = replacement;
         }
+        if let Ok(mut cache) = self.preview_cache.lock() {
+            cache.clear();
+        }
         self.clear_diagnostic_caches();
         self.end_scan_progress(
             progress_token,
@@ -974,6 +1081,7 @@ impl LanguageServer for Backend {
 
         // Editor-facing settings arrive as `initializationOptions`. Shape:
         // `{ "format": {"enable": bool}, "schemaPath": "schema.json",
+        //    "preview": {"imageWidth": 160, "zoomPercent": 100},
         //    "analysis": {"modelMemberStrictness": "compatible",
         //                 "allowPercentagesWithoutSign": false,
         //                 "mapOrderingDiagnostics": true, "debounceMs": 250},
@@ -1056,6 +1164,7 @@ impl LanguageServer for Backend {
                 )),
                 completion_provider: Some(CompletionOptions {
                     trigger_characters: Some(vec!["=".into(), " ".into()]),
+                    resolve_provider: Some(true),
                     ..Default::default()
                 }),
                 semantic_tokens_provider: Some(
@@ -1329,6 +1438,115 @@ impl LanguageServer for Backend {
         .map(|c| convert::to_lsp_completion(c, snippets))
         .collect();
         Ok(Some(CompletionResponse::Array(items)))
+    }
+
+    async fn completion_resolve(&self, mut item: CompletionItem) -> Result<CompletionItem> {
+        let Some(data) = item
+            .data
+            .clone()
+            .and_then(|value| serde_json::from_value::<CompletionResolveData>(value).ok())
+            .filter(|data| {
+                data.zerosyntax == "w3d-model-preview"
+                    && !data.model.is_empty()
+                    && data.model.len() <= 256
+            })
+        else {
+            return Ok(item);
+        };
+        let source = self
+            .index
+            .read()
+            .ok()
+            .and_then(|index| index.effective_model_source(&data.model).map(str::to_owned));
+        let Some(source) = source else {
+            return Ok(item);
+        };
+        let (image_width, zoom_percent) = self
+            .settings
+            .lock()
+            .map(|settings| (settings.preview_image_width, settings.preview_zoom_percent))
+            .unwrap_or((DEFAULT_PREVIEW_IMAGE_WIDTH, DEFAULT_PREVIEW_ZOOM_PERCENT));
+        let cache_key = format!(
+            "{}\0{}\0{image_width}\0{zoom_percent}",
+            data.model.to_ascii_lowercase(),
+            source
+        );
+        let (cached, cache_generation) = self
+            .preview_cache
+            .lock()
+            .map(|cache| (cache.get(&cache_key), cache.generation))
+            .unwrap_or((None, 0));
+        if let Some(markdown) = cached {
+            item.documentation = Some(Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: markdown.to_string(),
+            }));
+            return Ok(item);
+        }
+
+        let index = self.index.clone();
+        let model = data.model.clone();
+        let zoom = zoom_percent as f32 / 100.0;
+        let rendered = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+            let bytes = read_asset_uri(&source)?;
+            let file = zerosyntax_w3d::W3dFile::parse(&bytes)?;
+            file.render_thumbnail(&model, zoom, |texture| {
+                let uri = index.read().ok().and_then(|index| {
+                    index
+                        .effective_texture_source(texture)
+                        .map(|asset| asset.uri.clone())
+                })?;
+                read_asset_uri(&uri).ok()
+            })
+            .map_err(anyhow::Error::from)
+        })
+        .await;
+
+        let markdown = match rendered {
+            Ok(Ok(rendered)) => {
+                let encoded =
+                    base64::engine::general_purpose::STANDARD.encode(rendered.png.as_slice());
+                let label = markdown_text(&data.model);
+                let mut markdown = format!(
+                    "![{label} model preview](data:image/png;base64,{encoded}|width={image_width})\n\n`{label}`"
+                );
+                if !rendered.missing_textures.is_empty() {
+                    let shown = rendered
+                        .missing_textures
+                        .iter()
+                        .take(3)
+                        .map(|name| format!("`{}`", markdown_text(name)))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let remaining = rendered.missing_textures.len().saturating_sub(3);
+                    markdown.push_str("\n\nMissing texture");
+                    if rendered.missing_textures.len() != 1 {
+                        markdown.push('s');
+                    }
+                    markdown.push_str(&format!(": {shown}"));
+                    if remaining > 0 {
+                        markdown.push_str(&format!(" and {remaining} more"));
+                    }
+                }
+                Arc::<str>::from(markdown)
+            }
+            Ok(Err(error)) => {
+                tracing::warn!(%error, model = %data.model, "could not render W3D completion preview");
+                Arc::<str>::from("_Preview unavailable: unsupported or malformed W3D data._")
+            }
+            Err(error) => {
+                tracing::warn!(%error, model = %data.model, "W3D preview task failed");
+                Arc::<str>::from("_Preview unavailable: unsupported or malformed W3D data._")
+            }
+        };
+        if let Ok(mut cache) = self.preview_cache.lock() {
+            cache.insert(cache_generation, cache_key, markdown.clone());
+        }
+        item.documentation = Some(Documentation::MarkupContent(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: markdown.to_string(),
+        }));
+        Ok(item)
     }
 
     async fn semantic_tokens_full(
@@ -1995,11 +2213,25 @@ mod tests {
     }
 
     #[test]
+    fn preview_settings_default_and_clamp() {
+        let defaults = RuntimeSettings::default();
+        assert_eq!(defaults.preview_image_width, 160);
+        assert_eq!(defaults.preview_zoom_percent, 100);
+
+        let settings = RuntimeSettings::from_value(Some(&serde_json::json!({
+            "preview": {"imageWidth": 10_000, "zoomPercent": 0}
+        })));
+        assert_eq!(settings.preview_image_width, 640);
+        assert_eq!(settings.preview_zoom_percent, 25);
+    }
+
+    #[test]
     fn runtime_settings_accept_startup_and_vscode_shapes() {
         let startup = RuntimeSettings::from_value(Some(&serde_json::json!({
             "format": {"enable": true},
             "schemaPath": "schema.json",
             "baseIniRoots": ["base"],
+            "preview": {"imageWidth": 320, "zoomPercent": 150},
             "analysis": {"modelMemberStrictness": "strict", "debounceMs": 9000}
         })));
         let notification = RuntimeSettings::from_value(Some(&serde_json::json!({
@@ -2007,11 +2239,14 @@ mod tests {
                 "format": {"enable": true},
                 "schema": {"path": "schema.json"},
                 "baseIniRoots": ["base"],
+                "preview": {"imageWidth": 320, "zoomPercent": 150},
                 "analysis": {"modelMemberStrictness": "strict", "debounceMs": 9000}
             }
         })));
         assert_eq!(startup, notification);
         assert_eq!(startup.debounce_ms, 5000);
+        assert_eq!(startup.preview_image_width, 320);
+        assert_eq!(startup.preview_zoom_percent, 150);
     }
 
     #[test]
@@ -2130,7 +2365,6 @@ mod tests {
 
         let analyzer = Analyzer::embedded();
         let scanned = scan_big(&analyzer, &path).unwrap();
-        let _ = std::fs::remove_file(&path);
 
         assert_eq!(scanned.len(), 3, "INI, W3D, and one aggregated asset entry");
         let ini = scanned.iter().find(|entry| !entry.1.is_empty()).unwrap();
@@ -2144,6 +2378,12 @@ mod tests {
         assert_eq!(assets.len(), 2);
         assert!(assets.iter().any(|asset| asset.name == "Click.WAV"));
         assert!(assets.iter().any(|asset| asset.name == "Particle.DDS"));
+        let texture = assets
+            .iter()
+            .find(|asset| asset.name == "Particle.DDS")
+            .unwrap();
+        assert_eq!(read_asset_uri(&texture.uri).unwrap(), b"not read");
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
@@ -2161,6 +2401,7 @@ mod tests {
         assert_eq!(assets.len(), 2);
         assert!(assets.iter().any(|asset| asset.name == "Click.wav"));
         assert!(assets.iter().any(|asset| asset.name == "Particle.tga"));
+        assert!(assets.iter().all(|asset| asset.uri.starts_with("file:")));
     }
 
     #[test]
@@ -2265,6 +2506,27 @@ End
         let good = models.iter().find(|m| m.name == "Good").unwrap();
         assert!(good.members.iter().any(|m| m == "Tire01"), "{good:?}");
         assert!(good.members.iter().any(|m| m == "Cargo01"), "{good:?}");
+    }
+
+    #[test]
+    fn malformed_w3d_keeps_filename_fallback_model() {
+        let mut truncated = 0u32.to_le_bytes().to_vec();
+        truncated.extend_from_slice(&16u32.to_le_bytes());
+
+        let models = parse_w3d_models(&truncated, "Fallback");
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].name, "Fallback");
+        assert!(models[0].members.is_empty());
+    }
+
+    #[test]
+    fn invalidated_preview_is_not_cached_again() {
+        let mut cache = PreviewCache::default();
+        let generation = cache.generation;
+        cache.clear();
+        cache.insert(generation, "model".into(), Arc::from("stale"));
+
+        assert!(cache.get("model").is_none());
     }
 
     #[test]

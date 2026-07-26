@@ -25,6 +25,7 @@ pub enum AssetKind {
 pub struct FileAsset {
     pub kind: AssetKind,
     pub name: String,
+    pub uri: String,
 }
 
 /// Model data discovered from a W3D asset.
@@ -124,7 +125,8 @@ pub struct WorkspaceIndex {
     model_assets: HashMap<String, Vec<(String, ModelAsset)>>,
     /// Reverse map for removing/replacing models contributed by one asset file.
     file_models: HashMap<String, Vec<ModelAsset>>,
-    asset_names: HashMap<AssetKind, HashMap<String, Vec<(String, String)>>>,
+    asset_names: HashMap<AssetKind, HashMap<String, Vec<(String, FileAsset)>>>,
+    texture_assets: HashMap<String, Vec<(String, FileAsset)>>,
     file_assets: HashMap<String, Vec<FileAsset>>,
     object_models: HashMap<String, Vec<(String, Vec<String>)>>,
     file_object_models: HashMap<String, Vec<(String, Vec<String>)>>,
@@ -321,7 +323,13 @@ impl WorkspaceIndex {
                 .or_default()
                 .entry(asset.name.to_ascii_lowercase())
                 .or_default()
-                .push((file.to_string(), asset.name.clone()));
+                .push((file.to_string(), asset.clone()));
+            if asset.kind == AssetKind::Texture {
+                self.texture_assets
+                    .entry(asset_stem(&asset.name))
+                    .or_default()
+                    .push((file.to_string(), asset.clone()));
+            }
         }
         if assets.is_empty() {
             self.file_assets.remove(file);
@@ -353,6 +361,15 @@ impl WorkspaceIndex {
                     self.asset_names.remove(&asset.kind);
                 }
             }
+            if asset.kind == AssetKind::Texture {
+                let stem = asset_stem(&asset.name);
+                if let Some(contribs) = self.texture_assets.get_mut(&stem) {
+                    contribs.retain(|(source, _)| source != file);
+                    if contribs.is_empty() {
+                        self.texture_assets.remove(&stem);
+                    }
+                }
+            }
         }
     }
 
@@ -373,7 +390,7 @@ impl WorkspaceIndex {
             .get(&kind)
             .into_iter()
             .flat_map(|names| names.values().filter_map(|sources| sources.first()))
-            .map(|(_, display)| display.as_str())
+            .map(|(_, asset)| asset.name.as_str())
     }
 
     pub fn set_file_object_models(&mut self, file: &str, objects: Vec<(String, Vec<String>)>) {
@@ -672,8 +689,24 @@ impl WorkspaceIndex {
     pub fn model_names(&self) -> impl Iterator<Item = &str> {
         self.model_assets
             .values()
-            .filter_map(|contribs| contribs.first())
+            .filter_map(|contribs| contribs.last())
             .map(|(_, m)| m.name.as_str())
+    }
+
+    /// Last indexed contributor wins: base roots are indexed first and
+    /// workspace roots last.
+    pub fn effective_model_source(&self, model: &str) -> Option<&str> {
+        self.model_assets
+            .get(&model.to_ascii_lowercase())
+            .and_then(|contribs| contribs.last())
+            .map(|(source, _)| source.as_str())
+    }
+
+    pub fn effective_texture_source(&self, texture: &str) -> Option<&FileAsset> {
+        self.texture_assets
+            .get(&asset_stem(texture))
+            .and_then(|contribs| contribs.last())
+            .map(|(_, asset)| asset)
     }
 
     /// User-addressable members (pivots/subobjects/meshes) for `model`,
@@ -771,6 +804,14 @@ fn normalized_model_assets(models: &[ModelAsset]) -> Vec<(String, Vec<String>)> 
         .collect::<Vec<_>>();
     out.sort();
     out
+}
+
+fn asset_stem(name: &str) -> String {
+    let file = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    file.rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(file)
+        .to_ascii_lowercase()
 }
 
 fn normalize_object_models(objects: &[(String, Vec<String>)]) -> Vec<(String, Vec<String>)> {
@@ -1200,6 +1241,7 @@ mod tests {
         let audio = |name: &str| FileAsset {
             kind: AssetKind::Audio,
             name: name.into(),
+            uri: format!("file:///{name}"),
         };
         let mut idx = WorkspaceIndex::new();
         idx.set_file_assets("base", vec![audio("Click.WAV")]);
@@ -1222,6 +1264,44 @@ mod tests {
         assert_ne!(idx.generation(), first);
         assert!(!idx.is_asset(AssetKind::Audio, "Click.wav"));
         assert!(idx.is_asset(AssetKind::Audio, "OTHER.WAV"));
+    }
+
+    #[test]
+    fn effective_model_and_texture_use_last_contributor() {
+        let texture = |name: &str, uri: &str| FileAsset {
+            kind: AssetKind::Texture,
+            name: name.into(),
+            uri: uri.into(),
+        };
+        let mut idx = WorkspaceIndex::new();
+        idx.set_file_models(
+            "base.w3d",
+            vec![ModelAsset {
+                name: "Tank".into(),
+                members: Vec::new(),
+            }],
+        );
+        idx.set_file_models(
+            "mod.w3d",
+            vec![ModelAsset {
+                name: "TANK".into(),
+                members: Vec::new(),
+            }],
+        );
+        idx.set_file_assets(
+            "base.big",
+            vec![texture("Tank.dds", "big:///base.big!/Tank.dds")],
+        );
+        idx.set_file_assets(
+            "workspace",
+            vec![texture("tank.tga", "file:///workspace/tank.tga")],
+        );
+        assert_eq!(idx.effective_model_source("tank"), Some("mod.w3d"));
+        assert_eq!(
+            idx.effective_texture_source("TANK.DDS")
+                .map(|asset| asset.uri.as_str()),
+            Some("file:///workspace/tank.tga")
+        );
     }
 
     #[test]

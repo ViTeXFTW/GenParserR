@@ -407,10 +407,12 @@ fn specs_hold() {
                 .map(|name| FileAsset {
                     kind: AssetKind::Audio,
                     name: name.clone(),
+                    uri: format!("file:///{name}"),
                 })
                 .chain(spec.texture_assets.iter().map(|name| FileAsset {
                     kind: AssetKind::Texture,
                     name: name.clone(),
+                    uri: format!("file:///{name}"),
                 }))
                 .collect(),
         );
