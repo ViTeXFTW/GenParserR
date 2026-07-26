@@ -12,6 +12,10 @@ pub const HEIGHT: u32 = 120;
 const HIDDEN: u32 = 0x0000_1000;
 const TWO_SIDED: u32 = 0x0000_2000;
 const COLLISION_MASK: u32 = 0x0000_0ff0;
+const MAX_RENDER_TRIANGLES: usize = 10_000;
+const MAX_RENDER_TEXTURES: usize = 32;
+const MAX_RENDER_TEXTURE_PIXELS: u64 = 16 * 1024 * 1024;
+const MAX_RASTER_SAMPLES: u64 = WIDTH as u64 * HEIGHT as u64 * 32;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedThumbnail {
@@ -46,7 +50,14 @@ pub(crate) fn thumbnail(
     let hierarchy = selected_hierarchy(file, model);
     let bones = hierarchy.map(rest_pose).unwrap_or_default();
     let selected = selected_meshes(file, model);
-    let mut triangles = Vec::new();
+    let triangle_count = selected
+        .iter()
+        .try_fold(0usize, |total, (mesh, _)| {
+            total.checked_add(mesh.triangles.len())
+        })
+        .filter(|total| *total <= MAX_RENDER_TRIANGLES)
+        .ok_or_else(|| W3dError::new("model triangle budget exceeded"))?;
+    let mut triangles = Vec::with_capacity(triangle_count);
     for (mesh, fallback_bone) in selected {
         append_mesh_triangles(mesh, fallback_bone, &bones, &mut triangles);
     }
@@ -57,21 +68,30 @@ pub(crate) fn thumbnail(
     let mut textures = HashMap::new();
     let mut missing = Vec::new();
     let mut seen = HashSet::new();
+    let mut texture_pixels = 0u64;
     for name in triangles
         .iter()
         .map(|triangle| triangle.texture.as_str())
         .filter(|name| !name.is_empty())
     {
         let key = name.to_ascii_lowercase();
-        if !seen.insert(key.clone()) {
+        if seen.contains(&key) {
             continue;
         }
+        if seen.len() == MAX_RENDER_TEXTURES {
+            return Err(W3dError::new("model texture count budget exceeded"));
+        }
+        seen.insert(key.clone());
         let texture = load_texture(name)
             .and_then(|bytes| decode_texture(&bytes).ok())
             .unwrap_or_else(|| {
                 missing.push(name.to_string());
                 missing_texture()
             });
+        texture_pixels = texture_pixels
+            .checked_add(u64::from(texture.image.width()) * u64::from(texture.image.height()))
+            .filter(|pixels| *pixels <= MAX_RENDER_TEXTURE_PIXELS)
+            .ok_or_else(|| W3dError::new("model texture memory budget exceeded"))?;
         textures.insert(key, texture);
     }
 
@@ -355,6 +375,7 @@ fn rasterize(
     );
     let view_projection = projection * view;
     let light = Vec3::new(0.4, -0.7, 1.0).normalize();
+    let mut raster_samples = MAX_RASTER_SAMPLES;
 
     for triangle in triangles {
         let face = (triangle.vertices[1].position - triangle.vertices[0].position)
@@ -375,7 +396,8 @@ fn rasterize(
             light,
             pixels,
             depth,
-        );
+            &mut raster_samples,
+        )?;
     }
     Ok(())
 }
@@ -415,10 +437,11 @@ fn draw_triangle(
     light: Vec3,
     pixels: &mut RgbaImage,
     depth: &mut [f32],
-) {
+    raster_samples: &mut u64,
+) -> Result<(), W3dError> {
     let area = edge(vertices[0].screen, vertices[1].screen, vertices[2].screen);
     if area.abs() < 0.0001 {
-        return;
+        return Ok(());
     }
     let min_x = vertices
         .iter()
@@ -444,6 +467,13 @@ fn draw_triangle(
         .fold(f32::NEG_INFINITY, f32::max)
         .ceil()
         .clamp(0.0, (HEIGHT - 1) as f32) as u32;
+    if min_x > max_x || min_y > max_y {
+        return Ok(());
+    }
+    let samples = u64::from(max_x - min_x + 1) * u64::from(max_y - min_y + 1);
+    *raster_samples = (*raster_samples)
+        .checked_sub(samples)
+        .ok_or_else(|| W3dError::new("model raster work budget exceeded"))?;
 
     for y in min_y..=max_y {
         for x in min_x..=max_x {
@@ -525,6 +555,7 @@ fn draw_triangle(
             }
         }
     }
+    Ok(())
 }
 
 fn edge(a: Vec2, b: Vec2, point: Vec2) -> f32 {
@@ -631,5 +662,54 @@ mod tests {
             "{} bytes of PNG becomes {base64_len} bytes of base64",
             rendered.png.len()
         );
+    }
+
+    #[test]
+    fn thumbnail_rejects_excessive_triangle_and_texture_work() {
+        let mesh = |triangle_count: usize, texture_count: usize| Mesh {
+            name: "Budget".into(),
+            vertices: vec![
+                Vec3::new(-1.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+            ],
+            normals: vec![Vec3::NEG_Y; 3],
+            triangles: vec![Triangle { indices: [0, 1, 2] }; triangle_count],
+            textures: (0..texture_count)
+                .map(|index| format!("{index}.tga"))
+                .collect(),
+            material_diffuse: [255; 4],
+            pass: MaterialPass {
+                texture_ids: (0..triangle_count)
+                    .map(|index| (index % texture_count.max(1)) as u32)
+                    .collect(),
+                ..MaterialPass::default()
+            },
+            ..Mesh::default()
+        };
+
+        let too_many_triangles = W3dFile {
+            meshes: vec![mesh(10_001, 0)],
+            ..W3dFile::default()
+        };
+        assert!(thumbnail(&too_many_triangles, "Budget", 1.0, |_| None).is_err());
+
+        let too_much_raster_work = W3dFile {
+            meshes: vec![mesh(500, 0)],
+            ..W3dFile::default()
+        };
+        assert!(thumbnail(&too_much_raster_work, "Budget", 1.0, |_| None).is_err());
+
+        let too_many_textures = W3dFile {
+            meshes: vec![mesh(33, 33)],
+            ..W3dFile::default()
+        };
+        let mut loads = 0;
+        assert!(thumbnail(&too_many_textures, "Budget", 1.0, |_| {
+            loads += 1;
+            None
+        })
+        .is_err());
+        assert!(loads <= 32);
     }
 }

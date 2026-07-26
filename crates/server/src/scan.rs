@@ -295,17 +295,21 @@ fn raw_asset(path: &str, uri: &str) -> Option<FileAsset> {
 }
 
 pub(crate) fn parse_w3d_models(bytes: &[u8], fallback_name: &str) -> Vec<ModelAsset> {
-    W3dFile::parse(bytes)
-        .map(|file| {
-            file.catalog(fallback_name)
-                .into_iter()
-                .map(|model| ModelAsset {
-                    name: model.name,
-                    members: model.members,
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+    match W3dFile::parse(bytes) {
+        Ok(file) => file
+            .catalog(fallback_name)
+            .into_iter()
+            .map(|model| ModelAsset {
+                name: model.name,
+                members: model.members,
+            })
+            .collect(),
+        Err(_) if !fallback_name.trim().is_empty() => vec![ModelAsset {
+            name: fallback_name.trim().to_string(),
+            members: Vec::new(),
+        }],
+        Err(_) => Vec::new(),
+    }
 }
 
 pub(crate) fn scan_big(analyzer: &Analyzer, path: &Path) -> Result<Vec<ScanEntry>> {

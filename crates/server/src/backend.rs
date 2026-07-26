@@ -47,6 +47,7 @@ const PREVIEW_CACHE_SIZE: usize = 64;
 struct PreviewCache {
     items: HashMap<String, Arc<str>>,
     order: VecDeque<String>,
+    generation: u64,
 }
 
 impl PreviewCache {
@@ -54,7 +55,10 @@ impl PreviewCache {
         self.items.get(key).cloned()
     }
 
-    fn insert(&mut self, key: String, markdown: Arc<str>) {
+    fn insert(&mut self, generation: u64, key: String, markdown: Arc<str>) {
+        if self.generation != generation {
+            return;
+        }
         if let Some(existing) = self.items.get_mut(&key) {
             *existing = markdown;
             return;
@@ -73,6 +77,7 @@ impl PreviewCache {
     fn clear(&mut self) {
         self.items.clear();
         self.order.clear();
+        self.generation = self.generation.wrapping_add(1);
     }
 }
 
@@ -1466,12 +1471,12 @@ impl LanguageServer for Backend {
             data.model.to_ascii_lowercase(),
             source
         );
-        if let Some(markdown) = self
+        let (cached, cache_generation) = self
             .preview_cache
             .lock()
-            .ok()
-            .and_then(|cache| cache.get(&cache_key))
-        {
+            .map(|cache| (cache.get(&cache_key), cache.generation))
+            .unwrap_or((None, 0));
+        if let Some(markdown) = cached {
             item.documentation = Some(Documentation::MarkupContent(MarkupContent {
                 kind: MarkupKind::Markdown,
                 value: markdown.to_string(),
@@ -1535,7 +1540,7 @@ impl LanguageServer for Backend {
             }
         };
         if let Ok(mut cache) = self.preview_cache.lock() {
-            cache.insert(cache_key, markdown.clone());
+            cache.insert(cache_generation, cache_key, markdown.clone());
         }
         item.documentation = Some(Documentation::MarkupContent(MarkupContent {
             kind: MarkupKind::Markdown,
@@ -2501,6 +2506,27 @@ End
         let good = models.iter().find(|m| m.name == "Good").unwrap();
         assert!(good.members.iter().any(|m| m == "Tire01"), "{good:?}");
         assert!(good.members.iter().any(|m| m == "Cargo01"), "{good:?}");
+    }
+
+    #[test]
+    fn malformed_w3d_keeps_filename_fallback_model() {
+        let mut truncated = 0u32.to_le_bytes().to_vec();
+        truncated.extend_from_slice(&16u32.to_le_bytes());
+
+        let models = parse_w3d_models(&truncated, "Fallback");
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].name, "Fallback");
+        assert!(models[0].members.is_empty());
+    }
+
+    #[test]
+    fn invalidated_preview_is_not_cached_again() {
+        let mut cache = PreviewCache::default();
+        let generation = cache.generation;
+        cache.clear();
+        cache.insert(generation, "model".into(), Arc::from("stale"));
+
+        assert!(cache.get("model").is_none());
     }
 
     #[test]
