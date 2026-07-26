@@ -171,6 +171,12 @@ pub fn to_lsp_completion(c: Completion, snippets_supported: bool) -> CompletionI
         (None, None, None)
     };
 
+    let data = (c.kind == CompletionKind::W3dModel).then(|| {
+        serde_json::json!({
+            "zerosyntax": "w3d-model-preview",
+            "model": c.label,
+        })
+    });
     CompletionItem {
         label: c.label,
         kind: Some(match c.kind {
@@ -180,8 +186,10 @@ pub fn to_lsp_completion(c: Completion, snippets_supported: bool) -> CompletionI
             CompletionKind::EnumMember => CompletionItemKind::ENUM_MEMBER,
             CompletionKind::Value => CompletionItemKind::VALUE,
             CompletionKind::Reference => CompletionItemKind::REFERENCE,
+            CompletionKind::W3dModel => CompletionItemKind::REFERENCE,
         }),
         detail: c.detail,
+        data,
         insert_text,
         insert_text_format,
         command,
@@ -324,6 +332,7 @@ pub fn semantic_tokens_splice(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use zerosyntax_analysis::completion::{Completion, CompletionKind};
     use zerosyntax_analysis::semantic::{SemKind, SemToken};
 
     /// Apply a splice the way a client would, for the equivalence test below.
@@ -336,6 +345,24 @@ mod tests {
         out.extend(edit.data.clone().unwrap_or_default());
         out.extend(prev[start + del..].iter().copied());
         out
+    }
+
+    #[test]
+    fn model_completion_is_tagged_but_not_eagerly_rendered() {
+        let item = to_lsp_completion(
+            Completion {
+                label: "AVTank".into(),
+                kind: CompletionKind::W3dModel,
+                detail: Some("W3D model".into()),
+                insert: None,
+            },
+            false,
+        );
+        assert_eq!(
+            item.data.as_ref().and_then(|data| data.get("model")),
+            Some(&serde_json::json!("AVTank"))
+        );
+        assert!(item.documentation.is_none());
     }
 
     #[test]

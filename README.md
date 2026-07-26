@@ -27,7 +27,8 @@ VS Code extension with the server bundled.
 - Optional indentation formatting, disabled by default so existing files are
   never reformatted without your consent.
 - Base-game and mod indexing for `map.ini` and `solo.ini`, including W3D model
-  and bone checks.
+  and bone checks. Selecting a `Model =` completion shows a textured W3D
+  thumbnail when the indexed asset is available.
 
 ## Install the VS Code extension
 

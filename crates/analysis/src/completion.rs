@@ -26,6 +26,7 @@ pub enum CompletionKind {
     EnumMember,
     Value,
     Reference,
+    W3dModel,
 }
 
 /// A single completion candidate.
@@ -418,7 +419,7 @@ fn model_asset_completions(
                 .model_names()
                 .map(|name| Completion {
                     label: name.to_string(),
-                    kind: CompletionKind::Reference,
+                    kind: CompletionKind::W3dModel,
                     detail: Some("W3D model".into()),
                     insert: None,
                 })

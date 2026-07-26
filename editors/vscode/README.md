@@ -33,6 +33,11 @@ WAV/MP3 audio, and TGA/DDS texture checks. Configure every loaded game/mod root;
 asset warnings activate per kind once any matching asset is indexed. DDS-only
 textures are offered using the engine-compatible `stem.tga` spelling.
 
+While completing `Model =`, move the active selection with the keyboard or
+mouse to see a textured W3D thumbnail in VS Code's suggestion-details pane.
+The preview is loaded only for the selected entry. If the pane is collapsed,
+press `Ctrl+Space` again or use the suggestion widget's details control.
+
 ## Settings
 
 | Setting | Default | Purpose |

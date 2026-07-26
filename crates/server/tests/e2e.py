@@ -9,6 +9,7 @@ identical to a full-text baseline of the same final text. Exits non-zero on
 failure.
 """
 import json
+import base64
 import subprocess
 import sys
 import threading
@@ -60,6 +61,29 @@ def main() -> int:
 
     workspace = pathlib.Path(tempfile.mkdtemp(prefix="zerosyntax-e2e-"))
     (workspace / "Images.INI").write_text("MappedImage TestScanImage\nEnd\n")
+
+    def w3d_chunk(kind, payload):
+        return struct.pack("<II", kind, len(payload)) + payload
+
+    mesh_header = bytearray(116)
+    mesh_header[8:16] = b"Triangle"
+    mesh_header[24:31] = b"Preview"
+    preview_w3d = w3d_chunk(0, b"".join([
+        w3d_chunk(0x1F, mesh_header),
+        w3d_chunk(0x02, struct.pack("<9f", -1, 0, 0, 1, 0, 0, 0, 0, 1)),
+        w3d_chunk(0x03, struct.pack("<9f", 0, -1, 0, 0, -1, 0, 0, -1, 0)),
+        w3d_chunk(0x0D, struct.pack("<6f", 0, 0, 1, 0, .5, 1)),
+        w3d_chunk(0x20, struct.pack("<4I4f", 0, 1, 2, 0, 0, -1, 0, 0)),
+        w3d_chunk(0x30, w3d_chunk(0x31, w3d_chunk(0x32, b"Preview.tga\0"))),
+        w3d_chunk(0x38, w3d_chunk(0x48, w3d_chunk(0x49, struct.pack("<I", 0)))),
+    ]))
+    (workspace / "Preview.w3d").write_bytes(preview_w3d)
+    preview_tga = bytes([0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 32, 0x20])
+    preview_tga += bytes([
+        0, 0, 255, 255, 0, 255, 0, 255,
+        255, 0, 0, 255, 255, 255, 255, 255,
+    ])
+    (workspace / "Preview.tga").write_bytes(preview_tga)
     base = pathlib.Path(tempfile.mkdtemp(prefix="zerosyntax-e2e-base-"))
     (base / "Base.ini").write_text("MappedImage HotBaseImage\nEnd\n")
     (base / "HotSound.wav").write_bytes(b"")
@@ -174,6 +198,8 @@ def main() -> int:
     assert init, "no initialize result"
     caps = init["result"]["capabilities"]
     assert "completionProvider" in caps, "missing completionProvider"
+    assert caps["completionProvider"].get("resolveProvider") is True, \
+        "model previews require completionItem/resolve"
     assert "semanticTokensProvider" in caps, "missing semanticTokensProvider"
     sync = caps.get("textDocumentSync")
     assert sync == 2, f"expected INCREMENTAL sync (2), got {sync!r}"
@@ -221,6 +247,43 @@ def main() -> int:
     labels = [i["label"] for i in items]
     assert "PrimaryDamage" in labels, f"expected PrimaryDamage in {labels[:10]}..."
     print(f"OK: completion returned {len(labels)} items incl. field names")
+
+    # 3b) Model completion stays small until resolve, then carries a PNG preview.
+    preview_uri = (workspace / "Preview.ini").as_uri()
+    preview_text = (
+        "Object PreviewObject\n"
+        "  Draw = W3DModelDraw ModuleTag_01\n"
+        "    DefaultConditionState\n"
+        "      Model = \n"
+        "    End\n"
+        "  End\n"
+        "End\n"
+    )
+    send({"jsonrpc": "2.0", "method": "textDocument/didOpen",
+          "params": {"textDocument": {"uri": preview_uri, "languageId": "generals-ini",
+                                       "version": 1, "text": preview_text}}})
+    wait_for(lambda m: m.get("method") == "textDocument/publishDiagnostics"
+             and m["params"]["uri"] == preview_uri, "preview diagnostics")
+    send({"jsonrpc": "2.0", "id": 100, "method": "textDocument/completion",
+          "params": {"textDocument": {"uri": preview_uri},
+                     "position": {"line": 3, "character": len("      Model = ")}}})
+    preview_completion = wait_for(
+        lambda m: m.get("id") == 100 and "result" in m, "model completion")
+    preview_items = preview_completion["result"]
+    if isinstance(preview_items, dict):
+        preview_items = preview_items.get("items", [])
+    preview_item = next(item for item in preview_items if item["label"] == "Preview")
+    assert "documentation" not in preview_item, "preview rendered eagerly"
+    assert preview_item.get("data", {}).get("zerosyntax") == "w3d-model-preview"
+    send({"jsonrpc": "2.0", "id": 101, "method": "completionItem/resolve",
+          "params": preview_item})
+    resolved = wait_for(
+        lambda m: m.get("id") == 101 and "result" in m, "model completion resolve")
+    markdown = resolved["result"]["documentation"]["value"]
+    assert len(markdown) < 100_000, "VS Code truncates longer Markdown payloads"
+    encoded_png = markdown.split("data:image/png;base64,", 1)[1].split(")", 1)[0]
+    assert base64.b64decode(encoded_png).startswith(b"\x89PNG\r\n\x1a\n")
+    print("OK: model completion resolves lazily to a textured PNG preview")
 
     # 4) semantic tokens (full + range; the server must advertise range).
     assert caps["semanticTokensProvider"].get("range") is True, "range tokens not advertised"

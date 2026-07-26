@@ -143,6 +143,15 @@ ZeroSyntax supports incremental document sync, diagnostics, completion, hover,
 go to definition, references, rename, semantic tokens, document and workspace
 symbols, folding ranges, quick fixes, and optional document formatting.
 
+W3D model completion items support `completionItem/resolve`. Clients that render
+Markdown completion documentation can show a lazy 160×120 textured thumbnail
+for the active `Model =` suggestion. The initial completion list contains no
+image data. Previews use indexed loose or BIG-contained W3D/TGA/DDS assets and
+cover mesh geometry, base materials, HLOD composition, and hierarchy bind pose.
+Malformed or unsupported assets leave completion functional and show a short
+preview-unavailable message. Rebuild the asset index or reload the server after
+changing binary assets.
+
 ## Build from source
 
 Install Rust 1.75 or newer, clone the repository, and run:
