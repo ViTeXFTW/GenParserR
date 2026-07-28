@@ -10,7 +10,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use base64::Engine;
 use dashmap::DashMap;
@@ -19,7 +19,7 @@ use ropey::Rope;
 use serde::Deserialize;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{jsonrpc::Result, Client, LanguageServer};
-use zerosyntax_analysis::diagnostics::DiagnosticsCache;
+use zerosyntax_analysis::diagnostics::{DiagnosticsCache, Severity as AnalysisSeverity};
 use zerosyntax_analysis::index::{
     definitions_in, module_tags_in, object_models_in, object_parents_in, references_in,
     ModelMemberStrictness, WorkspaceIndex,
@@ -29,7 +29,7 @@ use zerosyntax_analysis::nav::{
     HoverInfo, ModuleTagReferenceAt, ReferenceAt,
 };
 use zerosyntax_analysis::{actions, completion, diagnostics, format, outline, semantic, Analyzer};
-use zerosyntax_syntax::{Edit, Parse};
+use zerosyntax_syntax::{Edit, Parse, Strategy};
 
 use crate::convert::{self, PositionEnc};
 use crate::scan::{
@@ -318,10 +318,13 @@ fn load_schema(path: &str) -> std::result::Result<Analyzer, String> {
 fn load_schema_or_embedded(path: &str) -> (Analyzer, Option<String>) {
     match load_schema(path) {
         Ok(analyzer) => (analyzer, None),
-        Err(error) => (
-            Analyzer::embedded(),
-            Some(format!("ZeroSyntax: {error}; using the built-in schema.")),
-        ),
+        Err(error) => {
+            tracing::debug!(schema_path = path, %error, "custom schema load failed");
+            (
+                Analyzer::embedded(),
+                Some(format!("ZeroSyntax: {error}; using the built-in schema.")),
+            )
+        }
     }
 }
 
@@ -394,6 +397,7 @@ async fn refresh_document(
     uri: Url,
     options: RefreshOptions,
 ) {
+    let started = Instant::now();
     let analyzer = analyzer.read().expect("analyzer lock poisoned").clone();
     let Some((rope, parse, version)) = docs.get(&uri).and_then(|d| {
         if options
@@ -405,6 +409,11 @@ async fn refresh_document(
             Some((d.rope.clone(), d.parse.clone(), d.version))
         }
     }) else {
+        tracing::trace!(
+            uri = %uri,
+            expected_version = ?options.expected_version,
+            "document refresh skipped because the document closed or changed"
+        );
         return;
     };
 
@@ -417,8 +426,17 @@ async fn refresh_document(
 
     // Keep this document guard through the short index commit so didChange
     // cannot advance the document and then be overwritten by this snapshot.
-    let Some(entry) = docs.get(&uri) else { return };
+    let Some(entry) = docs.get(&uri) else {
+        tracing::trace!(uri = %uri, version, "document refresh superseded before index commit");
+        return;
+    };
     if entry.version != version {
+        tracing::trace!(
+            uri = %uri,
+            version,
+            current_version = entry.version,
+            "document refresh superseded before index commit"
+        );
         return;
     }
     if let Ok(mut idx) = index.write() {
@@ -434,15 +452,22 @@ async fn refresh_document(
     // Take the cache only after the versioned index commit. Expensive work
     // above never empties the live document's cache when an edit supersedes it.
     let Some(mut entry) = docs.get_mut(&uri) else {
+        tracing::trace!(uri = %uri, version, "document refresh superseded before diagnostics");
         return;
     };
     if entry.version != version {
+        tracing::trace!(
+            uri = %uri,
+            version,
+            current_version = entry.version,
+            "document refresh superseded before diagnostics"
+        );
         return;
     }
     let mut cache = std::mem::take(&mut entry.diag_cache);
     drop(entry);
 
-    let lsp_diags: Vec<Diagnostic> = {
+    let (lsp_diags, error_count, warning_count, hint_count) = {
         let idx = index.read().ok();
         let mut diags = diagnostics::diagnose_with_cache(
             &analyzer,
@@ -455,24 +480,51 @@ async fn refresh_document(
             &mut diags,
             map_ordering_diagnostics.load(Ordering::Relaxed),
         );
-        diags
+        let (mut errors, mut warnings, mut hints) = (0, 0, 0);
+        for diagnostic in &diags {
+            match diagnostic.severity {
+                AnalysisSeverity::Error => errors += 1,
+                AnalysisSeverity::Warning => warnings += 1,
+                AnalysisSeverity::Hint => hints += 1,
+            }
+        }
+        let converted: Vec<Diagnostic> = diags
             .iter()
             .map(|d| convert::to_lsp_diagnostic(&rope, d, options.enc))
-            .collect()
+            .collect();
+        (converted, errors, warnings, hints)
     };
 
     let Some(mut entry) = docs.get_mut(&uri) else {
+        tracing::trace!(uri = %uri, version, "document refresh superseded before cache commit");
         return;
     };
     if entry.version != version {
+        tracing::trace!(
+            uri = %uri,
+            version,
+            current_version = entry.version,
+            "document refresh superseded before cache commit"
+        );
         return;
     }
     entry.diag_cache = cache;
     drop(entry);
 
+    let diagnostic_count = lsp_diags.len();
     client
-        .publish_diagnostics(uri, lsp_diags, Some(version))
+        .publish_diagnostics(uri.clone(), lsp_diags, Some(version))
         .await;
+    tracing::debug!(
+        uri = %uri,
+        version,
+        diagnostic_count,
+        error_count,
+        warning_count,
+        hint_count,
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "document diagnostics published"
+    );
 }
 
 impl Backend {
@@ -555,6 +607,12 @@ impl Backend {
         let enc = self.enc();
         let map_ordering_diagnostics = self.map_ordering_diagnostics.clone();
         let delay = Duration::from_millis(self.analysis_debounce_ms.load(Ordering::Relaxed));
+        tracing::trace!(
+            uri = %uri,
+            version,
+            delay_ms = delay.as_millis() as u64,
+            "document refresh scheduled"
+        );
         tokio::spawn(async move {
             tokio::time::sleep(delay).await;
             refresh_document(
@@ -621,10 +679,11 @@ impl Backend {
                 .await
         };
         if let Err(error) = result {
+            tracing::error!(%error, enabled, "formatting capability update failed");
             self.client
                 .log_message(
                     MessageType::ERROR,
-                    format!("failed to update formatting capability: {error}"),
+                    format!("ZeroSyntax: failed to update formatting capability: {error}"),
                 )
                 .await;
         }
@@ -637,6 +696,7 @@ impl Backend {
                 return;
             };
             if *current == settings {
+                tracing::trace!("configuration notification made no changes");
                 return;
             }
             let previous = current.clone();
@@ -661,6 +721,54 @@ impl Backend {
             previous.map_ordering_diagnostics != settings.map_ordering_diagnostics;
         let preview_changed = previous.preview_image_width != settings.preview_image_width
             || previous.preview_zoom_percent != settings.preview_zoom_percent;
+        let debounce_changed = previous.debounce_ms != settings.debounce_ms;
+        let format_changed = previous.format_enabled != settings.format_enabled;
+        let mut changed = Vec::new();
+        if format_changed {
+            changed.push("format.enable");
+        }
+        if schema_changed {
+            changed.push("schemaPath");
+        }
+        if roots_changed {
+            changed.push("baseIniRoots");
+        }
+        if strictness_changed {
+            changed.push("analysis.modelMemberStrictness");
+        }
+        if bare_changed {
+            changed.push("analysis.allowPercentagesWithoutSign");
+        }
+        if map_ordering_changed {
+            changed.push("analysis.mapOrderingDiagnostics");
+        }
+        if debounce_changed {
+            changed.push("analysis.debounceMs");
+        }
+        if preview_changed {
+            changed.push("preview");
+        }
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!(
+                    "ZeroSyntax: settings updated ({}) — formatting={}, schema={}, base roots={}, model strictness={:?}, bare percentages={}, map ordering={}, debounce={} ms.",
+                    changed.join(", "),
+                    settings.format_enabled,
+                    if settings.schema_path.is_empty() { "built-in" } else { "custom" },
+                    settings.base_ini_roots.len(),
+                    settings.model_member_strictness,
+                    settings.allow_bare_percentages,
+                    settings.map_ordering_diagnostics,
+                    settings.debounce_ms,
+                ),
+            )
+            .await;
+        tracing::debug!(
+            schema_path = settings.schema_path,
+            base_roots = ?settings.base_ini_roots,
+            "configuration paths updated"
+        );
 
         if preview_changed {
             if let Ok(mut cache) = self.preview_cache.lock() {
@@ -678,7 +786,8 @@ impl Backend {
             } else if bare_changed {
                 (Analyzer::new(self.analyzer().schema().clone()), None)
             } else {
-                self.scan_workspace(self.analyzer(), false).await;
+                self.scan_workspace(self.analyzer(), false, "configuration_changed")
+                    .await;
                 self.refresh_all().await;
                 return;
             };
@@ -691,10 +800,17 @@ impl Backend {
             }
             if let Some(warning) = warning {
                 self.client
+                    .log_message(
+                        MessageType::WARNING,
+                        "ZeroSyntax: custom schema could not be loaded; using the built-in schema.",
+                    )
+                    .await;
+                self.client
                     .show_message(MessageType::WARNING, warning)
                     .await;
             }
-            self.scan_workspace(analyzer, schema_changed).await;
+            self.scan_workspace(analyzer, schema_changed, "configuration_changed")
+                .await;
             self.refresh_all().await;
             return;
         }
@@ -732,14 +848,22 @@ impl Backend {
             .lock()
             .map(|settings| settings.base_ini_roots.is_empty())
             .unwrap_or(true);
-        if roots_empty && self.client_base_ini_hint.get().copied().unwrap_or(false) {
-            return;
-        }
+        let client_handles_hint =
+            roots_empty && self.client_base_ini_hint.get().copied().unwrap_or(false);
         if self
             .base_roots_hint_shown
             .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
             .is_err()
         {
+            return;
+        }
+        self.client
+            .log_message(
+                MessageType::WARNING,
+                "ZeroSyntax: map/solo.ini diagnostics are limited because no base game or mod data is configured.",
+            )
+            .await;
+        if client_handles_hint {
             return;
         }
         self.client
@@ -757,8 +881,13 @@ impl Backend {
     /// client as `$/progress` (a status-bar spinner with a `done/total`
     /// counter in VS Code) so users can tell "still indexing" apart from
     /// "nothing was found".
-    async fn scan_workspace(&self, analyzer: Arc<Analyzer>, replace_analyzer: bool) {
-        let progress_token = self.begin_scan_progress().await;
+    async fn scan_workspace(
+        &self,
+        analyzer: Arc<Analyzer>,
+        replace_analyzer: bool,
+        reason: &'static str,
+    ) {
+        let started = Instant::now();
         let roots = self.roots.lock().map(|r| r.clone()).unwrap_or_default();
         let (base_roots, model_member_strictness) = self
             .settings
@@ -770,6 +899,24 @@ impl Backend {
                 )
             })
             .unwrap_or_default();
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!(
+                    "ZeroSyntax: indexing started (reason={reason}, workspace roots={}, base roots={}).",
+                    roots.len(),
+                    base_roots.len()
+                ),
+            )
+            .await;
+        tracing::debug!(
+            reason,
+            workspace_roots = ?roots,
+            base_roots = ?base_roots,
+            replace_analyzer,
+            "workspace indexing paths"
+        );
+        let progress_token = self.begin_scan_progress().await;
         // The blocking scan streams (done, total) over a channel; forward
         // each update as a progress report while waiting for the results.
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(usize, usize)>();
@@ -793,7 +940,21 @@ impl Backend {
             self.report_scan_progress(&progress_token, done, total)
                 .await;
         }
-        let scanned = handle.await.unwrap_or_default();
+        let scanned = match handle.await {
+            Ok(scanned) => scanned,
+            Err(error) => {
+                tracing::error!(reason, %error, "workspace indexing worker failed");
+                self.client
+                    .log_message(
+                        MessageType::ERROR,
+                        format!(
+                            "ZeroSyntax: indexing worker failed (reason={reason}); the index may be incomplete."
+                        ),
+                    )
+                    .await;
+                Vec::new()
+            }
+        };
         if replace_analyzer {
             if let Ok(mut current) = self.analyzer.write() {
                 *current = analyzer.clone();
@@ -885,6 +1046,15 @@ impl Backend {
             texture_total,
         )
         .await;
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!(
+                    "ZeroSyntax: indexing completed (reason={reason}) — {ini_total} INI files, {model_total} W3D models, {audio_total} audio files, {texture_total} textures in {} ms.",
+                    started.elapsed().as_millis()
+                ),
+            )
+            .await;
     }
 
     /// Ask the client to show an indexing spinner. Returns the token to end
@@ -1210,13 +1380,51 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
+        let roots = self
+            .roots
+            .lock()
+            .map(|roots| roots.clone())
+            .unwrap_or_default();
+        let settings = self
+            .settings
+            .lock()
+            .map(|settings| settings.clone())
+            .unwrap_or_default();
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!(
+                    "ZeroSyntax: initializing v{} (encoding={:?}, workspace roots={}, base roots={}, schema={}, work progress={}, snippets={}, dynamic formatting={}).",
+                    env!("CARGO_PKG_VERSION"),
+                    self.enc(),
+                    roots.len(),
+                    settings.base_ini_roots.len(),
+                    if settings.schema_path.is_empty() { "built-in" } else { "custom" },
+                    self.progress_support.get().copied().unwrap_or(false),
+                    self.snippet_support.get().copied().unwrap_or(false),
+                    self.formatting_dynamic_registration.get().copied().unwrap_or(false),
+                ),
+            )
+            .await;
+        tracing::debug!(
+            workspace_roots = ?roots,
+            base_roots = ?settings.base_ini_roots,
+            schema_path = settings.schema_path,
+            "server initialization paths"
+        );
         if let Some(error) = self.schema_error.lock().ok().and_then(|mut e| e.take()) {
+            self.client
+                .log_message(
+                    MessageType::WARNING,
+                    "ZeroSyntax: custom schema could not be loaded; using the built-in schema.",
+                )
+                .await;
             self.client.show_message(MessageType::WARNING, error).await;
         }
         if self.format_enabled() {
             self.set_formatting_enabled(true).await;
         }
-        self.scan_workspace(self.analyzer(), false).await;
+        self.scan_workspace(self.analyzer(), false, "startup").await;
         // Re-publish diagnostics for any already-open docs now that the index
         // is populated (so cross-file references resolve). The cached parse is
         // still valid — only the index changed.
@@ -1252,7 +1460,7 @@ impl LanguageServer for Backend {
             .log_message(
                 MessageType::INFO,
                 format!(
-                    "zerosyntax language server ready ({ini} base INI files, {models} W3D models, {audio} audio files, {textures} textures indexed)"
+                    "ZeroSyntax: language server ready ({ini} base INI files, {models} W3D models, {audio} audio files, {textures} textures indexed)."
                 ),
             )
             .await;
@@ -1277,18 +1485,34 @@ impl LanguageServer for Backend {
             .lock()
             .map(|settings| settings.base_ini_roots.clone())
             .unwrap_or_default();
-        let cleared = clear_index_cache(&roots, &base_roots).map_err(|error| {
-            tracing::warn!(%error, "could not clear asset index cache");
-            tower_lsp::jsonrpc::Error::internal_error()
-        })?;
+        let cleared = match clear_index_cache(&roots, &base_roots) {
+            Ok(cleared) => cleared,
+            Err(error) => {
+                tracing::error!(%error, "asset index cache clear failed");
+                self.client
+                    .log_message(
+                        MessageType::ERROR,
+                        "ZeroSyntax: failed to clear the index cache.",
+                    )
+                    .await;
+                return Err(tower_lsp::jsonrpc::Error::internal_error());
+            }
+        };
         if params.command == REBUILD_INDEX_CACHE_COMMAND {
             self.scan_finished.store(false, Ordering::Relaxed);
             self.base_indexed_count.store(0, Ordering::Relaxed);
-            self.scan_workspace(self.analyzer(), false).await;
+            self.scan_workspace(self.analyzer(), false, "manual_cache_rebuild")
+                .await;
             let open: Vec<Url> = self.docs.iter().map(|entry| entry.key().clone()).collect();
             for uri in open {
                 self.refresh(&uri, None).await;
             }
+            self.client
+                .log_message(
+                    MessageType::INFO,
+                    format!("ZeroSyntax: index cache rebuilt (previous cache cleared={cleared})."),
+                )
+                .await;
             self.client
                 .show_message(MessageType::INFO, "ZeroSyntax index cache rebuilt.")
                 .await;
@@ -1301,11 +1525,18 @@ impl LanguageServer for Backend {
         } else {
             "ZeroSyntax index cache is already clear."
         };
+        self.client.log_message(MessageType::INFO, message).await;
         self.client.show_message(MessageType::INFO, message).await;
         Ok(Some(serde_json::json!({ "cleared": cleared })))
     }
 
     async fn shutdown(&self) -> Result<()> {
+        self.client
+            .log_message(
+                MessageType::INFO,
+                "ZeroSyntax: language server shutting down.",
+            )
+            .await;
         Ok(())
     }
 
@@ -1320,6 +1551,12 @@ impl LanguageServer for Backend {
         let rope = Rope::from_str(&text);
         let parse = Arc::new(self.analyzer().parse(&text));
         let version = params.text_document.version;
+        tracing::debug!(
+            uri = %uri,
+            version,
+            text_bytes = text.len(),
+            "document opened"
+        );
         self.docs.insert(
             uri.clone(),
             DocumentState {
@@ -1339,8 +1576,24 @@ impl LanguageServer for Backend {
         let version = params.text_document.version;
         let enc = self.enc();
         let analyzer = self.analyzer();
+        let change_count = params.content_changes.len();
+        let incoming_bytes = params
+            .content_changes
+            .iter()
+            .map(|change| change.text.len())
+            .sum::<usize>();
+        let all_ranged = params
+            .content_changes
+            .iter()
+            .all(|change| change.range.is_some());
+        let mut spliced_count = 0;
+        let mut full_fallback_count = 0;
+        let mut full_replacement = false;
+        let parse_strategy;
+        let text_bytes;
         {
             let Some(mut entry) = self.docs.get_mut(&uri) else {
+                tracing::trace!(uri = %uri, version, "document change ignored because it is not open");
                 return;
             };
             let entry = entry.value_mut();
@@ -1354,21 +1607,16 @@ impl LanguageServer for Backend {
             // format edits can each carry kilobytes).
             const BULK_CHANGE_THRESHOLD: usize = 8;
             const BULK_TEXT_BYTES: usize = 32 * 1024;
-            let bulk = params.content_changes.len() > BULK_CHANGE_THRESHOLD
-                || (params.content_changes.len() > 1
-                    && params
-                        .content_changes
-                        .iter()
-                        .map(|c| c.text.len())
-                        .sum::<usize>()
-                        > BULK_TEXT_BYTES);
-            if bulk && params.content_changes.iter().all(|c| c.range.is_some()) {
+            let bulk = change_count > BULK_CHANGE_THRESHOLD
+                || (change_count > 1 && incoming_bytes > BULK_TEXT_BYTES);
+            if bulk && all_ranged {
                 for change in params.content_changes {
                     convert::apply_change(&mut entry.rope, change.range, &change.text, enc);
                 }
                 entry.text = entry.rope.to_string().into();
                 entry.parse = Arc::new(analyzer.parse(&entry.text));
                 entry.version = version;
+                parse_strategy = "bulk_full_parse";
             } else {
                 // Each change applies to the text produced by the previous
                 // one. The parse is kept in lockstep via incremental reparse,
@@ -1386,8 +1634,12 @@ impl LanguageServer for Backend {
                                 old_end: old_end as usize,
                                 new_len: change.text.len(),
                             };
-                            let (parse, _strategy) =
+                            let (parse, strategy) =
                                 analyzer.reparse(&entry.parse, &entry.text, &new_text, edit);
+                            match strategy {
+                                Strategy::Spliced => spliced_count += 1,
+                                Strategy::Full => full_fallback_count += 1,
+                            }
                             entry.parse = Arc::new(parse);
                             entry.text = new_text;
                         }
@@ -1396,11 +1648,20 @@ impl LanguageServer for Backend {
                             entry.rope = Rope::from_str(&change.text);
                             entry.text = change.text.into();
                             entry.parse = Arc::new(analyzer.parse(&entry.text));
+                            full_replacement = true;
                         }
                     }
                 }
                 entry.version = version;
+                parse_strategy = if full_replacement {
+                    "full_document_replacement"
+                } else if full_fallback_count > 0 {
+                    "incremental_full_fallback"
+                } else {
+                    "incremental_splice"
+                };
             }
+            text_bytes = entry.text.len();
             // Definition names power reference completions and are cheap to
             // extract. Commit them while the document guard preserves version
             // order; the expensive index passes wait for the debounce.
@@ -1409,13 +1670,26 @@ impl LanguageServer for Backend {
                 idx.set_file(uri.as_str(), defs);
             }
         }
+        tracing::debug!(
+            uri = %uri,
+            version,
+            change_count,
+            incoming_bytes,
+            text_bytes,
+            parse_strategy,
+            spliced_count,
+            full_fallback_count,
+            "document changed"
+        );
         self.schedule_refresh(uri, version);
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         // Keep the file's symbols in the index (it still exists on disk); just
         // drop the in-memory buffer.
-        self.docs.remove(&canonical_uri(params.text_document.uri));
+        let uri = canonical_uri(params.text_document.uri);
+        let removed = self.docs.remove(&uri).is_some();
+        tracing::debug!(uri = %uri, removed, "document closed");
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -1531,11 +1805,13 @@ impl LanguageServer for Backend {
                 Arc::<str>::from(markdown)
             }
             Ok(Err(error)) => {
-                tracing::warn!(%error, model = %data.model, "could not render W3D completion preview");
+                tracing::debug!(%error, "W3D completion preview render details");
+                tracing::warn!("could not render W3D completion preview");
                 Arc::<str>::from("_Preview unavailable: unsupported or malformed W3D data._")
             }
             Err(error) => {
-                tracing::warn!(%error, model = %data.model, "W3D preview task failed");
+                tracing::debug!(%error, "W3D completion preview task details");
+                tracing::warn!("W3D preview task failed");
                 Arc::<str>::from("_Preview unavailable: unsupported or malformed W3D data._")
             }
         };

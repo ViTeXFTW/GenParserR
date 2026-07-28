@@ -15,6 +15,38 @@ over stdio.
 The server writes protocol messages to stdout, so clients must launch it using
 stdio rather than a TCP port.
 
+## Logging and troubleshooting
+
+The server sends concise lifecycle, configuration, indexing, and command
+outcomes through LSP `window/logMessage`. In VS Code these appear under
+**Output → ZeroSyntax v2 Language Server** at their proper Info, Warning, or
+Error level. Long scans also keep their existing status-bar progress report.
+
+Developer detail uses structured `tracing` records on stderr and is controlled
+with the standard `RUST_LOG` filter. The default is `warn`; enable server Debug
+or Trace records before starting the editor:
+
+```powershell
+$env:RUST_LOG = "zerosyntax_lsp=debug" # or zerosyntax_lsp=trace
+code .
+```
+
+```sh
+RUST_LOG=zerosyntax_lsp=debug code . # or zerosyntax_lsp=trace
+```
+
+The same filter works when launching `zerosyntax-lsp --stdio` from another LSP
+client. Debug records include paths, document URIs, versions, timings, cache
+decisions, parse strategies, and diagnostic counts. Info logs contain counts
+instead of paths. Source text, INI values, completion contents, and document
+excerpts are never logged.
+
+`zerosyntax.trace.server = verbose` is separate: it records the LSP requests
+and responses themselves, while `RUST_LOG` explains internal server decisions.
+Raw stderr can be decorated as an error by VS Code's language-client transport;
+the level printed inside each tracing record is authoritative. Stdout is always
+reserved for LSP framing and must never receive logs.
+
 ## Command-line diagnostics
 
 Use the `check` subcommand to run the same parser, schema, workspace index, and
