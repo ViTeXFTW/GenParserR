@@ -77,6 +77,11 @@
           "default": false,
           "markdownDescription": "Enable document formatting (indentation normalization). When off — the default — `#editor.formatOnSave#` will not invoke it for Generals INI files."
         },
+        "zerosyntax.preview.enable": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show rendered W3D model images in completion details. Disable this on lower-end hardware to avoid model rendering and cached preview images."
+        },
         "zerosyntax.preview.imageWidth": {
           "type": "integer",
           "default": 160,
