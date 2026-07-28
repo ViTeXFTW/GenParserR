@@ -140,6 +140,7 @@ struct RuntimeSettings {
     allow_bare_percentages: bool,
     map_ordering_diagnostics: bool,
     debounce_ms: u64,
+    preview_enabled: bool,
     preview_image_width: u32,
     preview_zoom_percent: u32,
 }
@@ -154,6 +155,7 @@ impl Default for RuntimeSettings {
             allow_bare_percentages: false,
             map_ordering_diagnostics: true,
             debounce_ms: DEFAULT_ANALYSIS_DEBOUNCE_MS,
+            preview_enabled: true,
             preview_image_width: DEFAULT_PREVIEW_IMAGE_WIDTH,
             preview_zoom_percent: DEFAULT_PREVIEW_ZOOM_PERCENT,
         }
@@ -213,6 +215,10 @@ impl RuntimeSettings {
                 .and_then(|value| value.as_bool())
                 .unwrap_or(true),
             debounce_ms,
+            preview_enabled: preview
+                .and_then(|preview| preview.get("enable"))
+                .and_then(|enabled| enabled.as_bool())
+                .unwrap_or(true),
             preview_image_width: normalized_u32(
                 preview.and_then(|preview| preview.get("imageWidth")),
                 DEFAULT_PREVIEW_IMAGE_WIDTH,
@@ -659,7 +665,8 @@ impl Backend {
             previous.model_member_strictness != settings.model_member_strictness;
         let map_ordering_changed =
             previous.map_ordering_diagnostics != settings.map_ordering_diagnostics;
-        let preview_changed = previous.preview_image_width != settings.preview_image_width
+        let preview_changed = previous.preview_enabled != settings.preview_enabled
+            || previous.preview_image_width != settings.preview_image_width
             || previous.preview_zoom_percent != settings.preview_zoom_percent;
 
         if preview_changed {
@@ -1081,7 +1088,7 @@ impl LanguageServer for Backend {
 
         // Editor-facing settings arrive as `initializationOptions`. Shape:
         // `{ "format": {"enable": bool}, "schemaPath": "schema.json",
-        //    "preview": {"imageWidth": 160, "zoomPercent": 100},
+        //    "preview": {"enable": true, "imageWidth": 160, "zoomPercent": 100},
         //    "analysis": {"modelMemberStrictness": "compatible",
         //                 "allowPercentagesWithoutSign": false,
         //                 "mapOrderingDiagnostics": true, "debounceMs": 250},
@@ -1461,11 +1468,25 @@ impl LanguageServer for Backend {
         let Some(source) = source else {
             return Ok(item);
         };
-        let (image_width, zoom_percent) = self
+        let (preview_enabled, image_width, zoom_percent) = self
             .settings
             .lock()
-            .map(|settings| (settings.preview_image_width, settings.preview_zoom_percent))
-            .unwrap_or((DEFAULT_PREVIEW_IMAGE_WIDTH, DEFAULT_PREVIEW_ZOOM_PERCENT));
+            .map(|settings| {
+                (
+                    settings.preview_enabled,
+                    settings.preview_image_width,
+                    settings.preview_zoom_percent,
+                )
+            })
+            .unwrap_or((
+                true,
+                DEFAULT_PREVIEW_IMAGE_WIDTH,
+                DEFAULT_PREVIEW_ZOOM_PERCENT,
+            ));
+        if !preview_enabled {
+            item.documentation = None;
+            return Ok(item);
+        }
         let cache_key = format!(
             "{}\0{}\0{image_width}\0{zoom_percent}",
             data.model.to_ascii_lowercase(),
@@ -2215,12 +2236,14 @@ mod tests {
     #[test]
     fn preview_settings_default_and_clamp() {
         let defaults = RuntimeSettings::default();
+        assert!(defaults.preview_enabled);
         assert_eq!(defaults.preview_image_width, 160);
         assert_eq!(defaults.preview_zoom_percent, 100);
 
         let settings = RuntimeSettings::from_value(Some(&serde_json::json!({
-            "preview": {"imageWidth": 10_000, "zoomPercent": 0}
+            "preview": {"enable": false, "imageWidth": 10_000, "zoomPercent": 0}
         })));
+        assert!(!settings.preview_enabled);
         assert_eq!(settings.preview_image_width, 640);
         assert_eq!(settings.preview_zoom_percent, 25);
     }
@@ -2231,7 +2254,7 @@ mod tests {
             "format": {"enable": true},
             "schemaPath": "schema.json",
             "baseIniRoots": ["base"],
-            "preview": {"imageWidth": 320, "zoomPercent": 150},
+            "preview": {"enable": false, "imageWidth": 320, "zoomPercent": 150},
             "analysis": {"modelMemberStrictness": "strict", "debounceMs": 9000}
         })));
         let notification = RuntimeSettings::from_value(Some(&serde_json::json!({
@@ -2239,12 +2262,13 @@ mod tests {
                 "format": {"enable": true},
                 "schema": {"path": "schema.json"},
                 "baseIniRoots": ["base"],
-                "preview": {"imageWidth": 320, "zoomPercent": 150},
+                "preview": {"enable": false, "imageWidth": 320, "zoomPercent": 150},
                 "analysis": {"modelMemberStrictness": "strict", "debounceMs": 9000}
             }
         })));
         assert_eq!(startup, notification);
         assert_eq!(startup.debounce_ms, 5000);
+        assert!(!startup.preview_enabled);
         assert_eq!(startup.preview_image_width, 320);
         assert_eq!(startup.preview_zoom_percent, 150);
     }

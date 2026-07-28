@@ -170,7 +170,7 @@ def main() -> int:
 
     runtime_settings = {
         "format": {"enable": False},
-        "preview": {"imageWidth": 240, "zoomPercent": 150},
+        "preview": {"enable": True, "imageWidth": 240, "zoomPercent": 150},
         "baseIniRoots": [],
         "schema": {"path": ""},
         "analysis": {
@@ -193,7 +193,7 @@ def main() -> int:
                      }, "workspaceFolders": None, "rootUri": root_uri,
                      "initializationOptions": {
                          "format": {"enable": False},
-                         "preview": {"imageWidth": 240, "zoomPercent": 150},
+                         "preview": {"enable": True, "imageWidth": 240, "zoomPercent": 150},
                          "analysis": {"debounceMs": 50},
                      }}})
     init = wait_for(lambda m: m.get("id") == 1 and "result" in m, "initialize result")
@@ -625,6 +625,15 @@ def main() -> int:
     assert "|width=320)" in resized_markdown
     assert resized_png != encoded_png, "zoom change reused the previous preview"
     print("OK: model preview size and zoom hot-reload")
+
+    runtime_settings["preview"]["enable"] = False
+    configure()
+    send({"jsonrpc": "2.0", "id": 103, "method": "completionItem/resolve",
+          "params": resolved["result"]})
+    disabled = wait_for(
+        lambda m: m.get("id") == 103 and "result" in m, "disabled model preview")
+    assert "documentation" not in disabled["result"]
+    print("OK: model preview can be disabled without restarting")
 
     runtime_settings["analysis"]["allowPercentagesWithoutSign"] = False
     configure()

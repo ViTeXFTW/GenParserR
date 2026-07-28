@@ -43,6 +43,7 @@ export function activate(context: vscode.ExtensionContext) {
         enable: setting<boolean>("format.enable", false),
       },
       preview: {
+        enable: setting<boolean>("preview.enable", true),
         imageWidth: setting<number>("preview.imageWidth", 160),
         zoomPercent: setting<number>("preview.zoomPercent", 100),
       },

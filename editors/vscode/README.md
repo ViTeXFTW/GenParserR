@@ -37,7 +37,8 @@ While completing `Model =`, move the active selection with the keyboard or
 mouse to see a textured W3D thumbnail in VS Code's suggestion-details pane.
 The preview is loaded only for the selected entry. If the pane is collapsed,
 press `Ctrl+Space` again or use the suggestion widget's details control.
-Use `zerosyntax.preview.imageWidth` to change the thumbnail/pane content width
+Disable `zerosyntax.preview.enable` to avoid model rendering and cached images
+on lower-end hardware. Use `zerosyntax.preview.imageWidth` to change the thumbnail/pane content width
 and `zerosyntax.preview.zoomPercent` to change the model framing.
 
 ## Settings
@@ -50,6 +51,7 @@ and `zerosyntax.preview.zoomPercent` to change the model framing.
 | `zerosyntax.analysis.allowPercentagesWithoutSign` | `false` | Allows engine-compatible percentage values without a trailing `%`; applies immediately. |
 | `zerosyntax.analysis.mapOrderingDiagnostics` | `true` | Warns about source-proven forward-order problems in `map.ini` and `solo.ini`; applies immediately. |
 | `zerosyntax.analysis.debounceMs` | `250` | Delay before diagnostics/index refresh after typing; applies to future edits immediately. |
+| `zerosyntax.preview.enable` | `true` | Enables rendered W3D model completion previews; disable on lower-end hardware. |
 | `zerosyntax.preview.imageWidth` | `160` | Displayed W3D thumbnail width in pixels; applies to newly resolved previews immediately. |
 | `zerosyntax.preview.zoomPercent` | `100` | Default W3D preview camera zoom; applies to newly resolved previews immediately. |
 | `zerosyntax.format.enable` | `false` | Enables indentation formatting immediately when the client supports dynamic registration. |
