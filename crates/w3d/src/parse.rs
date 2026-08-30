@@ -153,7 +153,7 @@ fn parse_mesh(bytes: &[u8]) -> Result<Mesh, W3dError> {
                 }
                 mesh.triangles = chunk
                     .data
-                    .chunks_exact(32)
+                    .chunks(32)
                     .map(|bytes| {
                         Ok(Triangle {
                             indices: [u32_at(bytes, 0)?, u32_at(bytes, 4)?, u32_at(bytes, 8)?],
@@ -167,7 +167,7 @@ fn parse_mesh(bytes: &[u8]) -> Result<Mesh, W3dError> {
                 }
                 mesh.influences = chunk
                     .data
-                    .chunks_exact(8)
+                    .chunks(8)
                     .map(|value| u16::from_le_bytes([value[0], value[1]]))
                     .collect();
             }
@@ -252,7 +252,7 @@ fn parse_hierarchy(bytes: &[u8]) -> Result<Hierarchy, W3dError> {
                 if chunk.data.len() % 60 != 0 {
                     return Err(W3dError::new("invalid pivot chunk size"));
                 }
-                for pivot in chunk.data.chunks_exact(60) {
+                for pivot in chunk.data.chunks(60) {
                     let parent = u32_at(pivot, 16)?;
                     let rotation = Quat::from_xyzw(
                         f32_at(pivot, 44)?,
@@ -342,7 +342,7 @@ fn collect_catalog_names(
             push_name(names, &fixed_name(&bytes[4..20]));
         }
         PIVOTS => {
-            for pivot in bytes.chunks_exact(60) {
+            for pivot in bytes.chunks(60).filter(|pivot| pivot.len() == 60) {
                 push_name(members, &fixed_name(&pivot[..16]));
             }
         }
@@ -479,7 +479,7 @@ fn rgba(bytes: &[u8]) -> Result<Vec<[u8; 4]>, W3dError> {
         return Err(W3dError::new("invalid RGBA array size"));
     }
     Ok(bytes
-        .chunks_exact(4)
+        .chunks(4)
         .map(|color| [color[0], color[1], color[2], color[3]])
         .collect())
 }
