@@ -27,6 +27,19 @@ end
 -- The server expects the Generals/Zero Hour INI language, so map .ini to it.
 vim.filetype.add({ extension = { ini = "generals-ini" } })
 
+-- Resolve one root for the whole project so files in sibling directories share
+-- a single server and its cross-file index (completion, definitions, rename).
+-- Walk up to the mod/game root (the folder holding `Data` or `.git`); fall back
+-- to the file's own directory when no marker is found.
+local function project_root(fname)
+  local start = vim.fs.dirname(fname)
+  local marker = vim.fs.find({ "Data", ".git" }, { upward = true, path = start })[1]
+  if marker then
+    return vim.fs.dirname(marker)
+  end
+  return start
+end
+
 vim.api.nvim_create_autocmd("FileType", {
   pattern = "generals-ini",
   callback = function(args)
@@ -34,7 +47,7 @@ vim.api.nvim_create_autocmd("FileType", {
     vim.lsp.start({
       name = "zerosyntax",
       cmd = { exe }, -- bare invocation speaks LSP over stdio
-      root_dir = vim.fs.dirname(fname),
+      root_dir = project_root(fname),
       -- Mirrors the VS Code extension's initializationOptions; see
       -- docs/language-server.md for the full list.
       init_options = {
