@@ -213,12 +213,15 @@ struct IndexSummary {
 impl IndexSummary {
     fn completion_message(self, outcome: &str) -> String {
         let skipped = self.stats.skipped_inputs();
-        if self.stats.discovered_inputs == 0 {
+        if self.stats.discovered_inputs == 0 && skipped == 0 {
             return format!("{outcome} — no indexable game data found");
         }
         let mut warnings = Vec::new();
         if skipped > 0 {
-            warnings.push(format!("{skipped} inputs skipped"));
+            warnings.push(format!(
+                "{skipped} input{} skipped",
+                if skipped == 1 { "" } else { "s" }
+            ));
         }
         if !self.stats.cache_written {
             warnings.push("persistent cache not saved".into());
@@ -1319,12 +1322,13 @@ impl Backend {
                 .log_message(
                     MessageType::WARNING,
                     format!(
-                        "ZeroSyntax: indexing completed with warnings (reason={reason}) — {skipped_inputs} inputs could not be indexed."
+                        "ZeroSyntax: indexing completed with warnings (reason={reason}) — {skipped_inputs} input{} could not be indexed.",
+                        if skipped_inputs == 1 { "" } else { "s" }
                     ),
                 )
                 .await;
         }
-        if stats.discovered_inputs > 0 && !stats.cache_written {
+        if (stats.discovered_inputs > 0 || skipped_inputs > 0) && !stats.cache_written {
             self.client
                 .log_message(
                     MessageType::WARNING,
@@ -2829,6 +2833,13 @@ mod tests {
         })
         .completion_message("Ready")
         .contains("Ready with warnings"));
+        assert!(summary(ScanStats {
+            discovery_failures: 1,
+            cache_written: true,
+            ..ScanStats::default()
+        })
+        .completion_message("Ready")
+        .contains("1 input skipped"));
     }
 
     #[test]
