@@ -30,6 +30,43 @@ pub(crate) type ScanEntry = (
     Option<Arc<str>>,
 );
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ScanProgress {
+    Discovering,
+    InputsDiscovered {
+        total: usize,
+        skipped: usize,
+    },
+    Indexing {
+        done: usize,
+        total: usize,
+        cache_hits: usize,
+        cache_misses: usize,
+    },
+    WritingCache,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ScanStats {
+    pub(crate) discovered_inputs: usize,
+    pub(crate) cache_hits: usize,
+    pub(crate) cache_misses: usize,
+    pub(crate) fingerprint_failures: usize,
+    pub(crate) scan_failures: usize,
+    pub(crate) cache_written: bool,
+}
+
+impl ScanStats {
+    pub(crate) fn skipped_inputs(self) -> usize {
+        self.fingerprint_failures + self.scan_failures
+    }
+}
+
+pub(crate) struct ScanOutcome {
+    pub(crate) entries: Vec<(bool, ScanEntry)>,
+    pub(crate) stats: ScanStats,
+}
+
 const INDEX_CACHE_VERSION: u32 = 5;
 const MAX_PREVIEW_ASSET_BYTES: u64 = 128 * 1024 * 1024;
 
@@ -502,9 +539,10 @@ pub(crate) fn scan_with_cache(
     analyzer: &Analyzer,
     workspace_roots: &[PathBuf],
     base_roots: &[PathBuf],
-    progress: &mut impl FnMut(usize, usize),
-) -> Vec<(bool, ScanEntry)> {
+    progress: &mut impl FnMut(ScanProgress),
+) -> ScanOutcome {
     let started = Instant::now();
+    progress(ScanProgress::Discovering);
     let cache_path = index_cache_path(workspace_roots, base_roots);
     let expected_schema_hash = schema_hash();
     let empty_cache = || IndexCache {
@@ -563,6 +601,10 @@ pub(crate) fn scan_with_cache(
             }
         }
     }
+    progress(ScanProgress::InputsDiscovered {
+        total: paths.len(),
+        skipped: fingerprint_failures,
+    });
 
     let mut next = HashMap::with_capacity(paths.len());
     let mut scanned = Vec::new();
@@ -593,8 +635,14 @@ pub(crate) fn scan_with_cache(
             },
         );
         scanned.extend(entries.into_iter().map(|entry| (is_base, entry)));
-        progress(done + 1, total);
+        progress(ScanProgress::Indexing {
+            done: done + 1,
+            total,
+            cache_hits,
+            cache_misses,
+        });
     }
+    progress(ScanProgress::WritingCache);
     let cache = IndexCache {
         version: INDEX_CACHE_VERSION,
         schema_hash: expected_schema_hash,
@@ -636,7 +684,17 @@ pub(crate) fn scan_with_cache(
         elapsed_ms = started.elapsed().as_millis() as u64,
         "workspace scan completed"
     );
-    scanned
+    ScanOutcome {
+        entries: scanned,
+        stats: ScanStats {
+            discovered_inputs,
+            cache_hits,
+            cache_misses,
+            fingerprint_failures,
+            scan_failures,
+            cache_written,
+        },
+    }
 }
 
 pub(crate) fn scan_files_checked(analyzer: &Analyzer, paths: &[PathBuf]) -> Result<Vec<ScanEntry>> {

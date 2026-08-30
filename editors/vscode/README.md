@@ -46,6 +46,7 @@ and `zerosyntax.preview.zoomPercent` to change the model framing.
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `zerosyntax.baseIniRoots` | `[]` | Base game/mod directories and `.big` archives used for INI and game-asset checks; changes reindex. |
+| `zerosyntax.progress.mode` | `indexing` | Shows indexing progress by default; `verbose` also reports settings-driven diagnostic refreshes, and `off` hides status progress while keeping Output logs. |
 | `zerosyntax.schema.path` | empty | Custom schema JSON; changes reparse and reindex, with invalid files falling back to the built-in schema. |
 | `zerosyntax.analysis.modelMemberStrictness` | `compatible` | Disables member warnings, accepts any applicable model, or requires every model; applies immediately. |
 | `zerosyntax.analysis.allowPercentagesWithoutSign` | `false` | Allows engine-compatible percentage values without a trailing `%`; applies immediately. |
@@ -62,8 +63,9 @@ Formatting is intentionally off by default. Enable it only when you want
 **Format Document** or format-on-save to normalize indentation.
 
 Runtime settings reload without restarting. Schema and base-root changes show
-indexing progress because they rebuild workspace state; only changing the
-server executable path requires a normal VS Code language-server restart.
+phased progress through discovery, indexing, activation, and diagnostics unless
+`zerosyntax.progress.mode` is `off`; only changing the server executable path
+requires a normal VS Code language-server restart.
 
 ## INI file association
 

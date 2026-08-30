@@ -104,6 +104,17 @@
           },
           "markdownDescription": "Directories or `.big` archives containing base game/mod INI files and game assets. INI definitions are treated as already loaded before `map.ini`/`solo.ini`; W3D, WAV/MP3, and TGA/DDS assets power completions and diagnostics. Configure all loaded roots to avoid partial-index warnings. Changing this reindexes in the background."
         },
+        "zerosyntax.progress.mode": {
+          "type": "string",
+          "enum": ["off", "indexing", "verbose"],
+          "enumDescriptions": [
+            "Hide status-bar progress. Lifecycle and error details remain available in the language-server Output channel.",
+            "Show startup, schema/base-root indexing, and manual index-rebuild progress.",
+            "Also show whole-document diagnostics refreshes caused by analysis setting changes."
+          ],
+          "default": "indexing",
+          "markdownDescription": "Controls ZeroSyntax work progress in the editor. `indexing` preserves the normal startup and reindexing feedback; `verbose` also reports potentially expensive diagnostic refreshes; `off` keeps these operations silent while retaining Output logs."
+        },
         "zerosyntax.schema.path": {
           "type": "string",
           "default": "",

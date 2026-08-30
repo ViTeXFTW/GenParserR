@@ -117,6 +117,7 @@ symbols.
 {
   "format": { "enable": false },
   "preview": { "imageWidth": 160, "zoomPercent": 100 },
+  "progress": { "mode": "indexing" },
   "schemaPath": "C:/Mods/MyMod/schema.json",
   "analysis": {
     "modelMemberStrictness": "compatible",
@@ -140,6 +141,10 @@ symbols.
 - `preview.zoomPercent` controls the default W3D camera zoom (`25`–`400`,
   default `100`). Both preview settings apply to newly resolved completions
   without restarting the server.
+- `progress.mode` is `off`, `indexing` (the default), or `verbose`. The default
+  reports phased startup, schema/base-root reload, and manual rebuild progress;
+  `verbose` also reports analysis-setting diagnostic refreshes. `off` hides
+  status progress but retains lifecycle and error details in the client log.
 - `schemaPath` points to a custom schema JSON file. Unreadable or invalid files
   produce a warning and fall back to the built-in schema.
 - `analysis.modelMemberStrictness` is `off`, `compatible` (member exists in any
@@ -168,7 +173,8 @@ The same settings can be sent at runtime through
 `workspace/didChangeConfiguration`, either directly or nested under
 `{"zerosyntax": ...}`. Analysis, debounce, and formatting changes apply
 immediately. Schema and base-root changes rebuild the complete index, keep
-filesystem scanning on a blocking worker, and report indexing progress.
+filesystem scanning on a blocking worker, and report progress through file
+discovery, cache checking, index activation, and open-document diagnostics.
 Identical settings are ignored.
 
 Clients without dynamic formatting registration keep their startup formatting

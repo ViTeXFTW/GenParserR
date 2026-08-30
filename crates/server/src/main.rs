@@ -4,6 +4,7 @@
 mod backend;
 mod cli;
 mod convert;
+mod progress;
 mod scan;
 
 use backend::Backend;

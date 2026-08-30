@@ -149,6 +149,7 @@ def main() -> int:
     stderr_thread.start()
     server_requests = []
     indexing_begins = []
+    progress_reports = []
     indexing_ends = []
     log_messages = []
 
@@ -179,6 +180,9 @@ def main() -> int:
                     and msg.get("params", {}).get("value", {}).get("kind") == "begin"):
                 indexing_begins.append(msg)
             if (msg.get("method") == "$/progress"
+                    and msg.get("params", {}).get("value", {}).get("kind") == "report"):
+                progress_reports.append(msg)
+            if (msg.get("method") == "$/progress"
                     and msg.get("params", {}).get("value", {}).get("kind") == "end"):
                 indexing_ends.append(msg)
             if msg.get("method") == "window/logMessage":
@@ -191,6 +195,7 @@ def main() -> int:
     runtime_settings = {
         "format": {"enable": False},
         "preview": {"enable": True, "imageWidth": 240, "zoomPercent": 150},
+        "progress": {"mode": "indexing"},
         "baseIniRoots": [],
         "schema": {"path": ""},
         "analysis": {
@@ -214,6 +219,7 @@ def main() -> int:
                      "initializationOptions": {
                          "format": {"enable": False},
                          "preview": {"enable": True, "imageWidth": 240, "zoomPercent": 150},
+                         "progress": {"mode": "indexing"},
                          "analysis": {"debounceMs": 50},
                      }}})
     init = wait_for(lambda m: m.get("id") == 1 and "result" in m, "initialize result")
@@ -249,11 +255,18 @@ def main() -> int:
         if "indexing completed (reason=startup" in message
     )
     assert "INI files" in completed and "W3D models" in completed, completed
+    startup_begin = indexing_begins[0]["params"]["value"]
+    assert startup_begin["title"] == "Starting ZeroSyntax", startup_begin
     startup_progress = indexing_ends[0]["params"]["value"]["message"]
-    assert startup_progress.removesuffix(" indexed") in completed, (
-        startup_progress,
-        completed,
-    )
+    assert startup_progress.startswith("Ready"), startup_progress
+    assert "INI files" in startup_progress or "no indexable game data" in startup_progress
+    phase_messages = [
+        message["params"]["value"].get("message", "")
+        for message in progress_reports
+    ]
+    assert any("Discovering workspace" in message for message in phase_messages), phase_messages
+    assert any("Activating workspace index" in message for message in phase_messages), phase_messages
+    assert any("Finalizing workspace state" in message for message in phase_messages), phase_messages
     print("OK: startup emits initialization, indexing, and ready logs")
 
     # 2) didOpen with a Weapon block: bad bool + unknown field.
@@ -725,11 +738,14 @@ def main() -> int:
         and m.get("params", {}).get("value", {}).get("kind") == "end",
         "base-root indexing",
     )
-    reindexed = wait_for(
-        lambda m: m.get("method") == "window/logMessage"
-        and "indexing completed (reason=configuration_changed"
-        in m.get("params", {}).get("message", ""),
-        "base-root indexing log",
+    reindexed = next(
+        (
+            message
+            for message in reversed(log_messages)
+            if "indexing completed (reason=configuration_changed"
+            in message.get("params", {}).get("message", "")
+        ),
+        None,
     )
     assert reindexed and "audio files" in reindexed["params"]["message"], reindexed
     assert len(indexing_begins) == progress_before + 1, (
@@ -985,6 +1001,7 @@ def main() -> int:
     rebuild = wait_for(lambda m: m.get("id") == 30 and "result" in m,
                        "manual cache rebuild response")
     assert rebuild_started and rebuild_completed and rebuild["result"]["rebuilt"] is True
+    assert indexing_begins[-1]["params"]["value"]["title"] == "Rebuilding ZeroSyntax index"
     print("OK: manual cache rebuild logs its reason and completion")
 
     requests_before = len(server_requests)
@@ -1007,6 +1024,54 @@ def main() -> int:
     assert len(indexing_begins) == progress_before
     assert len(log_messages) == logs_before
     print("OK: formatting hot-registers; identical settings are a no-op")
+
+    # Progress mode can suppress indexing UI without suppressing lifecycle logs.
+    runtime_settings["progress"]["mode"] = "off"
+    configure()
+    wait_for(
+        lambda m: m.get("method") == "window/logMessage"
+        and "settings updated (progress.mode)" in m.get("params", {}).get("message", ""),
+        "progress mode off",
+    )
+    progress_before = len(indexing_begins)
+    runtime_settings["baseIniRoots"] = [str(base)]
+    configure()
+    hidden_reindex = wait_for(
+        lambda m: m.get("method") == "window/logMessage"
+        and "indexing completed (reason=configuration_changed"
+        in m.get("params", {}).get("message", ""),
+        "hidden base-root indexing",
+    )
+    assert hidden_reindex
+    assert len(indexing_begins) == progress_before
+
+    # Verbose mode adds progress for settings-driven whole-document refreshes.
+    runtime_settings["progress"]["mode"] = "verbose"
+    runtime_settings["analysis"]["mapOrderingDiagnostics"] = False
+    configure()
+    verbose_refresh = wait_for(
+        lambda m: m.get("method") == "$/progress"
+        and m.get("params", {}).get("value", {}).get("kind") == "begin"
+        and m["params"]["value"].get("title") == "Refreshing ZeroSyntax diagnostics",
+        "verbose diagnostic refresh",
+    )
+    assert verbose_refresh
+    wait_for(
+        lambda m: m.get("method") == "$/progress"
+        and m.get("params", {}).get("value", {}).get("kind") == "end",
+        "verbose diagnostic refresh completion",
+    )
+    runtime_settings["progress"]["mode"] = "indexing"
+    runtime_settings["analysis"]["mapOrderingDiagnostics"] = True
+    runtime_settings["baseIniRoots"] = []
+    configure()
+    wait_for(
+        lambda m: m.get("method") == "window/logMessage"
+        and "indexing completed (reason=configuration_changed"
+        in m.get("params", {}).get("message", ""),
+        "restore base-root configuration",
+    )
+    print("OK: progress mode supports off, indexing, and verbose behavior")
 
     # 9) Phase-6 batch 2: semanticTokens delta, formatting, code actions.
     assert caps["semanticTokensProvider"]["full"] == {"delta": True}, \

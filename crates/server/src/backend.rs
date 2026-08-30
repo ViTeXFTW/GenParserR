@@ -32,9 +32,10 @@ use zerosyntax_analysis::{actions, completion, diagnostics, format, outline, sem
 use zerosyntax_syntax::{Edit, Parse, Strategy};
 
 use crate::convert::{self, PositionEnc};
+use crate::progress::ProgressReporter;
 use crate::scan::{
     clear_index_cache, index_cache_path, load_sibling_str_keys, read_asset_uri, read_lossy,
-    scan_with_cache,
+    scan_with_cache, ScanOutcome, ScanProgress, ScanStats,
 };
 #[cfg(test)]
 use crate::scan::{parse_w3d_models, scan_big, scan_roots};
@@ -131,6 +132,114 @@ const MIN_PREVIEW_ZOOM_PERCENT: u32 = 25;
 const MAX_PREVIEW_ZOOM_PERCENT: u32 = 400;
 const FORMATTING_REGISTRATION_ID: &str = "zerosyntax-formatting";
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum ProgressMode {
+    Off,
+    #[default]
+    Indexing,
+    Verbose,
+}
+
+impl ProgressMode {
+    fn from_value(value: Option<&serde_json::Value>) -> Self {
+        match value.and_then(serde_json::Value::as_str) {
+            Some("off") => Self::Off,
+            Some("verbose") => Self::Verbose,
+            _ => Self::Indexing,
+        }
+    }
+
+    fn allows(self, verbose_only: bool) -> bool {
+        match self {
+            Self::Off => false,
+            Self::Indexing => !verbose_only,
+            Self::Verbose => true,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Indexing => "indexing",
+            Self::Verbose => "verbose",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ProgressWork {
+    Startup,
+    GameDataReload,
+    SchemaReload,
+    ManualRebuild,
+    DiagnosticsRefresh,
+}
+
+impl ProgressWork {
+    fn title(self) -> &'static str {
+        match self {
+            Self::Startup => "Starting ZeroSyntax",
+            Self::GameDataReload => "Updating game-data index",
+            Self::SchemaReload => "Reloading ZeroSyntax schema",
+            Self::ManualRebuild => "Rebuilding ZeroSyntax index",
+            Self::DiagnosticsRefresh => "Refreshing ZeroSyntax diagnostics",
+        }
+    }
+
+    fn initial_message(self) -> &'static str {
+        match self {
+            Self::Startup => "preparing workspace data",
+            Self::GameDataReload => "applying configured game-data roots",
+            Self::SchemaReload => "loading the configured schema",
+            Self::ManualRebuild => "clearing the persistent index cache",
+            Self::DiagnosticsRefresh => "reanalyzing open documents",
+        }
+    }
+
+    fn verbose_only(self) -> bool {
+        matches!(self, Self::DiagnosticsRefresh)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct IndexSummary {
+    ini_total: usize,
+    model_total: usize,
+    audio_total: usize,
+    texture_total: usize,
+    stats: ScanStats,
+}
+
+impl IndexSummary {
+    fn completion_message(self, outcome: &str) -> String {
+        let skipped = self.stats.skipped_inputs();
+        if self.stats.discovered_inputs == 0 {
+            return format!("{outcome} — no indexable game data found");
+        }
+        let mut warnings = Vec::new();
+        if skipped > 0 {
+            warnings.push(format!("{skipped} inputs skipped"));
+        }
+        if !self.stats.cache_written {
+            warnings.push("persistent cache not saved".into());
+        }
+        let outcome = if warnings.is_empty() {
+            outcome.to_string()
+        } else {
+            format!("{outcome} with warnings")
+        };
+        let warning = (!warnings.is_empty()).then(|| format!("; {}", warnings.join(", ")));
+        format!(
+            "{outcome} — {} INI files, {} W3D models, {} audio files, {} textures indexed{}",
+            self.ini_total,
+            self.model_total,
+            self.audio_total,
+            self.texture_total,
+            warning.as_deref().unwrap_or_default(),
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RuntimeSettings {
     format_enabled: bool,
@@ -143,6 +252,7 @@ struct RuntimeSettings {
     preview_enabled: bool,
     preview_image_width: u32,
     preview_zoom_percent: u32,
+    progress_mode: ProgressMode,
 }
 
 impl Default for RuntimeSettings {
@@ -158,6 +268,7 @@ impl Default for RuntimeSettings {
             preview_enabled: true,
             preview_image_width: DEFAULT_PREVIEW_IMAGE_WIDTH,
             preview_zoom_percent: DEFAULT_PREVIEW_ZOOM_PERCENT,
+            progress_mode: ProgressMode::Indexing,
         }
     }
 }
@@ -170,6 +281,7 @@ impl RuntimeSettings {
         let value = value.get("zerosyntax").unwrap_or(value);
         let analysis = value.get("analysis");
         let preview = value.get("preview");
+        let progress = value.get("progress");
         let debounce_ms =
             normalized_debounce_ms(analysis.and_then(|analysis| analysis.get("debounceMs")));
         Self {
@@ -230,6 +342,9 @@ impl RuntimeSettings {
                 DEFAULT_PREVIEW_ZOOM_PERCENT,
                 MIN_PREVIEW_ZOOM_PERCENT,
                 MAX_PREVIEW_ZOOM_PERCENT,
+            ),
+            progress_mode: ProgressMode::from_value(
+                progress.and_then(|progress| progress.get("mode")),
             ),
         }
     }
@@ -305,6 +420,8 @@ pub struct Backend {
     /// Whether the client supports `window/workDoneProgress` (the scan
     /// spinner). Captured at `initialize`.
     progress_support: OnceLock<bool>,
+    /// Monotonic id source for concurrent work-done progress tokens.
+    work_progress_id: AtomicU64,
     /// Delay after the latest edit before whole-document indexes and
     /// diagnostics refresh. Parsing and definition-name indexing stay eager.
     analysis_debounce_ms: AtomicU64,
@@ -555,6 +672,7 @@ impl Backend {
             client_base_ini_hint: OnceLock::new(),
             snippet_support: OnceLock::new(),
             progress_support: OnceLock::new(),
+            work_progress_id: AtomicU64::new(1),
             analysis_debounce_ms: AtomicU64::new(DEFAULT_ANALYSIS_DEBOUNCE_MS),
             semantic_result_id: AtomicU64::new(1),
             preview_cache: Mutex::new(PreviewCache::default()),
@@ -583,6 +701,24 @@ impl Backend {
     fn next_semantic_id(&self) -> u64 {
         self.semantic_result_id
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    async fn begin_progress(&self, work: ProgressWork) -> ProgressReporter {
+        let mode = self
+            .settings
+            .lock()
+            .map(|settings| settings.progress_mode)
+            .unwrap_or_default();
+        let supported = self.progress_support.get().copied().unwrap_or(false);
+        let id = self.work_progress_id.fetch_add(1, Ordering::Relaxed);
+        ProgressReporter::begin(
+            &self.client,
+            supported && mode.allows(work.verbose_only()),
+            NumberOrString::String(format!("zerosyntax/work/{id}")),
+            work.title(),
+            work.initial_message(),
+        )
+        .await
     }
 
     /// Update the cross-file index from the document's cached parse, run
@@ -637,15 +773,46 @@ impl Backend {
         });
     }
 
-    async fn refresh_all(&self) {
+    async fn refresh_all_with_progress(
+        &self,
+        progress: &ProgressReporter,
+        start_percentage: u32,
+        percentage_span: u32,
+    ) -> usize {
         let open: Vec<Url> = self
             .docs
             .iter()
             .map(|document| document.key().clone())
             .collect();
-        for uri in open {
-            self.refresh(&uri, None).await;
+        let total = open.len();
+        if total == 0 {
+            progress
+                .report(
+                    "Finalizing workspace state",
+                    Some(start_percentage + percentage_span),
+                )
+                .await;
+            return 0;
         }
+        progress
+            .report(
+                format!("Refreshing diagnostics 0/{total}"),
+                Some(start_percentage),
+            )
+            .await;
+        for (done, uri) in open.into_iter().enumerate() {
+            self.refresh(&uri, None).await;
+            let completed = done + 1;
+            let percentage =
+                start_percentage + (completed as u32 * percentage_span / total.max(1) as u32);
+            progress
+                .report(
+                    format!("Refreshing diagnostics {completed}/{total}"),
+                    Some(percentage),
+                )
+                .await;
+        }
+        total
     }
 
     fn clear_diagnostic_caches(&self) {
@@ -695,6 +862,29 @@ impl Backend {
         }
     }
 
+    async fn finish_index_work(
+        &self,
+        progress: ProgressReporter,
+        scan: std::result::Result<IndexSummary, ()>,
+        success_outcome: &str,
+    ) -> Option<IndexSummary> {
+        match scan {
+            Ok(summary) => {
+                self.refresh_all_with_progress(&progress, 92, 8).await;
+                progress
+                    .end(summary.completion_message(success_outcome))
+                    .await;
+                Some(summary)
+            }
+            Err(()) => {
+                progress
+                    .end("Indexing failed — the previous workspace index remains active")
+                    .await;
+                None
+            }
+        }
+    }
+
     async fn apply_settings(&self, settings: RuntimeSettings) {
         let _reload = self.reload_lock.lock().await;
         let previous = {
@@ -730,6 +920,7 @@ impl Backend {
             || previous.preview_zoom_percent != settings.preview_zoom_percent;
         let debounce_changed = previous.debounce_ms != settings.debounce_ms;
         let format_changed = previous.format_enabled != settings.format_enabled;
+        let progress_changed = previous.progress_mode != settings.progress_mode;
         let mut changed = Vec::new();
         if format_changed {
             changed.push("format.enable");
@@ -755,11 +946,14 @@ impl Backend {
         if preview_changed {
             changed.push("preview");
         }
+        if progress_changed {
+            changed.push("progress.mode");
+        }
         self.client
             .log_message(
                 MessageType::INFO,
                 format!(
-                    "ZeroSyntax: settings updated ({}) — formatting={}, schema={}, base roots={}, model strictness={:?}, bare percentages={}, map ordering={}, debounce={} ms.",
+                    "ZeroSyntax: settings updated ({}) — formatting={}, schema={}, base roots={}, model strictness={:?}, bare percentages={}, map ordering={}, debounce={} ms, progress={}.",
                     changed.join(", "),
                     settings.format_enabled,
                     if settings.schema_path.is_empty() { "built-in" } else { "custom" },
@@ -768,6 +962,7 @@ impl Backend {
                     settings.allow_bare_percentages,
                     settings.map_ordering_diagnostics,
                     settings.debounce_ms,
+                    settings.progress_mode.as_str(),
                 ),
             )
             .await;
@@ -784,6 +979,15 @@ impl Backend {
         }
 
         if schema_changed || roots_changed {
+            let work = if schema_changed {
+                ProgressWork::SchemaReload
+            } else {
+                ProgressWork::GameDataReload
+            };
+            let progress = self.begin_progress(work).await;
+            if schema_changed {
+                progress.report("Loading configured schema", Some(0)).await;
+            }
             let (mut analyzer, warning) = if schema_changed {
                 if settings.schema_path.is_empty() {
                     (Analyzer::embedded(), None)
@@ -793,9 +997,11 @@ impl Backend {
             } else if bare_changed {
                 (Analyzer::new(self.analyzer().schema().clone()), None)
             } else {
-                self.scan_workspace(self.analyzer(), false, "configuration_changed")
+                let scan = self
+                    .scan_workspace(self.analyzer(), false, "configuration_changed", &progress)
                     .await;
-                self.refresh_all().await;
+                self.finish_index_work(progress, scan, "Index updated")
+                    .await;
                 return;
             };
             analyzer.set_allow_bare_percentages(settings.allow_bare_percentages);
@@ -816,9 +1022,11 @@ impl Backend {
                     .show_message(MessageType::WARNING, warning)
                     .await;
             }
-            self.scan_workspace(analyzer, schema_changed, "configuration_changed")
+            let scan = self
+                .scan_workspace(analyzer, schema_changed, "configuration_changed", &progress)
                 .await;
-            self.refresh_all().await;
+            self.finish_index_work(progress, scan, "Index updated")
+                .await;
             return;
         }
 
@@ -836,7 +1044,17 @@ impl Backend {
             }
         }
         if bare_changed || strictness_changed || map_ordering_changed {
-            self.refresh_all().await;
+            if self.docs.is_empty() {
+                return;
+            }
+            let progress = self.begin_progress(ProgressWork::DiagnosticsRefresh).await;
+            let refreshed = self.refresh_all_with_progress(&progress, 0, 100).await;
+            progress
+                .end(format!(
+                    "Diagnostics refreshed for {refreshed} open document{}",
+                    if refreshed == 1 { "" } else { "s" }
+                ))
+                .await;
         }
     }
 
@@ -881,19 +1099,16 @@ impl Backend {
             .await;
     }
 
-    /// Best-effort scan of the workspace roots for `.ini` files to seed the
-    /// index, so references resolve before a file is opened. The walk +
-    /// parse runs on a blocking thread (full-mod folders take seconds); the
-    /// results are applied under the index lock afterwards. Reported to the
-    /// client as `$/progress` (a status-bar spinner with a `done/total`
-    /// counter in VS Code) so users can tell "still indexing" apart from
-    /// "nothing was found".
+    /// Best-effort scan of workspace and game-data roots. The blocking scan
+    /// emits typed phases; the caller owns the progress lifecycle so it can
+    /// remain visible through the later diagnostics refresh.
     async fn scan_workspace(
         &self,
         analyzer: Arc<Analyzer>,
         replace_analyzer: bool,
         reason: &'static str,
-    ) {
+        progress: &ProgressReporter,
+    ) -> std::result::Result<IndexSummary, ()> {
         let started = Instant::now();
         let roots = self.roots.lock().map(|r| r.clone()).unwrap_or_default();
         let (base_roots, model_member_strictness) = self
@@ -923,46 +1138,96 @@ impl Backend {
             replace_analyzer,
             "workspace indexing paths"
         );
-        let progress_token = self.begin_scan_progress().await;
-        // The blocking scan streams (done, total) over a channel; forward
-        // each update as a progress report while waiting for the results.
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(usize, usize)>();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<ScanProgress>();
         let scan_analyzer = analyzer.clone();
         let handle = tokio::task::spawn_blocking(move || {
-            let mut done = 0;
-            let mut last_percent = u32::MAX;
-            // Throttle to whole-percent changes (plus the final count) so a
-            // 10k-file scan sends ~100 notifications, not 10k.
-            let mut progress = |_done_in_batch: usize, total: usize| {
-                done += 1;
-                let percent = (done * 100 / total.max(1)) as u32;
-                if percent != last_percent || done == total {
-                    last_percent = percent;
-                    let _ = tx.send((done, total));
+            let mut last_percentage = None;
+            let mut report = |event: ScanProgress| {
+                if let ScanProgress::Indexing { done, total, .. } = event {
+                    // File checking occupies the first 85% of the complete
+                    // operation. Throttle large scans to percentage changes.
+                    let percentage = (done * 85 / total.max(1)) as u32;
+                    if last_percentage == Some(percentage) && done != total {
+                        return;
+                    }
+                    last_percentage = Some(percentage);
                 }
+                let _ = tx.send(event);
             };
-            scan_with_cache(&scan_analyzer, &roots, &base_roots, &mut progress)
+            scan_with_cache(&scan_analyzer, &roots, &base_roots, &mut report)
         });
-        while let Some((done, total)) = rx.recv().await {
-            self.report_scan_progress(&progress_token, done, total)
-                .await;
+        while let Some(event) = rx.recv().await {
+            match event {
+                ScanProgress::Discovering => {
+                    progress
+                        .report("Discovering workspace and game data", None)
+                        .await;
+                }
+                ScanProgress::InputsDiscovered { total, skipped } => {
+                    let message = if total == 0 {
+                        if skipped == 0 {
+                            "No indexable game data found".to_string()
+                        } else {
+                            format!("No readable inputs found — {skipped} skipped")
+                        }
+                    } else if skipped == 0 {
+                        format!("Checking 0/{total} inputs")
+                    } else {
+                        format!("Checking 0/{total} inputs — {skipped} skipped during discovery")
+                    };
+                    progress.report(message, (total == 0).then_some(85)).await;
+                }
+                ScanProgress::Indexing {
+                    done,
+                    total,
+                    cache_hits,
+                    cache_misses,
+                } => {
+                    progress
+                        .report(
+                            format!(
+                                "Checking {done}/{total} inputs — {cache_hits} cached, {cache_misses} reparsed"
+                            ),
+                            Some((done * 85 / total.max(1)) as u32),
+                        )
+                        .await;
+                }
+                ScanProgress::WritingCache => {
+                    progress
+                        .report("Saving the persistent index cache", Some(88))
+                        .await;
+                }
+            }
         }
-        let scanned = match handle.await {
-            Ok(scanned) => scanned,
+        let ScanOutcome {
+            entries: scanned,
+            stats,
+        } = match handle.await {
+            Ok(outcome) => outcome,
             Err(error) => {
                 tracing::error!(reason, %error, "workspace indexing worker failed");
                 self.client
                     .log_message(
                         MessageType::ERROR,
                         format!(
-                            "ZeroSyntax: indexing worker failed (reason={reason}); the index may be incomplete."
+                            "ZeroSyntax: indexing worker failed (reason={reason}); the previous index remains active."
                         ),
                     )
                     .await;
-                Vec::new()
+                return Err(());
             }
         };
         if replace_analyzer {
+            let open_count = self.docs.len();
+            progress
+                .report(
+                    format!(
+                        "Reparsing {open_count} open document{} with the new schema",
+                        if open_count == 1 { "" } else { "s" }
+                    ),
+                    Some(89),
+                )
+                .await;
             if let Ok(mut current) = self.analyzer.write() {
                 *current = analyzer.clone();
             }
@@ -999,6 +1264,9 @@ impl Backend {
                 zerosyntax_analysis::index::AssetKind::Audio => (audio + 1, texture),
                 zerosyntax_analysis::index::AssetKind::Texture => (audio, texture + 1),
             });
+        progress
+            .report("Activating workspace index", Some(90))
+            .await;
         // Build the replacement off to the side so removed roots cannot leave
         // stale definitions, assets, inheritance, models, or virtual files.
         let open: std::collections::HashSet<String> = self
@@ -1045,96 +1313,43 @@ impl Backend {
             cache.clear();
         }
         self.clear_diagnostic_caches();
-        self.end_scan_progress(
-            progress_token,
-            ini_total,
-            model_total,
-            audio_total,
-            texture_total,
-        )
-        .await;
+        let skipped_inputs = stats.skipped_inputs();
+        if skipped_inputs > 0 {
+            self.client
+                .log_message(
+                    MessageType::WARNING,
+                    format!(
+                        "ZeroSyntax: indexing completed with warnings (reason={reason}) — {skipped_inputs} inputs could not be indexed."
+                    ),
+                )
+                .await;
+        }
+        if stats.discovered_inputs > 0 && !stats.cache_written {
+            self.client
+                .log_message(
+                    MessageType::WARNING,
+                    "ZeroSyntax: the index cache could not be saved; unchanged files may be reparsed next time.",
+                )
+                .await;
+        }
         self.client
             .log_message(
                 MessageType::INFO,
                 format!(
-                    "ZeroSyntax: indexing completed (reason={reason}) — {ini_total} INI files, {model_total} W3D models, {audio_total} audio files, {texture_total} textures in {} ms.",
+                    "ZeroSyntax: indexing completed (reason={reason}) — {ini_total} INI files, {model_total} W3D models, {audio_total} audio files, {texture_total} textures; {} cached, {} reparsed, {skipped_inputs} skipped in {} ms.",
+                    stats.cache_hits,
+                    stats.cache_misses,
                     started.elapsed().as_millis()
                 ),
             )
             .await;
-    }
-
-    /// Ask the client to show an indexing spinner. Returns the token to end
-    /// it with, or `None` when the client doesn't support work-done progress.
-    async fn begin_scan_progress(&self) -> Option<NumberOrString> {
-        if !self.progress_support.get().copied().unwrap_or(false) {
-            return None;
-        }
-        let token = NumberOrString::String("zerosyntax/indexing".into());
-        self.client
-            .send_request::<request::WorkDoneProgressCreate>(WorkDoneProgressCreateParams {
-                token: token.clone(),
-            })
-            .await
-            .ok()?;
-        self.client
-            .send_notification::<notification::Progress>(ProgressParams {
-                token: token.clone(),
-                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
-                    WorkDoneProgressBegin {
-                        title: "Indexing game data".into(),
-                        message: Some("scanning workspace and configured game-data roots".into()),
-                        cancellable: Some(false),
-                        // Signals that reports will carry a percentage.
-                        percentage: Some(0),
-                    },
-                )),
-            })
-            .await;
-        Some(token)
-    }
-
-    /// Forward one `done/total` update to the client's progress UI.
-    async fn report_scan_progress(
-        &self,
-        token: &Option<NumberOrString>,
-        done: usize,
-        total: usize,
-    ) {
-        let Some(token) = token else { return };
-        self.client
-            .send_notification::<notification::Progress>(ProgressParams {
-                token: token.clone(),
-                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
-                    WorkDoneProgressReport {
-                        message: Some(format!("{done}/{total} files")),
-                        percentage: Some((done * 100 / total.max(1)) as u32),
-                        cancellable: Some(false),
-                    },
-                )),
-            })
-            .await;
-    }
-
-    async fn end_scan_progress(
-        &self,
-        token: Option<NumberOrString>,
-        ini_total: usize,
-        model_total: usize,
-        audio_total: usize,
-        texture_total: usize,
-    ) {
-        let Some(token) = token else { return };
-        self.client
-            .send_notification::<notification::Progress>(ProgressParams {
-                token,
-                value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(WorkDoneProgressEnd {
-                    message: Some(format!(
-                        "{ini_total} INI files, {model_total} W3D models, {audio_total} audio files, {texture_total} textures indexed"
-                    )),
-                })),
-            })
-            .await;
+        Ok(IndexSummary {
+            ini_total,
+            model_total,
+            audio_total,
+            texture_total,
+            stats,
+        })
     }
 
     /// The cached state for an open document (rope + parse), if any.
@@ -1259,6 +1474,7 @@ impl LanguageServer for Backend {
         // Editor-facing settings arrive as `initializationOptions`. Shape:
         // `{ "format": {"enable": bool}, "schemaPath": "schema.json",
         //    "preview": {"enable": true, "imageWidth": 160, "zoomPercent": 100},
+        //    "progress": {"mode": "indexing"},
         //    "analysis": {"modelMemberStrictness": "compatible",
         //                 "allowPercentagesWithoutSign": false,
         //                 "mapOrderingDiagnostics": true, "debounceMs": 250},
@@ -1401,13 +1617,14 @@ impl LanguageServer for Backend {
             .log_message(
                 MessageType::INFO,
                 format!(
-                    "ZeroSyntax: initializing v{} (encoding={:?}, workspace roots={}, base roots={}, schema={}, work progress={}, snippets={}, dynamic formatting={}).",
+                    "ZeroSyntax: initializing v{} (encoding={:?}, workspace roots={}, base roots={}, schema={}, work progress={} {}, snippets={}, dynamic formatting={}).",
                     env!("CARGO_PKG_VERSION"),
                     self.enc(),
                     roots.len(),
                     settings.base_ini_roots.len(),
                     if settings.schema_path.is_empty() { "built-in" } else { "custom" },
                     self.progress_support.get().copied().unwrap_or(false),
+                    settings.progress_mode.as_str(),
                     self.snippet_support.get().copied().unwrap_or(false),
                     self.formatting_dynamic_registration.get().copied().unwrap_or(false),
                 ),
@@ -1431,11 +1648,12 @@ impl LanguageServer for Backend {
         if self.format_enabled() {
             self.set_formatting_enabled(true).await;
         }
-        self.scan_workspace(self.analyzer(), false, "startup").await;
-        // Re-publish diagnostics for any already-open docs now that the index
-        // is populated (so cross-file references resolve). The cached parse is
-        // still valid — only the index changed.
-        self.refresh_all().await;
+        let progress = self.begin_progress(ProgressWork::Startup).await;
+        let scan = self
+            .scan_workspace(self.analyzer(), false, "startup", &progress)
+            .await;
+        // Keep progress alive until cross-file diagnostics reflect the index.
+        self.finish_index_work(progress, scan, "Ready").await;
         let (ini, models, audio, textures) = {
             let idx = self.index.read().ok();
             let models = idx
@@ -1492,10 +1710,25 @@ impl LanguageServer for Backend {
             .lock()
             .map(|settings| settings.base_ini_roots.clone())
             .unwrap_or_default();
+        let mut progress = if params.command == REBUILD_INDEX_CACHE_COMMAND {
+            Some(self.begin_progress(ProgressWork::ManualRebuild).await)
+        } else {
+            None
+        };
+        if let Some(progress) = &progress {
+            progress
+                .report("Clearing the persistent index cache", Some(0))
+                .await;
+        }
         let cleared = match clear_index_cache(&roots, &base_roots) {
             Ok(cleared) => cleared,
             Err(error) => {
                 tracing::error!(%error, "asset index cache clear failed");
+                if let Some(progress) = progress.take() {
+                    progress
+                        .end("Index rebuild failed — the cache could not be cleared")
+                        .await;
+                }
                 self.client
                     .log_message(
                         MessageType::ERROR,
@@ -1506,13 +1739,24 @@ impl LanguageServer for Backend {
             }
         };
         if params.command == REBUILD_INDEX_CACHE_COMMAND {
+            let previous_scan_finished = self.scan_finished.load(Ordering::Relaxed);
+            let previous_base_indexed_count = self.base_indexed_count.load(Ordering::Relaxed);
             self.scan_finished.store(false, Ordering::Relaxed);
             self.base_indexed_count.store(0, Ordering::Relaxed);
-            self.scan_workspace(self.analyzer(), false, "manual_cache_rebuild")
+            let progress = progress.expect("rebuild progress initialized above");
+            let scan = self
+                .scan_workspace(self.analyzer(), false, "manual_cache_rebuild", &progress)
                 .await;
-            let open: Vec<Url> = self.docs.iter().map(|entry| entry.key().clone()).collect();
-            for uri in open {
-                self.refresh(&uri, None).await;
+            if self
+                .finish_index_work(progress, scan, "Index rebuilt")
+                .await
+                .is_none()
+            {
+                self.scan_finished
+                    .store(previous_scan_finished, Ordering::Relaxed);
+                self.base_indexed_count
+                    .store(previous_base_indexed_count, Ordering::Relaxed);
+                return Err(tower_lsp::jsonrpc::Error::internal_error());
             }
             self.client
                 .log_message(
@@ -2525,11 +2769,75 @@ mod tests {
     }
 
     #[test]
+    fn progress_mode_defaults_and_parses() {
+        assert_eq!(
+            RuntimeSettings::default().progress_mode,
+            ProgressMode::Indexing
+        );
+        assert_eq!(
+            RuntimeSettings::from_value(Some(&serde_json::json!({
+                "progress": {"mode": "off"}
+            })))
+            .progress_mode,
+            ProgressMode::Off
+        );
+        assert_eq!(
+            RuntimeSettings::from_value(Some(&serde_json::json!({
+                "zerosyntax": {"progress": {"mode": "verbose"}}
+            })))
+            .progress_mode,
+            ProgressMode::Verbose
+        );
+        assert_eq!(
+            RuntimeSettings::from_value(Some(&serde_json::json!({
+                "progress": {"mode": "future-value"}
+            })))
+            .progress_mode,
+            ProgressMode::Indexing
+        );
+        assert!(!ProgressMode::Off.allows(false));
+        assert!(ProgressMode::Indexing.allows(false));
+        assert!(!ProgressMode::Indexing.allows(true));
+        assert!(ProgressMode::Verbose.allows(true));
+    }
+
+    #[test]
+    fn index_completion_distinguishes_empty_success_and_warnings() {
+        let summary = |stats| IndexSummary {
+            ini_total: 2,
+            model_total: 1,
+            audio_total: 0,
+            texture_total: 0,
+            stats,
+        };
+        assert_eq!(
+            summary(ScanStats::default()).completion_message("Ready"),
+            "Ready — no indexable game data found"
+        );
+        assert!(summary(ScanStats {
+            discovered_inputs: 2,
+            cache_written: true,
+            ..ScanStats::default()
+        })
+        .completion_message("Ready")
+        .starts_with("Ready — 2 INI files"));
+        assert!(summary(ScanStats {
+            discovered_inputs: 2,
+            scan_failures: 1,
+            cache_written: false,
+            ..ScanStats::default()
+        })
+        .completion_message("Ready")
+        .contains("Ready with warnings"));
+    }
+
+    #[test]
     fn runtime_settings_accept_startup_and_vscode_shapes() {
         let startup = RuntimeSettings::from_value(Some(&serde_json::json!({
             "format": {"enable": true},
             "schemaPath": "schema.json",
             "baseIniRoots": ["base"],
+            "progress": {"mode": "verbose"},
             "preview": {"enable": false, "imageWidth": 320, "zoomPercent": 150},
             "analysis": {"modelMemberStrictness": "strict", "debounceMs": 9000}
         })));
@@ -2538,6 +2846,7 @@ mod tests {
                 "format": {"enable": true},
                 "schema": {"path": "schema.json"},
                 "baseIniRoots": ["base"],
+                "progress": {"mode": "verbose"},
                 "preview": {"enable": false, "imageWidth": 320, "zoomPercent": 150},
                 "analysis": {"modelMemberStrictness": "strict", "debounceMs": 9000}
             }
@@ -2547,6 +2856,7 @@ mod tests {
         assert!(!startup.preview_enabled);
         assert_eq!(startup.preview_image_width, 320);
         assert_eq!(startup.preview_zoom_percent, 150);
+        assert_eq!(startup.progress_mode, ProgressMode::Verbose);
     }
 
     #[test]
