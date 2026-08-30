@@ -163,7 +163,7 @@
     "@vscode/test-electron": "^3.0.0",
     "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.28.2",
-    "mocha": "^11.3.0",
+    "mocha": "^11.8.0",
     "typescript": "^6.0.3"
   }
 }
