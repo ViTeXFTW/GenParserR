@@ -15,9 +15,32 @@ npm ci
 npm test
 ```
 
-To debug the extension, open `editors/vscode` in VS Code and press <kbd>F5</kbd>.
-The repository's launch configuration points the Extension Development Host at
-the locally built debug server.
+## Fast local loop (F5)
+
+Open the **repository root** in VS Code and press <kbd>F5</kbd> (the
+_Run Extension (local dev server)_ configuration in `.vscode/launch.json`).
+This runs one build task that, in parallel:
+
+1. builds the debug server (`cargo build -p zerosyntax-server`), and
+2. bundles the extension with source maps (`npm run compile:dev` in
+   `editors/vscode`).
+
+It then opens an Extension Development Host window with `ZEROSYNTAX_LSP_PATH`
+pointed at `target/debug/zerosyntax-lsp[.exe]`, so the extension loads the
+freshly built server without copying a binary or installing a `.vsix`.
+
+- **Changed the server?** Rebuild and reload: run the build task (or press
+  <kbd>F5</kbd> again), then restart the language server from the dev-host
+  window (Command Palette → _Developer: Reload Window_).
+- **Changed the extension (TypeScript)?** _Developer: Reload Window_ in the
+  dev-host picks up the rebuilt bundle; breakpoints work via the emitted source
+  maps.
+
+The first run needs `npm ci` in `editors/vscode` so the build task can find the
+TypeScript/esbuild toolchain.
+
+For a lighter, server-only loop (no extension), see the Neovim harness in
+[`editors/nvim/README.md`](../editors/nvim/README.md).
 
 ## Choose a server binary
 

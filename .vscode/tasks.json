@@ -1,0 +1,29 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build-server",
+      "type": "shell",
+      "command": "cargo build -p zerosyntax-server",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": "$rustc",
+      "presentation": { "reveal": "silent", "clear": true, "panel": "shared" },
+      "group": "build"
+    },
+    {
+      "label": "build-extension",
+      "type": "shell",
+      "command": "npm run compile:dev",
+      "options": { "cwd": "${workspaceFolder}/editors/vscode" },
+      "problemMatcher": "$tsc",
+      "presentation": { "reveal": "silent", "panel": "shared" },
+      "group": "build"
+    },
+    {
+      "label": "build-dev",
+      "dependsOn": ["build-server", "build-extension"],
+      "dependsOrder": "parallel",
+      "group": { "kind": "build", "isDefault": true }
+    }
+  ]
+}
