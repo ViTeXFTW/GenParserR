@@ -5,7 +5,7 @@ use std::hash::{Hash, Hasher};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::UNIX_EPOCH;
+use std::time::{Instant, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use percent_encoding::percent_decode_str;
@@ -406,6 +406,7 @@ pub(crate) fn collect_scan_paths_checked(roots: &[PathBuf]) -> Result<Vec<PathBu
 
 fn collect_paths(roots: &[PathBuf], checked: bool) -> Result<Vec<PathBuf>> {
     let mut out = Vec::new();
+    let mut skipped = 0;
     for root in roots {
         let root_start = out.len();
         if root.is_file()
@@ -421,7 +422,11 @@ fn collect_paths(roots: &[PathBuf], checked: bool) -> Result<Vec<PathBuf>> {
             let entry = match entry {
                 Ok(entry) => entry,
                 Err(error) if checked => return Err(error.into()),
-                Err(_) => continue,
+                Err(error) => {
+                    skipped += 1;
+                    tracing::debug!(root = %root.display(), %error, "workspace walk entry skipped");
+                    continue;
+                }
             };
             let path = entry.path();
             if !path.is_file() {
@@ -464,6 +469,12 @@ fn collect_paths(roots: &[PathBuf], checked: bool) -> Result<Vec<PathBuf>> {
             })
         });
     }
+    if skipped > 0 {
+        tracing::warn!(
+            skipped_count = skipped,
+            "workspace walk skipped inaccessible entries"
+        );
+    }
     Ok(out)
 }
 
@@ -493,28 +504,61 @@ pub(crate) fn scan_with_cache(
     base_roots: &[PathBuf],
     progress: &mut impl FnMut(usize, usize),
 ) -> Vec<(bool, ScanEntry)> {
+    let started = Instant::now();
     let cache_path = index_cache_path(workspace_roots, base_roots);
     let expected_schema_hash = schema_hash();
-    let mut cache = std::fs::read(&cache_path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<IndexCache>(&bytes).ok())
-        .filter(|cache| {
-            cache.version == INDEX_CACHE_VERSION && cache.schema_hash == expected_schema_hash
-        })
-        .unwrap_or(IndexCache {
-            version: INDEX_CACHE_VERSION,
-            schema_hash: expected_schema_hash,
-            files: HashMap::new(),
-        });
+    let empty_cache = || IndexCache {
+        version: INDEX_CACHE_VERSION,
+        schema_hash: expected_schema_hash,
+        files: HashMap::new(),
+    };
+    let (mut cache, cache_state) = match std::fs::read(&cache_path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (empty_cache(), "absent"),
+        Err(error) => {
+            tracing::debug!(path = %cache_path.display(), %error, "index cache could not be read");
+            (empty_cache(), "corrupt")
+        }
+        Ok(bytes) => match serde_json::from_slice::<IndexCache>(&bytes) {
+            Err(error) => {
+                tracing::debug!(path = %cache_path.display(), %error, "index cache could not be parsed");
+                (empty_cache(), "corrupt")
+            }
+            Ok(cache)
+                if cache.version != INDEX_CACHE_VERSION
+                    || cache.schema_hash != expected_schema_hash =>
+            {
+                tracing::debug!(
+                    path = %cache_path.display(),
+                    cache_version = cache.version,
+                    expected_version = INDEX_CACHE_VERSION,
+                    "index cache is stale"
+                );
+                (empty_cache(), "stale")
+            }
+            Ok(cache) => (cache, "valid"),
+        },
+    };
 
+    let mut discovered_inputs = 0;
+    let mut fingerprint_failures = 0;
+    let mut cache_hits = 0;
+    let mut cache_misses = 0;
+    let mut scan_failures = 0;
     let mut seen = HashSet::new();
     let mut paths = Vec::new();
     for (roots, is_base) in [(base_roots, true), (workspace_roots, false)] {
         for path in collect_scan_paths(roots) {
             let key = path_key(&path);
             if seen.insert(key.clone()) {
+                discovered_inputs += 1;
                 if let Some(fingerprint) = fingerprint(&path) {
                     paths.push((path, key, fingerprint, is_base));
+                } else {
+                    fingerprint_failures += 1;
+                    tracing::debug!(
+                        path = %path.display(),
+                        "workspace input skipped because it could not be fingerprinted"
+                    );
                 }
             }
         }
@@ -526,9 +570,20 @@ pub(crate) fn scan_with_cache(
     for (done, (path, key, fingerprint, is_base)) in paths.into_iter().enumerate() {
         let entries = match cache.files.remove(&key) {
             Some(cached) if cached.fingerprint == fingerprint => {
+                cache_hits += 1;
                 cached.entries.into_iter().map(ScanEntry::from).collect()
             }
-            _ => scan_path(analyzer, &path).unwrap_or_default(),
+            _ => {
+                cache_misses += 1;
+                match scan_path(analyzer, &path) {
+                    Ok(entries) => entries,
+                    Err(error) => {
+                        scan_failures += 1;
+                        tracing::debug!(path = %path.display(), %error, "workspace input could not be indexed");
+                        Vec::new()
+                    }
+                }
+            }
         };
         next.insert(
             key,
@@ -545,15 +600,42 @@ pub(crate) fn scan_with_cache(
         schema_hash: expected_schema_hash,
         files: next,
     };
+    let mut cache_written = false;
     if let Some(parent) = cache_path.parent() {
         if let Err(error) = std::fs::create_dir_all(parent).and_then(|()| {
             serde_json::to_vec(&cache)
                 .map_err(std::io::Error::other)
                 .and_then(|bytes| std::fs::write(&cache_path, bytes))
         }) {
-            tracing::warn!(%error, path = %cache_path.display(), "could not write asset index cache");
+            tracing::debug!(path = %cache_path.display(), %error, "asset index cache write failed");
+            tracing::warn!(%error, "could not write asset index cache");
+        } else {
+            cache_written = true;
         }
     }
+    let skipped_count = fingerprint_failures + scan_failures;
+    if skipped_count > 0 {
+        tracing::warn!(
+            skipped_count,
+            fingerprint_failures,
+            scan_failures,
+            "workspace indexing skipped inputs"
+        );
+    }
+    tracing::debug!(
+        path = %cache_path.display(),
+        cache_state,
+        discovered_inputs,
+        cache_hits,
+        cache_misses,
+        reparsed_files = cache_misses,
+        fingerprint_failures,
+        scan_failures,
+        produced_entries = scanned.len(),
+        cache_written,
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "workspace scan completed"
+    );
     scanned
 }
 

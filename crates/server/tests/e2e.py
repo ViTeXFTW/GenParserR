@@ -10,6 +10,7 @@ failure.
 """
 import json
 import base64
+import os
 import subprocess
 import sys
 import threading
@@ -49,6 +50,11 @@ def reader(stream, q: "queue.Queue"):
                 q.put(json.loads(body.decode("utf-8")))
             except Exception as e:  # noqa
                 q.put({"_parse_error": str(e)})
+
+
+def line_reader(stream, lines):
+    for line in iter(stream.readline, b""):
+        lines.append(line.decode("utf-8", "replace").rstrip())
 
 
 def main() -> int:
@@ -130,13 +136,21 @@ def main() -> int:
         [exe, "--stdio"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
         bufsize=0,
+        env={**os.environ, "RUST_LOG": "zerosyntax_lsp=debug"},
     )
     q: "queue.Queue" = queue.Queue()
     threading.Thread(target=reader, args=(proc.stdout, q), daemon=True).start()
+    stderr_lines = []
+    stderr_thread = threading.Thread(
+        target=line_reader, args=(proc.stderr, stderr_lines), daemon=True
+    )
+    stderr_thread.start()
     server_requests = []
     indexing_begins = []
+    indexing_ends = []
+    log_messages = []
 
     def send(obj):
         proc.stdin.write(frame(obj))
@@ -153,6 +167,7 @@ def main() -> int:
                 break
             if msg is None:
                 break
+            assert "_parse_error" not in msg, msg
             if msg.get("method") in {
                 "client/registerCapability",
                 "client/unregisterCapability",
@@ -163,6 +178,11 @@ def main() -> int:
             if (msg.get("method") == "$/progress"
                     and msg.get("params", {}).get("value", {}).get("kind") == "begin"):
                 indexing_begins.append(msg)
+            if (msg.get("method") == "$/progress"
+                    and msg.get("params", {}).get("value", {}).get("kind") == "end"):
+                indexing_ends.append(msg)
+            if msg.get("method") == "window/logMessage":
+                log_messages.append(msg)
             if pred(msg):
                 return msg
         print(f"TIMEOUT waiting for {what}", file=sys.stderr)
@@ -212,6 +232,29 @@ def main() -> int:
     print("OK: initialize advertised capabilities (incremental sync, utf-16)")
 
     send({"jsonrpc": "2.0", "method": "initialized", "params": {}})
+    ready = wait_for(
+        lambda m: m.get("method") == "window/logMessage"
+        and "language server ready" in m.get("params", {}).get("message", ""),
+        "startup logging",
+    )
+    assert ready and ready["params"]["type"] == 3, ready
+    startup_logs = [message["params"]["message"] for message in log_messages]
+    assert any("initializing v" in message for message in startup_logs), startup_logs
+    assert any(
+        "indexing started (reason=startup" in message for message in startup_logs
+    ), startup_logs
+    completed = next(
+        message
+        for message in startup_logs
+        if "indexing completed (reason=startup" in message
+    )
+    assert "INI files" in completed and "W3D models" in completed, completed
+    startup_progress = indexing_ends[0]["params"]["value"]["message"]
+    assert startup_progress.removesuffix(" indexed") in completed, (
+        startup_progress,
+        completed,
+    )
+    print("OK: startup emits initialization, indexing, and ready logs")
 
     # 2) didOpen with a Weapon block: bad bool + unknown field.
     uri = "file:///test/Weapon.ini"
@@ -682,6 +725,13 @@ def main() -> int:
         and m.get("params", {}).get("value", {}).get("kind") == "end",
         "base-root indexing",
     )
+    reindexed = wait_for(
+        lambda m: m.get("method") == "window/logMessage"
+        and "indexing completed (reason=configuration_changed"
+        in m.get("params", {}).get("message", ""),
+        "base-root indexing log",
+    )
+    assert reindexed and "audio files" in reindexed["params"]["message"], reindexed
     assert len(indexing_begins) == progress_before + 1, (
         f"expected one base-root scan, got {len(indexing_begins) - progress_before}"
     )
@@ -858,6 +908,27 @@ def main() -> int:
         "custom-schema diagnostics",
     )
     assert "unknown-block" not in [d.get("code") for d in custom["params"]["diagnostics"]]
+    runtime_settings["schema"]["path"] = str(workspace / "missing-schema.json")
+    configure()
+    schema_warning_log = wait_for(
+        lambda m: m.get("method") == "window/logMessage"
+        and m.get("params", {}).get("type") == 2
+        and "custom schema could not be loaded" in m.get("params", {}).get("message", ""),
+        "invalid-schema warning log",
+    )
+    schema_warning_popup = wait_for(
+        lambda m: m.get("method") == "window/showMessage"
+        and m.get("params", {}).get("type") == 2
+        and "built-in schema" in m.get("params", {}).get("message", ""),
+        "invalid-schema warning popup",
+    )
+    assert schema_warning_log and schema_warning_popup
+    custom = wait_for(
+        lambda m: m.get("method") == "textDocument/publishDiagnostics"
+        and m["params"]["uri"] == custom_uri,
+        "invalid-schema fallback diagnostics",
+    )
+    assert "unknown-block" in [d.get("code") for d in custom["params"]["diagnostics"]]
     runtime_settings["schema"]["path"] = ""
     configure()
     custom = wait_for(
@@ -866,7 +937,7 @@ def main() -> int:
         "embedded-schema diagnostics",
     )
     assert "unknown-block" in [d.get("code") for d in custom["params"]["diagnostics"]]
-    print("OK: schema hot-reload reparses already-open documents")
+    print("OK: schema hot-reload logs invalid fallback and reparses open documents")
 
     runtime_settings["format"]["enable"] = True
     configure()
@@ -891,14 +962,42 @@ def main() -> int:
     configure()
     wait_for(lambda m: m.get("method") == "client/registerCapability",
              "dynamic formatting re-registration")
+    wait_for(
+        lambda m: m.get("method") == "window/logMessage"
+        and "settings updated (format.enable)" in m.get("params", {}).get("message", ""),
+        "dynamic formatting settings log",
+    )
+
+    send({"jsonrpc": "2.0", "id": 30, "method": "workspace/executeCommand",
+          "params": {"command": "zerosyntax.rebuildIndexCache", "arguments": []}})
+    rebuild_started = wait_for(
+        lambda m: m.get("method") == "window/logMessage"
+        and "indexing started (reason=manual_cache_rebuild"
+        in m.get("params", {}).get("message", ""),
+        "manual cache rebuild start log",
+    )
+    rebuild_completed = wait_for(
+        lambda m: m.get("method") == "window/logMessage"
+        and "indexing completed (reason=manual_cache_rebuild"
+        in m.get("params", {}).get("message", ""),
+        "manual cache rebuild completion log",
+    )
+    rebuild = wait_for(lambda m: m.get("id") == 30 and "result" in m,
+                       "manual cache rebuild response")
+    assert rebuild_started and rebuild_completed and rebuild["result"]["rebuilt"] is True
+    print("OK: manual cache rebuild logs its reason and completion")
 
     requests_before = len(server_requests)
     progress_before = len(indexing_begins)
+    logs_before = len(log_messages)
     configure()
     import time
     time.sleep(0.25)
     while not q.empty():
         pending = q.get_nowait()
+        assert "_parse_error" not in pending, pending
+        if pending.get("method") == "window/logMessage":
+            log_messages.append(pending)
         assert pending.get("method") not in {
             "client/registerCapability", "client/unregisterCapability"
         }, pending
@@ -906,6 +1005,7 @@ def main() -> int:
                     and pending.get("params", {}).get("value", {}).get("kind") == "begin"), pending
     assert len(server_requests) == requests_before
     assert len(indexing_begins) == progress_before
+    assert len(log_messages) == logs_before
     print("OK: formatting hot-registers; identical settings are a no-op")
 
     # 9) Phase-6 batch 2: semanticTokens delta, formatting, code actions.
@@ -989,6 +1089,17 @@ def main() -> int:
         proc.wait(timeout=5)
     except Exception:
         proc.kill()
+    stderr_thread.join(timeout=2)
+    developer_logs = "\n".join(stderr_lines)
+    assert "workspace scan completed" in developer_logs, developer_logs
+    assert "document changed" in developer_logs, developer_logs
+    assert "document diagnostics published" in developer_logs, developer_logs
+    assert "parse_strategy=" in developer_logs, developer_logs
+    assert uri in developer_logs, developer_logs
+    assert workspace.name in developer_logs, developer_logs
+    assert "ScaleWeaponSpeed = Maybe" not in developer_logs, developer_logs
+    assert "Bogus = 1" not in developer_logs, developer_logs
+    print("OK: RUST_LOG debug records decisions and paths without document contents")
 
     # 10) a default-initialized server (no initializationOptions) must not
     #     advertise formatting and must answer the request with null.

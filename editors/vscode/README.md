@@ -90,8 +90,11 @@ Use the language selector in VS Code's status bar to change an individual file.
 - If map references are reported as missing, configure
   `zerosyntax.baseIniRoots` and check that the paths point to the required INI
   folders or `.big` archives.
-- For detailed logs, set `zerosyntax.trace.server` to `messages` or `verbose`,
-  reproduce the problem, then open **Output → ZeroSyntax v2 Language Server**.
+- Start with the operational log under **Output → ZeroSyntax v2 Language
+  Server**. Set `zerosyntax.trace.server` to `verbose` for protocol traffic.
+  For internal cache, parse, and diagnostic decisions, launch VS Code with
+  `RUST_LOG=zerosyntax_lsp=debug` (PowerShell:
+  `$env:RUST_LOG = "zerosyntax_lsp=debug"; code .`).
 
 Report reproducible problems through
 [GitHub Issues](https://github.com/ViTeXFTW/ZeroSyntaxV2/issues) with a minimal
