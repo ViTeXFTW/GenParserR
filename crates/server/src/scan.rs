@@ -182,6 +182,21 @@ fn fingerprint(path: &Path) -> Option<Fingerprint> {
     })
 }
 
+/// Refresh the retention timestamp without rewriting a valid cache.
+fn refresh_index_cache_last_used(path: &Path) -> bool {
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .and_then(|file| file.set_modified(SystemTime::now()))
+    {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::debug!(path = %path.display(), %error, "index cache last-used time could not be updated; falling back to cache rewrite");
+            false
+        }
+    }
+}
+
 pub(crate) fn index_cache_path(workspace_roots: &[PathBuf], base_roots: &[PathBuf]) -> PathBuf {
     let mut roots: Vec<_> = workspace_roots
         .iter()
@@ -701,7 +716,7 @@ pub(crate) fn scan_with_cache(
         skipped: discovery_failures + fingerprint_failures,
     });
 
-    let cache_unchanged = cache_state == "valid"
+    let cache_manifest_unchanged = cache_state == "valid"
         && discovery_failures == 0
         && fingerprint_failures == 0
         && paths.len() == cache.files.len()
@@ -711,6 +726,7 @@ pub(crate) fn scan_with_cache(
                 .get(key)
                 .is_some_and(|cached| cached.fingerprint == *fingerprint)
         });
+    let cache_unchanged = cache_manifest_unchanged && refresh_index_cache_last_used(&cache_path);
 
     let mut next = if cache_unchanged {
         HashMap::new()
@@ -756,17 +772,7 @@ pub(crate) fn scan_with_cache(
     }
     let mut cache_written = cache_unchanged;
     let mut cache_updated = false;
-    if cache_unchanged {
-        // Retention uses the modification timestamp as last-used time. Keep
-        // that signal current without serializing and rewriting the cache.
-        if let Err(error) = std::fs::OpenOptions::new()
-            .write(true)
-            .open(&cache_path)
-            .and_then(|file| file.set_modified(SystemTime::now()))
-        {
-            tracing::debug!(path = %cache_path.display(), %error, "index cache last-used time could not be updated");
-        }
-    } else {
+    if !cache_unchanged {
         progress(ScanProgress::WritingCache);
         let cache = IndexCache {
             version: INDEX_CACHE_VERSION,
@@ -992,6 +998,13 @@ mod tests {
 
         let _ = clear_index_cache(&workspace_roots, &[]);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_retention_refresh_rejects_the_no_rewrite_fast_path() {
+        let missing = unique_temp_dir("missing-cache").join("index.json");
+        assert!(!missing.exists());
+        assert!(!refresh_index_cache_last_used(&missing));
     }
 
     #[test]
