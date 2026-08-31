@@ -37001,8 +37001,7 @@
                 "kind": "prefixed",
                 "prefix": "Faction",
                 "value_type": {
-                  "kind": "enum",
-                  "value_set": "ai_side"
+                  "kind": "ascii_string"
                 }
               },
               {
