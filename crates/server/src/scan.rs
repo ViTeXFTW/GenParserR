@@ -54,7 +54,11 @@ pub(crate) struct ScanStats {
     pub(crate) cache_misses: usize,
     pub(crate) fingerprint_failures: usize,
     pub(crate) scan_failures: usize,
+    /// A usable persistent cache exists after the scan. This is also true
+    /// when an unchanged cache did not need to be written again.
     pub(crate) cache_written: bool,
+    /// The persistent cache was created or replaced during this scan.
+    pub(crate) cache_updated: bool,
 }
 
 impl ScanStats {
@@ -697,7 +701,22 @@ pub(crate) fn scan_with_cache(
         skipped: discovery_failures + fingerprint_failures,
     });
 
-    let mut next = HashMap::with_capacity(paths.len());
+    let cache_unchanged = cache_state == "valid"
+        && discovery_failures == 0
+        && fingerprint_failures == 0
+        && paths.len() == cache.files.len()
+        && paths.iter().all(|(_, key, fingerprint, _)| {
+            cache
+                .files
+                .get(key)
+                .is_some_and(|cached| cached.fingerprint == *fingerprint)
+        });
+
+    let mut next = if cache_unchanged {
+        HashMap::new()
+    } else {
+        HashMap::with_capacity(paths.len())
+    };
     let mut scanned = Vec::new();
     let total = paths.len();
     for (done, (path, key, fingerprint, is_base)) in paths.into_iter().enumerate() {
@@ -718,13 +737,15 @@ pub(crate) fn scan_with_cache(
                 }
             }
         };
-        next.insert(
-            key,
-            CachedFile {
-                fingerprint,
-                entries: entries.iter().map(CachedEntry::from).collect(),
-            },
-        );
+        if !cache_unchanged {
+            next.insert(
+                key,
+                CachedFile {
+                    fingerprint,
+                    entries: entries.iter().map(CachedEntry::from).collect(),
+                },
+            );
+        }
         scanned.extend(entries.into_iter().map(|entry| (is_base, entry)));
         progress(ScanProgress::Indexing {
             done: done + 1,
@@ -733,23 +754,37 @@ pub(crate) fn scan_with_cache(
             cache_misses,
         });
     }
-    progress(ScanProgress::WritingCache);
-    let cache = IndexCache {
-        version: INDEX_CACHE_VERSION,
-        schema_hash: expected_schema_hash,
-        files: next,
-    };
-    let mut cache_written = false;
-    if let Some(parent) = cache_path.parent() {
-        if let Err(error) = std::fs::create_dir_all(parent).and_then(|()| {
-            serde_json::to_vec(&cache)
-                .map_err(std::io::Error::other)
-                .and_then(|bytes| std::fs::write(&cache_path, bytes))
-        }) {
-            tracing::debug!(path = %cache_path.display(), %error, "asset index cache write failed");
-            tracing::warn!(%error, "could not write asset index cache");
-        } else {
-            cache_written = true;
+    let mut cache_written = cache_unchanged;
+    let mut cache_updated = false;
+    if cache_unchanged {
+        // Retention uses the modification timestamp as last-used time. Keep
+        // that signal current without serializing and rewriting the cache.
+        if let Err(error) = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&cache_path)
+            .and_then(|file| file.set_modified(SystemTime::now()))
+        {
+            tracing::debug!(path = %cache_path.display(), %error, "index cache last-used time could not be updated");
+        }
+    } else {
+        progress(ScanProgress::WritingCache);
+        let cache = IndexCache {
+            version: INDEX_CACHE_VERSION,
+            schema_hash: expected_schema_hash,
+            files: next,
+        };
+        if let Some(parent) = cache_path.parent() {
+            if let Err(error) = std::fs::create_dir_all(parent).and_then(|()| {
+                serde_json::to_vec(&cache)
+                    .map_err(std::io::Error::other)
+                    .and_then(|bytes| std::fs::write(&cache_path, bytes))
+            }) {
+                tracing::debug!(path = %cache_path.display(), %error, "asset index cache write failed");
+                tracing::warn!(%error, "could not write asset index cache");
+            } else {
+                cache_written = true;
+                cache_updated = true;
+            }
         }
     }
     let pruned_caches = prune_index_caches(cache_written.then_some(cache_path.as_path()));
@@ -775,6 +810,7 @@ pub(crate) fn scan_with_cache(
         produced_entries = scanned.len(),
         cache_written,
         pruned_caches,
+        cache_updated,
         elapsed_ms = started.elapsed().as_millis() as u64,
         "workspace scan completed"
     );
@@ -788,6 +824,7 @@ pub(crate) fn scan_with_cache(
             fingerprint_failures,
             scan_failures,
             cache_written,
+            cache_updated,
         },
     }
 }
@@ -906,6 +943,56 @@ pub(crate) fn scan_roots(analyzer: &Analyzer, roots: &[PathBuf]) -> Vec<ScanEntr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn unique_temp_dir(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "zerosyntax-{label}-{}-{}",
+            std::process::id(),
+            UNIX_EPOCH.elapsed().unwrap().as_nanos()
+        ))
+    }
+
+    #[test]
+    fn unchanged_warm_cache_is_not_rewritten() {
+        let root = unique_temp_dir("warm-cache");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("Weapon.ini"), "Weapon TestWeapon\nEnd\n").unwrap();
+        let workspace_roots = vec![root.clone()];
+
+        let cold = scan_with_cache(&Analyzer::embedded(), &workspace_roots, &[], &mut |_| {});
+        assert_eq!(cold.stats.cache_misses, 1);
+        assert!(cold.stats.cache_updated);
+        let cache_path = index_cache_path(&workspace_roots, &[]);
+        let old_last_used = SystemTime::now() - Duration::from_secs(24 * 60 * 60);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&cache_path)
+            .unwrap()
+            .set_modified(old_last_used)
+            .unwrap();
+
+        let mut warm_events = Vec::new();
+        let warm = scan_with_cache(&Analyzer::embedded(), &workspace_roots, &[], &mut |event| {
+            warm_events.push(event)
+        });
+        assert_eq!(warm.stats.cache_hits, 1);
+        assert_eq!(warm.stats.cache_misses, 0);
+        assert!(warm.stats.cache_written);
+        assert!(!warm.stats.cache_updated);
+        assert!(!warm_events.contains(&ScanProgress::WritingCache));
+        assert!(
+            std::fs::metadata(&cache_path).unwrap().modified().unwrap() > old_last_used,
+            "using an unchanged cache refreshes its retention timestamp"
+        );
+
+        std::fs::write(root.join("Weapon.ini"), "Weapon UpdatedWeapon\nEnd\n").unwrap();
+        let changed = scan_with_cache(&Analyzer::embedded(), &workspace_roots, &[], &mut |_| {});
+        assert_eq!(changed.stats.cache_misses, 1);
+        assert!(changed.stats.cache_updated);
+
+        let _ = clear_index_cache(&workspace_roots, &[]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn discovery_failures_reach_progress_and_scan_stats() {

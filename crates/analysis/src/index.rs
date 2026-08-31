@@ -6,6 +6,7 @@
 //! change ([`WorkspaceIndex::set_file`]).
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use zerosyntax_schema::{RefKind, ValueType};
@@ -122,9 +123,9 @@ pub struct WorkspaceIndex {
     /// keeps the per-file contributions, so re-indexing or removing one asset
     /// file (e.g. a patch archive overriding a base-game model) never drops
     /// another file's model of the same name.
-    model_assets: HashMap<String, Vec<(String, ModelAsset)>>,
+    model_assets: HashMap<String, Vec<(Arc<str>, ModelAsset)>>,
     /// Reverse map for removing/replacing models contributed by one asset file.
-    file_models: HashMap<String, Vec<ModelAsset>>,
+    file_models: HashMap<String, Vec<String>>,
     asset_names: HashMap<AssetKind, HashMap<String, Vec<(String, FileAsset)>>>,
     texture_assets: HashMap<String, Vec<(String, FileAsset)>>,
     file_assets: HashMap<String, Vec<FileAsset>>,
@@ -264,35 +265,69 @@ impl WorkspaceIndex {
 
     /// Replace W3D model assets contributed by `file`.
     pub fn set_file_models(&mut self, file: &str, models: Vec<ModelAsset>) {
-        let normalized = normalized_model_assets(&models);
         let changed = match self.file_models.get(file) {
-            Some(old) => normalized_model_assets(old) != normalized,
+            Some(old) => {
+                let old = old
+                    .iter()
+                    .filter_map(|name| self.model_assets.get(name))
+                    .flatten()
+                    .filter(|(source, _)| source.as_ref() == file)
+                    .map(|(_, model)| model)
+                    .collect::<Vec<_>>();
+                normalized_model_asset_refs(&old) != normalized_model_assets(&models)
+            }
             None => !models.is_empty(),
         };
         if changed {
             self.generation += 1;
         }
         self.remove_model_entries(file);
+        let source: Arc<str> = Arc::from(file);
         let mut stored = Vec::with_capacity(models.len());
         for mut model in models {
             dedup_case_insensitive(&mut model.members);
+            let lower = model.name.to_ascii_lowercase();
             self.model_assets
-                .entry(model.name.to_ascii_lowercase())
+                .entry(lower.clone())
                 .or_default()
-                .push((file.to_string(), model.clone()));
-            stored.push(model);
+                .push((source.clone(), model));
+            stored.push(lower);
         }
         if !stored.is_empty() {
             self.file_models.insert(file.to_string(), stored);
         }
     }
 
+    /// Insert pre-normalized W3D models while constructing a fresh index.
+    ///
+    /// Unlike [`set_file_models`](Self::set_file_models), this avoids change
+    /// detection and member normalization. Callers must supply a file that is
+    /// not already present and model members already deduplicated
+    /// case-insensitively (the W3D catalog guarantees this).
+    pub fn insert_file_models_prepared(&mut self, file: &str, models: Vec<ModelAsset>) {
+        debug_assert!(!self.file_models.contains_key(file));
+        if models.is_empty() {
+            return;
+        }
+        self.generation += 1;
+        let source: Arc<str> = Arc::from(file);
+        let mut stored = Vec::with_capacity(models.len());
+        for model in models {
+            let lower = model.name.to_ascii_lowercase();
+            self.model_assets
+                .entry(lower.clone())
+                .or_default()
+                .push((source.clone(), model));
+            stored.push(lower);
+        }
+        self.file_models.insert(file.to_string(), stored);
+    }
+
     fn remove_model_entries(&mut self, file: &str) {
         if let Some(models) = self.file_models.remove(file) {
-            for model in models {
-                let lower = model.name.to_ascii_lowercase();
+            for lower in models {
                 if let Some(contribs) = self.model_assets.get_mut(&lower) {
-                    contribs.retain(|(f, _)| f != file);
+                    contribs.retain(|(source, _)| source.as_ref() != file);
                     if contribs.is_empty() {
                         self.model_assets.remove(&lower);
                     }
@@ -699,7 +734,7 @@ impl WorkspaceIndex {
         self.model_assets
             .get(&model.to_ascii_lowercase())
             .and_then(|contribs| contribs.last())
-            .map(|(source, _)| source.as_str())
+            .map(|(source, _)| source.as_ref())
     }
 
     pub fn effective_texture_source(&self, texture: &str) -> Option<&FileAsset> {
@@ -789,6 +824,10 @@ fn dedup_case_insensitive(values: &mut Vec<String>) {
 }
 
 fn normalized_model_assets(models: &[ModelAsset]) -> Vec<(String, Vec<String>)> {
+    normalized_model_asset_refs(&models.iter().collect::<Vec<_>>())
+}
+
+fn normalized_model_asset_refs(models: &[&ModelAsset]) -> Vec<(String, Vec<String>)> {
     let mut out = models
         .iter()
         .map(|model| {
@@ -1357,14 +1396,15 @@ mod tests {
     #[test]
     fn model_asset_member_changes_bump_generation() {
         let mut idx = WorkspaceIndex::new();
-        idx.set_file_models(
-            "model.w3d",
-            vec![ModelAsset {
-                name: "Tank".into(),
-                members: vec!["Tire01".into()],
-            }],
-        );
+        let original = vec![ModelAsset {
+            name: "Tank".into(),
+            members: vec!["Tire01".into()],
+        }];
+        idx.set_file_models("model.w3d", original.clone());
         let g1 = idx.generation();
+        idx.set_file_models("model.w3d", original);
+        assert_eq!(idx.generation(), g1);
+
         idx.set_file_models(
             "model.w3d",
             vec![ModelAsset {
@@ -1373,6 +1413,39 @@ mod tests {
             }],
         );
         assert_ne!(idx.generation(), g1);
+    }
+
+    #[test]
+    fn prepared_model_insert_supports_lookup_override_and_removal() {
+        let mut idx = WorkspaceIndex::new();
+        idx.insert_file_models_prepared(
+            "base.w3d",
+            vec![ModelAsset {
+                name: "Tank".into(),
+                members: vec!["Tire01".into()],
+            }],
+        );
+        idx.insert_file_models_prepared(
+            "patch.w3d",
+            vec![ModelAsset {
+                name: "TANK".into(),
+                members: vec!["Cargo01".into()],
+            }],
+        );
+
+        assert!(idx.is_model_asset("tank"));
+        assert_eq!(idx.effective_model_source("Tank"), Some("patch.w3d"));
+        assert_eq!(
+            idx.model_members("tank").collect::<Vec<_>>(),
+            vec!["Tire01", "Cargo01"]
+        );
+
+        idx.remove_file("patch.w3d");
+        assert_eq!(idx.effective_model_source("tank"), Some("base.w3d"));
+        assert_eq!(
+            idx.model_members("tank").collect::<Vec<_>>(),
+            vec!["Tire01"]
+        );
     }
 
     #[test]
