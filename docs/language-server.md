@@ -182,6 +182,21 @@ capability. If such a client starts with formatting disabled, it must restart
 to expose formatting; all other settings still hot-reload. Only selecting a
 different server executable inherently requires a new process.
 
+## Persistent index cache
+
+Indexing results are cached on disk so a restart reuses unchanged files. The
+cache lives in `%LOCALAPPDATA%\zerosyntax` on Windows and
+`$XDG_CACHE_HOME/zerosyntax` (else the temp directory) elsewhere, as one
+`index-v<version>-<hash>.json` file per set of workspace and base roots. Every
+cache-format bump, renamed workspace folder, or `baseIniRoots` change therefore
+produces a new file.
+
+The server keeps that directory bounded: after each scan it deletes caches
+written by an earlier cache version, caches unused for 30 days, and all but the
+four most recently used current-version caches. The cache the running server
+just wrote is always kept, and files it did not create are never touched.
+Deleting the directory by hand is safe — the next scan rebuilds it.
+
 ## Supported LSP features
 
 ZeroSyntax supports incremental document sync, diagnostics, completion, hover,

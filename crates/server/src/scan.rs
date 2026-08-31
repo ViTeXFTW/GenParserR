@@ -5,7 +5,7 @@ use std::hash::{Hash, Hasher};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Instant, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use percent_encoding::percent_decode_str;
@@ -69,6 +69,10 @@ pub(crate) struct ScanOutcome {
 }
 
 const INDEX_CACHE_VERSION: u32 = 5;
+/// How many current-version caches `prune_index_caches` keeps, newest first.
+const INDEX_CACHE_RETAINED: usize = 4;
+/// How long a cache may sit unused before `prune_index_caches` drops it.
+const INDEX_CACHE_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 const MAX_PREVIEW_ASSET_BYTES: u64 = 128 * 1024 * 1024;
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -193,15 +197,84 @@ pub(crate) fn index_cache_path(workspace_roots: &[PathBuf], base_roots: &[PathBu
     ))
 }
 
+/// The cache version encoded in an `index-v<version>-<hash>.json` file name,
+/// or `None` for anything the server did not write as an index cache.
+fn cache_file_version(name: &str) -> Option<u32> {
+    let (version, hash) = name
+        .strip_prefix("index-v")?
+        .strip_suffix(".json")?
+        .split_once('-')?;
+    (hash.len() == 16 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| version.parse().ok())
+        .flatten()
+}
+
+/// Delete index caches the server can no longer use — earlier cache
+/// versions, and current-version caches unused for a while — down to
+/// `INDEX_CACHE_RETAINED` files. `keep`, when given, is exempt and reserves a
+/// retention slot; pass `None` if the caller didn't just write it
+/// successfully, so a failed or partial write can't shield a stale file at
+/// the expense of evicting a newer one. Unrecognized files are never
+/// touched, and a failed delete only costs disk space.
+fn prune_index_caches_in(dir: &Path, keep: Option<&Path>) -> usize {
+    let Ok(dir) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let now = SystemTime::now();
+    let mut pruned = 0;
+    let mut remove = |path: &Path| match std::fs::remove_file(path) {
+        Ok(()) => pruned += 1,
+        Err(error) => {
+            tracing::debug!(path = %path.display(), %error, "stale index cache could not be removed")
+        }
+    };
+    let mut current = Vec::new();
+    for entry in dir.flatten() {
+        let path = entry.path();
+        let Some(version) = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(cache_file_version)
+        else {
+            continue;
+        };
+        if Some(path.as_path()) == keep {
+            continue;
+        }
+        let modified = entry.metadata().and_then(|data| data.modified()).ok();
+        let expired = modified
+            .and_then(|modified| now.duration_since(modified).ok())
+            .is_some_and(|age| age > INDEX_CACHE_MAX_AGE);
+        if version != INDEX_CACHE_VERSION || expired {
+            remove(&path);
+        } else {
+            current.push((modified, path));
+        }
+    }
+    current.sort_unstable_by_key(|(modified, _)| std::cmp::Reverse(*modified));
+    let retained = INDEX_CACHE_RETAINED.saturating_sub(usize::from(keep.is_some()));
+    for (_, path) in current.into_iter().skip(retained) {
+        remove(&path);
+    }
+    pruned
+}
+
+fn prune_index_caches(keep: Option<&Path>) -> usize {
+    prune_index_caches_in(&cache_dir(), keep)
+}
+
 pub(crate) fn clear_index_cache(
     workspace_roots: &[PathBuf],
     base_roots: &[PathBuf],
 ) -> std::io::Result<bool> {
-    match std::fs::remove_file(index_cache_path(workspace_roots, base_roots)) {
-        Ok(()) => Ok(true),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error),
-    }
+    let path = index_cache_path(workspace_roots, base_roots);
+    let cleared = match std::fs::remove_file(&path) {
+        Ok(()) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error),
+    };
+    prune_index_caches(None);
+    Ok(cleared)
 }
 
 struct BigEntry {
@@ -679,6 +752,7 @@ pub(crate) fn scan_with_cache(
             cache_written = true;
         }
     }
+    let pruned_caches = prune_index_caches(cache_written.then_some(cache_path.as_path()));
     let skipped_count = fingerprint_failures + scan_failures;
     if skipped_count > 0 {
         tracing::warn!(
@@ -700,6 +774,7 @@ pub(crate) fn scan_with_cache(
         scan_failures,
         produced_entries = scanned.len(),
         cache_written,
+        pruned_caches,
         elapsed_ms = started.elapsed().as_millis() as u64,
         "workspace scan completed"
     );
@@ -858,5 +933,131 @@ mod tests {
         )));
 
         let _ = clear_index_cache(&workspace_roots, &[]);
+    }
+
+    fn temp_cache_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "zerosyntax-prune-{name}-{}-{}",
+            std::process::id(),
+            UNIX_EPOCH.elapsed().unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Write a cache-shaped file `age` old, so retention order is deterministic
+    /// instead of dependent on filesystem timestamp granularity.
+    fn write_cache_file(dir: &Path, name: &str, age: Duration) -> PathBuf {
+        let path = dir.join(name);
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_modified(SystemTime::now() - age).unwrap();
+        path
+    }
+
+    #[test]
+    fn cache_file_version_accepts_only_generated_names() {
+        assert_eq!(
+            cache_file_version("index-v5-0123456789abcdef.json"),
+            Some(5)
+        );
+        assert_eq!(
+            cache_file_version("index-v12-0123456789abcdef.json"),
+            Some(12)
+        );
+        for name in [
+            "index-v5-0123456789abcde.json",   // hash too short
+            "index-v5-0123456789abcdefg.json", // not hexadecimal
+            "index-vX-0123456789abcdef.json",
+            "index-v5-0123456789abcdef.json.bak",
+            "notes.txt",
+        ] {
+            assert_eq!(cache_file_version(name), None, "{name}");
+        }
+    }
+
+    #[test]
+    fn pruning_drops_earlier_versions_and_keeps_recent_caches() {
+        let dir = temp_cache_dir("versions");
+        let unrelated = write_cache_file(&dir, "notes.txt", Duration::ZERO);
+        let old_version = write_cache_file(&dir, "index-v1-00000000000000ff.json", Duration::ZERO);
+        let keep = write_cache_file(
+            &dir,
+            &format!("index-v{INDEX_CACHE_VERSION}-0000000000000000.json"),
+            Duration::ZERO,
+        );
+        let others: Vec<_> = (1..=INDEX_CACHE_RETAINED as u64 + 2)
+            .map(|index| {
+                write_cache_file(
+                    &dir,
+                    &format!("index-v{INDEX_CACHE_VERSION}-{index:016x}.json"),
+                    Duration::from_secs(index * 60),
+                )
+            })
+            .collect();
+
+        let pruned = prune_index_caches_in(&dir, Some(&keep));
+
+        assert!(keep.exists(), "the cache just written survives");
+        assert!(unrelated.exists(), "unrelated files are never touched");
+        assert!(!old_version.exists(), "earlier cache versions are dropped");
+        let surviving = others.iter().filter(|path| path.exists()).count();
+        assert_eq!(surviving, INDEX_CACHE_RETAINED - 1, "newest others survive");
+        assert!(others[0].exists() && !others[others.len() - 1].exists());
+        assert_eq!(pruned, 1 + others.len() - surviving);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn pruning_drops_caches_unused_past_the_age_limit() {
+        let dir = temp_cache_dir("age");
+        let fresh = write_cache_file(
+            &dir,
+            &format!("index-v{INDEX_CACHE_VERSION}-000000000000000a.json"),
+            Duration::ZERO,
+        );
+        let expired = write_cache_file(
+            &dir,
+            &format!("index-v{INDEX_CACHE_VERSION}-000000000000000b.json"),
+            INDEX_CACHE_MAX_AGE + Duration::from_secs(60),
+        );
+
+        // No `keep` (the cache write failed) still prunes.
+        let pruned = prune_index_caches_in(&dir, None);
+
+        assert!(fresh.exists());
+        assert!(!expired.exists());
+        assert_eq!(pruned, 1);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn failed_write_does_not_reserve_a_retention_slot_for_the_stale_file() {
+        // A write failure leaves the previous file at `cache_path` in place.
+        // It must compete for a retention slot like any other cache, not
+        // reserve one and evict a newer file in its place.
+        let dir = temp_cache_dir("stale-keep");
+        let stale = write_cache_file(
+            &dir,
+            &format!("index-v{INDEX_CACHE_VERSION}-0000000000000001.json"),
+            Duration::from_secs(600),
+        );
+        let others: Vec<_> = (2..=INDEX_CACHE_RETAINED as u64 + 1)
+            .map(|index| {
+                write_cache_file(
+                    &dir,
+                    &format!("index-v{INDEX_CACHE_VERSION}-{index:016x}.json"),
+                    Duration::from_secs(600 - index * 60),
+                )
+            })
+            .collect();
+
+        prune_index_caches_in(&dir, None);
+
+        assert!(!stale.exists(), "the oldest file is evicted, not reserved");
+        assert!(
+            others.iter().all(|path| path.exists()),
+            "newer files are not evicted to make room for the stale one"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
