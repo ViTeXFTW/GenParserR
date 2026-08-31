@@ -1353,7 +1353,10 @@ mod tests {
             "parseFactionObjectCreationList",
             1,
             &token_list(vec![
-                prefixed("Faction", reference(RefKind::PlayerTemplate)),
+                // Compares against `PlayerTemplate::getSide()` (e.g. `America`),
+                // not a PlayerTemplate object name (`FactionAmerica`) — see
+                // OCLUpdate.cpp.
+                prefixed("Faction", enum_type("ai_side")),
                 prefixed("OCL", reference(RefKind::ObjectCreationList)),
             ]),
         );

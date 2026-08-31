@@ -6,29 +6,87 @@
 //! `didChange` deltas are applied to the rope and the document is re-parsed
 //! once per change batch; read-only requests reuse the cached parse.
 
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use base64::Engine;
 use dashmap::DashMap;
+use percent_encoding::percent_decode_str;
 use ropey::Rope;
 use serde::Deserialize;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{jsonrpc::Result, Client, LanguageServer};
-use zerosyntax_analysis::diagnostics::DiagnosticsCache;
+use zerosyntax_analysis::diagnostics::{DiagnosticsCache, Severity as AnalysisSeverity};
 use zerosyntax_analysis::index::{
     definitions_in, module_tags_in, object_models_in, object_parents_in, references_in,
     ModelMemberStrictness, WorkspaceIndex,
 };
-use zerosyntax_analysis::nav::{definition_at, hover_at, reference_at, HoverInfo};
+use zerosyntax_analysis::nav::{
+    definition_at, hover_at, module_tag_definition_at, module_tag_reference_at, reference_at,
+    HoverInfo, ModuleTagReferenceAt, ReferenceAt,
+};
 use zerosyntax_analysis::{actions, completion, diagnostics, format, outline, semantic, Analyzer};
-use zerosyntax_syntax::{Edit, Parse};
+use zerosyntax_syntax::{Edit, Parse, Strategy};
 
 use crate::convert::{self, PositionEnc};
-use crate::scan::{collect_scan_paths, load_sibling_str_keys, read_lossy, scan_files};
+use crate::progress::ProgressReporter;
+use crate::scan::{
+    clear_index_cache, index_cache_path, load_sibling_str_keys, read_asset_uri, read_lossy,
+    scan_with_cache, ScanOutcome, ScanProgress, ScanStats,
+};
 #[cfg(test)]
 use crate::scan::{parse_w3d_models, scan_big, scan_roots};
+
+const CLEAR_INDEX_CACHE_COMMAND: &str = "zerosyntax.clearIndexCache";
+const REBUILD_INDEX_CACHE_COMMAND: &str = "zerosyntax.rebuildIndexCache";
+const PREVIEW_CACHE_SIZE: usize = 64;
+
+#[derive(Default)]
+struct PreviewCache {
+    items: HashMap<String, Arc<str>>,
+    order: VecDeque<String>,
+    generation: u64,
+}
+
+impl PreviewCache {
+    fn get(&self, key: &str) -> Option<Arc<str>> {
+        self.items.get(key).cloned()
+    }
+
+    fn insert(&mut self, generation: u64, key: String, markdown: Arc<str>) {
+        if self.generation != generation {
+            return;
+        }
+        if let Some(existing) = self.items.get_mut(&key) {
+            *existing = markdown;
+            return;
+        }
+        // ponytail: FIFO is enough for 64 completion thumbnails; use an LRU
+        // only if measured model-switching churn makes eviction visible.
+        if self.items.len() == PREVIEW_CACHE_SIZE {
+            if let Some(oldest) = self.order.pop_front() {
+                self.items.remove(&oldest);
+            }
+        }
+        self.order.push_back(key.clone());
+        self.items.insert(key, markdown);
+    }
+
+    fn clear(&mut self) {
+        self.items.clear();
+        self.order.clear();
+        self.generation = self.generation.wrapping_add(1);
+    }
+}
+
+#[derive(Deserialize)]
+struct CompletionResolveData {
+    zerosyntax: String,
+    model: String,
+}
 
 /// An open document: its text (as both a rope for position math and a string
 /// for the parser) and the parse of that exact text. `did_open`/`did_change`
@@ -47,9 +105,143 @@ struct DocumentState {
     last_semantic: Option<(u64, Vec<SemanticToken>)>,
 }
 
+enum SymbolAt {
+    Reference(ReferenceAt),
+    ModuleTag {
+        symbol: ModuleTagReferenceAt,
+        before: Option<u32>,
+    },
+}
+
+impl SymbolAt {
+    fn span(&self) -> zerosyntax_analysis::Span {
+        match self {
+            Self::Reference(symbol) => symbol.span,
+            Self::ModuleTag { symbol, .. } => symbol.span,
+        }
+    }
+}
+
 const DEFAULT_ANALYSIS_DEBOUNCE_MS: u64 = 250;
 const MAX_ANALYSIS_DEBOUNCE_MS: u64 = 5_000;
+const DEFAULT_PREVIEW_IMAGE_WIDTH: u32 = 160;
+const MIN_PREVIEW_IMAGE_WIDTH: u32 = 80;
+const MAX_PREVIEW_IMAGE_WIDTH: u32 = 640;
+const DEFAULT_PREVIEW_ZOOM_PERCENT: u32 = 100;
+const MIN_PREVIEW_ZOOM_PERCENT: u32 = 25;
+const MAX_PREVIEW_ZOOM_PERCENT: u32 = 400;
 const FORMATTING_REGISTRATION_ID: &str = "zerosyntax-formatting";
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum ProgressMode {
+    Off,
+    #[default]
+    Indexing,
+    Verbose,
+}
+
+impl ProgressMode {
+    fn from_value(value: Option<&serde_json::Value>) -> Self {
+        match value.and_then(serde_json::Value::as_str) {
+            Some("off") => Self::Off,
+            Some("verbose") => Self::Verbose,
+            _ => Self::Indexing,
+        }
+    }
+
+    fn allows(self, verbose_only: bool) -> bool {
+        match self {
+            Self::Off => false,
+            Self::Indexing => !verbose_only,
+            Self::Verbose => true,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Indexing => "indexing",
+            Self::Verbose => "verbose",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ProgressWork {
+    Startup,
+    GameDataReload,
+    SchemaReload,
+    ManualRebuild,
+    DiagnosticsRefresh,
+}
+
+impl ProgressWork {
+    fn title(self) -> &'static str {
+        match self {
+            Self::Startup => "Starting ZeroSyntax",
+            Self::GameDataReload => "Updating game-data index",
+            Self::SchemaReload => "Reloading ZeroSyntax schema",
+            Self::ManualRebuild => "Rebuilding ZeroSyntax index",
+            Self::DiagnosticsRefresh => "Refreshing ZeroSyntax diagnostics",
+        }
+    }
+
+    fn initial_message(self) -> &'static str {
+        match self {
+            Self::Startup => "preparing workspace data",
+            Self::GameDataReload => "applying configured game-data roots",
+            Self::SchemaReload => "loading the configured schema",
+            Self::ManualRebuild => "clearing the persistent index cache",
+            Self::DiagnosticsRefresh => "reanalyzing open documents",
+        }
+    }
+
+    fn verbose_only(self) -> bool {
+        matches!(self, Self::DiagnosticsRefresh)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct IndexSummary {
+    ini_total: usize,
+    model_total: usize,
+    audio_total: usize,
+    texture_total: usize,
+    stats: ScanStats,
+}
+
+impl IndexSummary {
+    fn completion_message(self, outcome: &str) -> String {
+        let skipped = self.stats.skipped_inputs();
+        if self.stats.discovered_inputs == 0 && skipped == 0 {
+            return format!("{outcome} — no indexable game data found");
+        }
+        let mut warnings = Vec::new();
+        if skipped > 0 {
+            warnings.push(format!(
+                "{skipped} input{} skipped",
+                if skipped == 1 { "" } else { "s" }
+            ));
+        }
+        if !self.stats.cache_written {
+            warnings.push("persistent cache not saved".into());
+        }
+        let outcome = if warnings.is_empty() {
+            outcome.to_string()
+        } else {
+            format!("{outcome} with warnings")
+        };
+        let warning = (!warnings.is_empty()).then(|| format!("; {}", warnings.join(", ")));
+        format!(
+            "{outcome} — {} INI files, {} W3D models, {} audio files, {} textures indexed{}",
+            self.ini_total,
+            self.model_total,
+            self.audio_total,
+            self.texture_total,
+            warning.as_deref().unwrap_or_default(),
+        )
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RuntimeSettings {
@@ -60,6 +252,10 @@ struct RuntimeSettings {
     allow_bare_percentages: bool,
     map_ordering_diagnostics: bool,
     debounce_ms: u64,
+    preview_enabled: bool,
+    preview_image_width: u32,
+    preview_zoom_percent: u32,
+    progress_mode: ProgressMode,
 }
 
 impl Default for RuntimeSettings {
@@ -72,6 +268,10 @@ impl Default for RuntimeSettings {
             allow_bare_percentages: false,
             map_ordering_diagnostics: true,
             debounce_ms: DEFAULT_ANALYSIS_DEBOUNCE_MS,
+            preview_enabled: true,
+            preview_image_width: DEFAULT_PREVIEW_IMAGE_WIDTH,
+            preview_zoom_percent: DEFAULT_PREVIEW_ZOOM_PERCENT,
+            progress_mode: ProgressMode::Indexing,
         }
     }
 }
@@ -83,6 +283,8 @@ impl RuntimeSettings {
         };
         let value = value.get("zerosyntax").unwrap_or(value);
         let analysis = value.get("analysis");
+        let preview = value.get("preview");
+        let progress = value.get("progress");
         let debounce_ms =
             normalized_debounce_ms(analysis.and_then(|analysis| analysis.get("debounceMs")));
         Self {
@@ -128,6 +330,25 @@ impl RuntimeSettings {
                 .and_then(|value| value.as_bool())
                 .unwrap_or(true),
             debounce_ms,
+            preview_enabled: preview
+                .and_then(|preview| preview.get("enable"))
+                .and_then(|enabled| enabled.as_bool())
+                .unwrap_or(true),
+            preview_image_width: normalized_u32(
+                preview.and_then(|preview| preview.get("imageWidth")),
+                DEFAULT_PREVIEW_IMAGE_WIDTH,
+                MIN_PREVIEW_IMAGE_WIDTH,
+                MAX_PREVIEW_IMAGE_WIDTH,
+            ),
+            preview_zoom_percent: normalized_u32(
+                preview.and_then(|preview| preview.get("zoomPercent")),
+                DEFAULT_PREVIEW_ZOOM_PERCENT,
+                MIN_PREVIEW_ZOOM_PERCENT,
+                MAX_PREVIEW_ZOOM_PERCENT,
+            ),
+            progress_mode: ProgressMode::from_value(
+                progress.and_then(|progress| progress.get("mode")),
+            ),
         }
     }
 }
@@ -140,6 +361,29 @@ fn normalized_debounce_ms(value: Option<&serde_json::Value>) -> u64 {
                 .or_else(|| v.as_u64().map(|n| n.min(MAX_ANALYSIS_DEBOUNCE_MS)))
         })
         .unwrap_or(DEFAULT_ANALYSIS_DEBOUNCE_MS)
+}
+
+fn normalized_u32(value: Option<&serde_json::Value>, default: u32, min: u32, max: u32) -> u32 {
+    value
+        .and_then(|value| {
+            value
+                .as_i64()
+                .map(|value| value.clamp(i64::from(min), i64::from(max)) as u32)
+                .or_else(|| {
+                    value
+                        .as_u64()
+                        .map(|value| value.clamp(min.into(), max.into()) as u32)
+                })
+        })
+        .unwrap_or(default)
+}
+
+fn markdown_text(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
+        .replace('`', "\\`")
 }
 
 pub struct Backend {
@@ -179,11 +423,14 @@ pub struct Backend {
     /// Whether the client supports `window/workDoneProgress` (the scan
     /// spinner). Captured at `initialize`.
     progress_support: OnceLock<bool>,
+    /// Monotonic id source for concurrent work-done progress tokens.
+    work_progress_id: AtomicU64,
     /// Delay after the latest edit before whole-document indexes and
     /// diagnostics refresh. Parsing and definition-name indexing stay eager.
     analysis_debounce_ms: AtomicU64,
     /// Monotonic id source for semantic-token results (delta bookkeeping).
     semantic_result_id: AtomicU64,
+    preview_cache: Mutex<PreviewCache>,
 }
 
 fn load_schema(path: &str) -> std::result::Result<Analyzer, String> {
@@ -197,10 +444,13 @@ fn load_schema(path: &str) -> std::result::Result<Analyzer, String> {
 fn load_schema_or_embedded(path: &str) -> (Analyzer, Option<String>) {
     match load_schema(path) {
         Ok(analyzer) => (analyzer, None),
-        Err(error) => (
-            Analyzer::embedded(),
-            Some(format!("ZeroSyntax: {error}; using the built-in schema.")),
-        ),
+        Err(error) => {
+            tracing::debug!(schema_path = path, %error, "custom schema load failed");
+            (
+                Analyzer::embedded(),
+                Some(format!("ZeroSyntax: {error}; using the built-in schema.")),
+            )
+        }
     }
 }
 
@@ -215,7 +465,7 @@ pub struct VirtualFileParams {
 /// makes the same file land in the `WorkspaceIndex` under two different keys,
 /// so every definition appears duplicated. Round-tripping through the file-path
 /// canonicalises both percent-encoding and drive-letter casing. Non-`file:`
-/// schemes are returned unchanged.
+/// schemes other than `big:` are returned unchanged.
 fn canonical_uri(uri: Url) -> Url {
     if uri.scheme() == "file" {
         if let Ok(path) = uri.to_file_path() {
@@ -223,6 +473,22 @@ fn canonical_uri(uri: Url) -> Url {
                 return canonical;
             }
         }
+    } else if uri.scheme() == "big" {
+        let Ok(mut path) = percent_decode_str(uri.path())
+            .decode_utf8()
+            .map(|path| path.into_owned())
+        else {
+            return uri;
+        };
+        if path.as_bytes().get(1).is_some_and(u8::is_ascii_lowercase)
+            && path.as_bytes().get(2) == Some(&b':')
+        {
+            let drive = char::from(path.as_bytes()[1].to_ascii_uppercase()).to_string();
+            path.replace_range(1..2, &drive);
+        }
+        let mut canonical = Url::parse("big:///").expect("static BIG URI is valid");
+        canonical.set_path(&path);
+        return canonical;
     }
     uri
 }
@@ -257,6 +523,7 @@ async fn refresh_document(
     uri: Url,
     options: RefreshOptions,
 ) {
+    let started = Instant::now();
     let analyzer = analyzer.read().expect("analyzer lock poisoned").clone();
     let Some((rope, parse, version)) = docs.get(&uri).and_then(|d| {
         if options
@@ -268,6 +535,11 @@ async fn refresh_document(
             Some((d.rope.clone(), d.parse.clone(), d.version))
         }
     }) else {
+        tracing::trace!(
+            uri = %uri,
+            expected_version = ?options.expected_version,
+            "document refresh skipped because the document closed or changed"
+        );
         return;
     };
 
@@ -280,8 +552,17 @@ async fn refresh_document(
 
     // Keep this document guard through the short index commit so didChange
     // cannot advance the document and then be overwritten by this snapshot.
-    let Some(entry) = docs.get(&uri) else { return };
+    let Some(entry) = docs.get(&uri) else {
+        tracing::trace!(uri = %uri, version, "document refresh superseded before index commit");
+        return;
+    };
     if entry.version != version {
+        tracing::trace!(
+            uri = %uri,
+            version,
+            current_version = entry.version,
+            "document refresh superseded before index commit"
+        );
         return;
     }
     if let Ok(mut idx) = index.write() {
@@ -297,15 +578,22 @@ async fn refresh_document(
     // Take the cache only after the versioned index commit. Expensive work
     // above never empties the live document's cache when an edit supersedes it.
     let Some(mut entry) = docs.get_mut(&uri) else {
+        tracing::trace!(uri = %uri, version, "document refresh superseded before diagnostics");
         return;
     };
     if entry.version != version {
+        tracing::trace!(
+            uri = %uri,
+            version,
+            current_version = entry.version,
+            "document refresh superseded before diagnostics"
+        );
         return;
     }
     let mut cache = std::mem::take(&mut entry.diag_cache);
     drop(entry);
 
-    let lsp_diags: Vec<Diagnostic> = {
+    let (lsp_diags, error_count, warning_count, hint_count) = {
         let idx = index.read().ok();
         let mut diags = diagnostics::diagnose_with_cache(
             &analyzer,
@@ -318,24 +606,51 @@ async fn refresh_document(
             &mut diags,
             map_ordering_diagnostics.load(Ordering::Relaxed),
         );
-        diags
+        let (mut errors, mut warnings, mut hints) = (0, 0, 0);
+        for diagnostic in &diags {
+            match diagnostic.severity {
+                AnalysisSeverity::Error => errors += 1,
+                AnalysisSeverity::Warning => warnings += 1,
+                AnalysisSeverity::Hint => hints += 1,
+            }
+        }
+        let converted: Vec<Diagnostic> = diags
             .iter()
             .map(|d| convert::to_lsp_diagnostic(&rope, d, options.enc))
-            .collect()
+            .collect();
+        (converted, errors, warnings, hints)
     };
 
     let Some(mut entry) = docs.get_mut(&uri) else {
+        tracing::trace!(uri = %uri, version, "document refresh superseded before cache commit");
         return;
     };
     if entry.version != version {
+        tracing::trace!(
+            uri = %uri,
+            version,
+            current_version = entry.version,
+            "document refresh superseded before cache commit"
+        );
         return;
     }
     entry.diag_cache = cache;
     drop(entry);
 
+    let diagnostic_count = lsp_diags.len();
     client
-        .publish_diagnostics(uri, lsp_diags, Some(version))
+        .publish_diagnostics(uri.clone(), lsp_diags, Some(version))
         .await;
+    tracing::debug!(
+        uri = %uri,
+        version,
+        diagnostic_count,
+        error_count,
+        warning_count,
+        hint_count,
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "document diagnostics published"
+    );
 }
 
 impl Backend {
@@ -360,8 +675,10 @@ impl Backend {
             client_base_ini_hint: OnceLock::new(),
             snippet_support: OnceLock::new(),
             progress_support: OnceLock::new(),
+            work_progress_id: AtomicU64::new(1),
             analysis_debounce_ms: AtomicU64::new(DEFAULT_ANALYSIS_DEBOUNCE_MS),
             semantic_result_id: AtomicU64::new(1),
+            preview_cache: Mutex::new(PreviewCache::default()),
         }
     }
 
@@ -387,6 +704,24 @@ impl Backend {
     fn next_semantic_id(&self) -> u64 {
         self.semantic_result_id
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    async fn begin_progress(&self, work: ProgressWork) -> ProgressReporter {
+        let mode = self
+            .settings
+            .lock()
+            .map(|settings| settings.progress_mode)
+            .unwrap_or_default();
+        let supported = self.progress_support.get().copied().unwrap_or(false);
+        let id = self.work_progress_id.fetch_add(1, Ordering::Relaxed);
+        ProgressReporter::begin(
+            &self.client,
+            supported && mode.allows(work.verbose_only()),
+            NumberOrString::String(format!("zerosyntax/work/{id}")),
+            work.title(),
+            work.initial_message(),
+        )
+        .await
     }
 
     /// Update the cross-file index from the document's cached parse, run
@@ -417,6 +752,12 @@ impl Backend {
         let enc = self.enc();
         let map_ordering_diagnostics = self.map_ordering_diagnostics.clone();
         let delay = Duration::from_millis(self.analysis_debounce_ms.load(Ordering::Relaxed));
+        tracing::trace!(
+            uri = %uri,
+            version,
+            delay_ms = delay.as_millis() as u64,
+            "document refresh scheduled"
+        );
         tokio::spawn(async move {
             tokio::time::sleep(delay).await;
             refresh_document(
@@ -435,15 +776,46 @@ impl Backend {
         });
     }
 
-    async fn refresh_all(&self) {
+    async fn refresh_all_with_progress(
+        &self,
+        progress: &ProgressReporter,
+        start_percentage: u32,
+        percentage_span: u32,
+    ) -> usize {
         let open: Vec<Url> = self
             .docs
             .iter()
             .map(|document| document.key().clone())
             .collect();
-        for uri in open {
-            self.refresh(&uri, None).await;
+        let total = open.len();
+        if total == 0 {
+            progress
+                .report(
+                    "Finalizing workspace state",
+                    Some(start_percentage + percentage_span),
+                )
+                .await;
+            return 0;
         }
+        progress
+            .report(
+                format!("Refreshing diagnostics 0/{total}"),
+                Some(start_percentage),
+            )
+            .await;
+        for (done, uri) in open.into_iter().enumerate() {
+            self.refresh(&uri, None).await;
+            let completed = done + 1;
+            let percentage =
+                start_percentage + (completed as u32 * percentage_span / total.max(1) as u32);
+            progress
+                .report(
+                    format!("Refreshing diagnostics {completed}/{total}"),
+                    Some(percentage),
+                )
+                .await;
+        }
+        total
     }
 
     fn clear_diagnostic_caches(&self) {
@@ -483,12 +855,36 @@ impl Backend {
                 .await
         };
         if let Err(error) = result {
+            tracing::error!(%error, enabled, "formatting capability update failed");
             self.client
                 .log_message(
                     MessageType::ERROR,
-                    format!("failed to update formatting capability: {error}"),
+                    format!("ZeroSyntax: failed to update formatting capability: {error}"),
                 )
                 .await;
+        }
+    }
+
+    async fn finish_index_work(
+        &self,
+        progress: ProgressReporter,
+        scan: std::result::Result<IndexSummary, ()>,
+        success_outcome: &str,
+    ) -> Option<IndexSummary> {
+        match scan {
+            Ok(summary) => {
+                self.refresh_all_with_progress(&progress, 92, 8).await;
+                progress
+                    .end(summary.completion_message(success_outcome))
+                    .await;
+                Some(summary)
+            }
+            Err(()) => {
+                progress
+                    .end("Indexing failed — the previous workspace index remains active")
+                    .await;
+                None
+            }
         }
     }
 
@@ -499,6 +895,7 @@ impl Backend {
                 return;
             };
             if *current == settings {
+                tracing::trace!("configuration notification made no changes");
                 return;
             }
             let previous = current.clone();
@@ -521,8 +918,79 @@ impl Backend {
             previous.model_member_strictness != settings.model_member_strictness;
         let map_ordering_changed =
             previous.map_ordering_diagnostics != settings.map_ordering_diagnostics;
+        let preview_changed = previous.preview_enabled != settings.preview_enabled
+            || previous.preview_image_width != settings.preview_image_width
+            || previous.preview_zoom_percent != settings.preview_zoom_percent;
+        let debounce_changed = previous.debounce_ms != settings.debounce_ms;
+        let format_changed = previous.format_enabled != settings.format_enabled;
+        let progress_changed = previous.progress_mode != settings.progress_mode;
+        let mut changed = Vec::new();
+        if format_changed {
+            changed.push("format.enable");
+        }
+        if schema_changed {
+            changed.push("schemaPath");
+        }
+        if roots_changed {
+            changed.push("baseIniRoots");
+        }
+        if strictness_changed {
+            changed.push("analysis.modelMemberStrictness");
+        }
+        if bare_changed {
+            changed.push("analysis.allowPercentagesWithoutSign");
+        }
+        if map_ordering_changed {
+            changed.push("analysis.mapOrderingDiagnostics");
+        }
+        if debounce_changed {
+            changed.push("analysis.debounceMs");
+        }
+        if preview_changed {
+            changed.push("preview");
+        }
+        if progress_changed {
+            changed.push("progress.mode");
+        }
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!(
+                    "ZeroSyntax: settings updated ({}) — formatting={}, schema={}, base roots={}, model strictness={:?}, bare percentages={}, map ordering={}, debounce={} ms, progress={}.",
+                    changed.join(", "),
+                    settings.format_enabled,
+                    if settings.schema_path.is_empty() { "built-in" } else { "custom" },
+                    settings.base_ini_roots.len(),
+                    settings.model_member_strictness,
+                    settings.allow_bare_percentages,
+                    settings.map_ordering_diagnostics,
+                    settings.debounce_ms,
+                    settings.progress_mode.as_str(),
+                ),
+            )
+            .await;
+        tracing::debug!(
+            schema_path = settings.schema_path,
+            base_roots = ?settings.base_ini_roots,
+            "configuration paths updated"
+        );
+
+        if preview_changed {
+            if let Ok(mut cache) = self.preview_cache.lock() {
+                cache.clear();
+            }
+        }
 
         if schema_changed || roots_changed {
+            let work = if schema_changed {
+                ProgressWork::SchemaReload
+            } else {
+                ProgressWork::GameDataReload
+            };
+            let progress = self.begin_progress(work).await;
+            if schema_changed {
+                progress.report("Loading configured schema", Some(0)).await;
+            }
             let (mut analyzer, warning) = if schema_changed {
                 if settings.schema_path.is_empty() {
                     (Analyzer::embedded(), None)
@@ -532,8 +1000,11 @@ impl Backend {
             } else if bare_changed {
                 (Analyzer::new(self.analyzer().schema().clone()), None)
             } else {
-                self.scan_workspace(self.analyzer(), false).await;
-                self.refresh_all().await;
+                let scan = self
+                    .scan_workspace(self.analyzer(), false, "configuration_changed", &progress)
+                    .await;
+                self.finish_index_work(progress, scan, "Index updated")
+                    .await;
                 return;
             };
             analyzer.set_allow_bare_percentages(settings.allow_bare_percentages);
@@ -545,11 +1016,20 @@ impl Backend {
             }
             if let Some(warning) = warning {
                 self.client
+                    .log_message(
+                        MessageType::WARNING,
+                        "ZeroSyntax: custom schema could not be loaded; using the built-in schema.",
+                    )
+                    .await;
+                self.client
                     .show_message(MessageType::WARNING, warning)
                     .await;
             }
-            self.scan_workspace(analyzer, schema_changed).await;
-            self.refresh_all().await;
+            let scan = self
+                .scan_workspace(analyzer, schema_changed, "configuration_changed", &progress)
+                .await;
+            self.finish_index_work(progress, scan, "Index updated")
+                .await;
             return;
         }
 
@@ -567,7 +1047,17 @@ impl Backend {
             }
         }
         if bare_changed || strictness_changed || map_ordering_changed {
-            self.refresh_all().await;
+            if self.docs.is_empty() {
+                return;
+            }
+            let progress = self.begin_progress(ProgressWork::DiagnosticsRefresh).await;
+            let refreshed = self.refresh_all_with_progress(&progress, 0, 100).await;
+            progress
+                .end(format!(
+                    "Diagnostics refreshed for {refreshed} open document{}",
+                    if refreshed == 1 { "" } else { "s" }
+                ))
+                .await;
         }
     }
 
@@ -586,14 +1076,22 @@ impl Backend {
             .lock()
             .map(|settings| settings.base_ini_roots.is_empty())
             .unwrap_or(true);
-        if roots_empty && self.client_base_ini_hint.get().copied().unwrap_or(false) {
-            return;
-        }
+        let client_handles_hint =
+            roots_empty && self.client_base_ini_hint.get().copied().unwrap_or(false);
         if self
             .base_roots_hint_shown
             .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
             .is_err()
         {
+            return;
+        }
+        self.client
+            .log_message(
+                MessageType::WARNING,
+                "ZeroSyntax: map/solo.ini diagnostics are limited because no base game or mod data is configured.",
+            )
+            .await;
+        if client_handles_hint {
             return;
         }
         self.client
@@ -604,15 +1102,17 @@ impl Backend {
             .await;
     }
 
-    /// Best-effort scan of the workspace roots for `.ini` files to seed the
-    /// index, so references resolve before a file is opened. The walk +
-    /// parse runs on a blocking thread (full-mod folders take seconds); the
-    /// results are applied under the index lock afterwards. Reported to the
-    /// client as `$/progress` (a status-bar spinner with a `done/total`
-    /// counter in VS Code) so users can tell "still indexing" apart from
-    /// "nothing was found".
-    async fn scan_workspace(&self, analyzer: Arc<Analyzer>, replace_analyzer: bool) {
-        let progress_token = self.begin_scan_progress().await;
+    /// Best-effort scan of workspace and game-data roots. The blocking scan
+    /// emits typed phases; the caller owns the progress lifecycle so it can
+    /// remain visible through the later diagnostics refresh.
+    async fn scan_workspace(
+        &self,
+        analyzer: Arc<Analyzer>,
+        replace_analyzer: bool,
+        reason: &'static str,
+        progress: &ProgressReporter,
+    ) -> std::result::Result<IndexSummary, ()> {
+        let started = Instant::now();
         let roots = self.roots.lock().map(|r| r.clone()).unwrap_or_default();
         let (base_roots, model_member_strictness) = self
             .settings
@@ -624,37 +1124,113 @@ impl Backend {
                 )
             })
             .unwrap_or_default();
-        // The blocking scan streams (done, total) over a channel; forward
-        // each update as a progress report while waiting for the results.
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(usize, usize)>();
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!(
+                    "ZeroSyntax: indexing started (reason={reason}, workspace roots={}, base roots={}).",
+                    roots.len(),
+                    base_roots.len()
+                ),
+            )
+            .await;
+        tracing::debug!(
+            reason,
+            workspace_roots = ?roots,
+            base_roots = ?base_roots,
+            replace_analyzer,
+            "workspace indexing paths"
+        );
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<ScanProgress>();
         let scan_analyzer = analyzer.clone();
         let handle = tokio::task::spawn_blocking(move || {
-            let workspace_paths = collect_scan_paths(&roots);
-            let base_paths = collect_scan_paths(&base_roots);
-            let total = workspace_paths.len() + base_paths.len();
-            let mut done = 0;
-            let mut last_percent = u32::MAX;
-            // Throttle to whole-percent changes (plus the final count) so a
-            // 10k-file scan sends ~100 notifications, not 10k.
-            let mut progress = |_done_in_batch: usize, _batch_total: usize| {
-                done += 1;
-                let percent = (done * 100 / total.max(1)) as u32;
-                if percent != last_percent || done == total {
-                    last_percent = percent;
-                    let _ = tx.send((done, total));
+            let mut last_percentage = None;
+            let mut report = |event: ScanProgress| {
+                if let ScanProgress::Indexing { done, total, .. } = event {
+                    // File checking occupies the first 85% of the complete
+                    // operation. Throttle large scans to percentage changes.
+                    let percentage = (done * 85 / total.max(1)) as u32;
+                    if last_percentage == Some(percentage) && done != total {
+                        return;
+                    }
+                    last_percentage = Some(percentage);
                 }
+                let _ = tx.send(event);
             };
-            let scanned = scan_files(&scan_analyzer, &workspace_paths, &mut progress);
-            let base_scanned = scan_files(&scan_analyzer, &base_paths, &mut progress);
-            (scanned, base_scanned)
+            scan_with_cache(&scan_analyzer, &roots, &base_roots, &mut report)
         });
-        while let Some((done, total)) = rx.recv().await {
-            self.report_scan_progress(&progress_token, done, total)
-                .await;
+        while let Some(event) = rx.recv().await {
+            match event {
+                ScanProgress::Discovering => {
+                    progress
+                        .report("Discovering workspace and game data", None)
+                        .await;
+                }
+                ScanProgress::InputsDiscovered { total, skipped } => {
+                    let message = if total == 0 {
+                        if skipped == 0 {
+                            "No indexable game data found".to_string()
+                        } else {
+                            format!("No readable inputs found — {skipped} skipped")
+                        }
+                    } else if skipped == 0 {
+                        format!("Checking 0/{total} inputs")
+                    } else {
+                        format!("Checking 0/{total} inputs — {skipped} skipped during discovery")
+                    };
+                    progress.report(message, (total == 0).then_some(85)).await;
+                }
+                ScanProgress::Indexing {
+                    done,
+                    total,
+                    cache_hits,
+                    cache_misses,
+                } => {
+                    progress
+                        .report(
+                            format!(
+                                "Checking {done}/{total} inputs — {cache_hits} cached, {cache_misses} reparsed"
+                            ),
+                            Some((done * 85 / total.max(1)) as u32),
+                        )
+                        .await;
+                }
+                ScanProgress::WritingCache => {
+                    progress
+                        .report("Saving the persistent index cache", Some(88))
+                        .await;
+                }
+            }
         }
-        let (scanned, base_scanned) = handle.await.unwrap_or_default();
-
+        let ScanOutcome {
+            entries: scanned,
+            stats,
+        } = match handle.await {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                tracing::error!(reason, %error, "workspace indexing worker failed");
+                self.client
+                    .log_message(
+                        MessageType::ERROR,
+                        format!(
+                            "ZeroSyntax: indexing worker failed (reason={reason}); the previous index remains active."
+                        ),
+                    )
+                    .await;
+                return Err(());
+            }
+        };
         if replace_analyzer {
+            let open_count = self.docs.len();
+            progress
+                .report(
+                    format!(
+                        "Reparsing {open_count} open document{} with the new schema",
+                        if open_count == 1 { "" } else { "s" }
+                    ),
+                    Some(89),
+                )
+                .await;
             if let Ok(mut current) = self.analyzer.write() {
                 *current = analyzer.clone();
             }
@@ -665,33 +1241,35 @@ impl Backend {
             }
         }
 
-        let base_ini_count = base_scanned
+        let base_ini_count = scanned
             .iter()
-            .filter(|(_, _, _, _, _, _, models, assets, _)| models.is_empty() && assets.is_empty())
+            .filter(|(is_base, (_, _, _, _, _, _, models, assets, _))| {
+                *is_base && models.is_empty() && assets.is_empty()
+            })
             .count();
         self.base_indexed_count
             .store(base_ini_count, Ordering::Relaxed);
         self.scan_finished.store(true, Ordering::Relaxed);
-        let ini_total = base_ini_count
-            + scanned
-                .iter()
-                .filter(|(_, _, _, _, _, _, models, assets, _)| {
-                    models.is_empty() && assets.is_empty()
-                })
-                .count();
-        let model_total: usize = base_scanned
+        let ini_total = scanned
             .iter()
-            .chain(scanned.iter())
-            .map(|(_, _, _, _, _, _, models, _, _)| models.len())
+            .filter(|(_, (_, _, _, _, _, _, models, assets, _))| {
+                models.is_empty() && assets.is_empty()
+            })
+            .count();
+        let model_total: usize = scanned
+            .iter()
+            .map(|(_, (_, _, _, _, _, _, models, _, _))| models.len())
             .sum();
-        let (audio_total, texture_total) = base_scanned
+        let (audio_total, texture_total) = scanned
             .iter()
-            .chain(scanned.iter())
-            .flat_map(|(_, _, _, _, _, _, _, assets, _)| assets)
+            .flat_map(|(_, (_, _, _, _, _, _, _, assets, _))| assets)
             .fold((0, 0), |(audio, texture), asset| match asset.kind {
                 zerosyntax_analysis::index::AssetKind::Audio => (audio + 1, texture),
                 zerosyntax_analysis::index::AssetKind::Texture => (audio, texture + 1),
             });
+        progress
+            .report("Activating workspace index", Some(90))
+            .await;
         // Build the replacement off to the side so removed roots cannot leave
         // stale definitions, assets, inheritance, models, or virtual files.
         let open: std::collections::HashSet<String> = self
@@ -702,8 +1280,8 @@ impl Backend {
         let mut replacement = WorkspaceIndex::new();
         replacement.set_model_member_strictness(model_member_strictness);
         self.virtual_files.clear();
-        for (uri, defs, refs, tags, object_models, object_parents, models, assets, text) in
-            base_scanned.into_iter().chain(scanned)
+        for (_, (uri, defs, refs, tags, object_models, object_parents, models, assets, text)) in
+            scanned
         {
             if let Some(text) = text {
                 self.virtual_files.insert(uri.clone(), text);
@@ -714,7 +1292,7 @@ impl Backend {
                 replacement.set_file_tags(&uri, tags);
                 replacement.set_file_object_models(&uri, object_models);
                 replacement.set_file_object_parents(&uri, object_parents);
-                replacement.set_file_models(&uri, models);
+                replacement.insert_file_models_prepared(&uri, models);
                 replacement.set_file_assets(&uri, assets);
             }
         }
@@ -734,88 +1312,48 @@ impl Backend {
         if let Ok(mut index) = self.index.write() {
             *index = replacement;
         }
+        if let Ok(mut cache) = self.preview_cache.lock() {
+            cache.clear();
+        }
         self.clear_diagnostic_caches();
-        self.end_scan_progress(
-            progress_token,
+        let skipped_inputs = stats.skipped_inputs();
+        if skipped_inputs > 0 {
+            self.client
+                .log_message(
+                    MessageType::WARNING,
+                    format!(
+                        "ZeroSyntax: indexing completed with warnings (reason={reason}) — {skipped_inputs} input{} could not be indexed.",
+                        if skipped_inputs == 1 { "" } else { "s" }
+                    ),
+                )
+                .await;
+        }
+        if (stats.discovered_inputs > 0 || skipped_inputs > 0) && !stats.cache_written {
+            self.client
+                .log_message(
+                    MessageType::WARNING,
+                    "ZeroSyntax: the index cache could not be saved; unchanged files may be reparsed next time.",
+                )
+                .await;
+        }
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!(
+                    "ZeroSyntax: indexing completed (reason={reason}) — {ini_total} INI files, {model_total} W3D models, {audio_total} audio files, {texture_total} textures; {} cached, {} reparsed, {skipped_inputs} skipped in {} ms.",
+                    stats.cache_hits,
+                    stats.cache_misses,
+                    started.elapsed().as_millis()
+                ),
+            )
+            .await;
+        Ok(IndexSummary {
             ini_total,
             model_total,
             audio_total,
             texture_total,
-        )
-        .await;
-    }
-
-    /// Ask the client to show an indexing spinner. Returns the token to end
-    /// it with, or `None` when the client doesn't support work-done progress.
-    async fn begin_scan_progress(&self) -> Option<NumberOrString> {
-        if !self.progress_support.get().copied().unwrap_or(false) {
-            return None;
-        }
-        let token = NumberOrString::String("zerosyntax/indexing".into());
-        self.client
-            .send_request::<request::WorkDoneProgressCreate>(WorkDoneProgressCreateParams {
-                token: token.clone(),
-            })
-            .await
-            .ok()?;
-        self.client
-            .send_notification::<notification::Progress>(ProgressParams {
-                token: token.clone(),
-                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
-                    WorkDoneProgressBegin {
-                        title: "Indexing game data".into(),
-                        message: Some("scanning workspace and configured game-data roots".into()),
-                        cancellable: Some(false),
-                        // Signals that reports will carry a percentage.
-                        percentage: Some(0),
-                    },
-                )),
-            })
-            .await;
-        Some(token)
-    }
-
-    /// Forward one `done/total` update to the client's progress UI.
-    async fn report_scan_progress(
-        &self,
-        token: &Option<NumberOrString>,
-        done: usize,
-        total: usize,
-    ) {
-        let Some(token) = token else { return };
-        self.client
-            .send_notification::<notification::Progress>(ProgressParams {
-                token: token.clone(),
-                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
-                    WorkDoneProgressReport {
-                        message: Some(format!("{done}/{total} files")),
-                        percentage: Some((done * 100 / total.max(1)) as u32),
-                        cancellable: Some(false),
-                    },
-                )),
-            })
-            .await;
-    }
-
-    async fn end_scan_progress(
-        &self,
-        token: Option<NumberOrString>,
-        ini_total: usize,
-        model_total: usize,
-        audio_total: usize,
-        texture_total: usize,
-    ) {
-        let Some(token) = token else { return };
-        self.client
-            .send_notification::<notification::Progress>(ProgressParams {
-                token,
-                value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(WorkDoneProgressEnd {
-                    message: Some(format!(
-                        "{ini_total} INI files, {model_total} W3D models, {audio_total} audio files, {texture_total} textures indexed"
-                    )),
-                })),
-            })
-            .await;
+            stats,
+        })
     }
 
     /// The cached state for an open document (rope + parse), if any.
@@ -828,7 +1366,8 @@ impl Backend {
     /// Resolve a URI's text to a rope, preferring open documents and falling
     /// back to disk (for go-to-definition into unopened files).
     fn rope_for(&self, uri: &Url) -> Option<Rope> {
-        if let Some(doc) = self.docs.get(uri) {
+        let uri = canonical_uri(uri.clone());
+        if let Some(doc) = self.docs.get(&uri) {
             return Some(doc.rope.clone());
         }
         if uri.scheme() == "big" {
@@ -842,20 +1381,53 @@ impl Backend {
     }
 
     pub async fn read_virtual_file(&self, params: VirtualFileParams) -> Result<Option<String>> {
+        let Some(uri) = Url::parse(&params.uri).ok().map(canonical_uri) else {
+            return Ok(None);
+        };
         Ok(self
             .virtual_files
-            .get(&params.uri)
+            .get(uri.as_str())
             .map(|text| text.to_string()))
+    }
+
+    pub async fn index_cache_path(&self) -> Result<String> {
+        let roots = self
+            .roots
+            .lock()
+            .map(|roots| roots.clone())
+            .unwrap_or_default();
+        let base_roots = self
+            .settings
+            .lock()
+            .map(|settings| settings.base_ini_roots.clone())
+            .unwrap_or_default();
+        Ok(index_cache_path(&roots, &base_roots)
+            .to_string_lossy()
+            .into_owned())
     }
 
     /// The (kind, name, span) under the cursor — a reference-typed value token
     /// or a definition's name token. The shared entry point for
     /// find-references and rename, which work from either end of an edge.
-    fn symbol_at(&self, uri: &Url, pos: Position) -> Option<zerosyntax_analysis::nav::ReferenceAt> {
+    fn symbol_at(&self, uri: &Url, pos: Position) -> Option<SymbolAt> {
         let (rope, parse) = self.doc(uri)?;
         let offset = convert::position_to_offset(&rope, pos, self.enc());
         let analyzer = self.analyzer();
-        reference_at(&analyzer, &parse, offset).or_else(|| definition_at(&analyzer, &parse, offset))
+        reference_at(&analyzer, &parse, offset)
+            .or_else(|| definition_at(&analyzer, &parse, offset))
+            .map(SymbolAt::Reference)
+            .or_else(|| {
+                module_tag_reference_at(&parse, offset).map(|symbol| SymbolAt::ModuleTag {
+                    before: Some(symbol.span.start),
+                    symbol,
+                })
+            })
+            .or_else(|| {
+                module_tag_definition_at(&parse, offset).map(|symbol| SymbolAt::ModuleTag {
+                    symbol,
+                    before: None,
+                })
+            })
     }
 
     /// Convert `(file uri, span)` pairs to LSP locations, reading each file's
@@ -905,6 +1477,8 @@ impl LanguageServer for Backend {
 
         // Editor-facing settings arrive as `initializationOptions`. Shape:
         // `{ "format": {"enable": bool}, "schemaPath": "schema.json",
+        //    "preview": {"enable": true, "imageWidth": 160, "zoomPercent": 100},
+        //    "progress": {"mode": "indexing"},
         //    "analysis": {"modelMemberStrictness": "compatible",
         //                 "allowPercentagesWithoutSign": false,
         //                 "mapOrderingDiagnostics": true, "debounceMs": 250},
@@ -987,6 +1561,7 @@ impl LanguageServer for Backend {
                 )),
                 completion_provider: Some(CompletionOptions {
                     trigger_characters: Some(vec!["=".into(), " ".into()]),
+                    resolve_provider: Some(true),
                     ..Default::default()
                 }),
                 semantic_tokens_provider: Some(
@@ -1019,23 +1594,70 @@ impl LanguageServer for Backend {
                         ..Default::default()
                     },
                 )),
+                execute_command_provider: Some(ExecuteCommandOptions {
+                    commands: vec![
+                        CLEAR_INDEX_CACHE_COMMAND.into(),
+                        REBUILD_INDEX_CACHE_COMMAND.into(),
+                    ],
+                    work_done_progress_options: Default::default(),
+                }),
                 ..Default::default()
             },
         })
     }
 
     async fn initialized(&self, _: InitializedParams) {
+        let roots = self
+            .roots
+            .lock()
+            .map(|roots| roots.clone())
+            .unwrap_or_default();
+        let settings = self
+            .settings
+            .lock()
+            .map(|settings| settings.clone())
+            .unwrap_or_default();
+        self.client
+            .log_message(
+                MessageType::INFO,
+                format!(
+                    "ZeroSyntax: initializing v{} (encoding={:?}, workspace roots={}, base roots={}, schema={}, work progress={} {}, snippets={}, dynamic formatting={}).",
+                    env!("CARGO_PKG_VERSION"),
+                    self.enc(),
+                    roots.len(),
+                    settings.base_ini_roots.len(),
+                    if settings.schema_path.is_empty() { "built-in" } else { "custom" },
+                    self.progress_support.get().copied().unwrap_or(false),
+                    settings.progress_mode.as_str(),
+                    self.snippet_support.get().copied().unwrap_or(false),
+                    self.formatting_dynamic_registration.get().copied().unwrap_or(false),
+                ),
+            )
+            .await;
+        tracing::debug!(
+            workspace_roots = ?roots,
+            base_roots = ?settings.base_ini_roots,
+            schema_path = settings.schema_path,
+            "server initialization paths"
+        );
         if let Some(error) = self.schema_error.lock().ok().and_then(|mut e| e.take()) {
+            self.client
+                .log_message(
+                    MessageType::WARNING,
+                    "ZeroSyntax: custom schema could not be loaded; using the built-in schema.",
+                )
+                .await;
             self.client.show_message(MessageType::WARNING, error).await;
         }
         if self.format_enabled() {
             self.set_formatting_enabled(true).await;
         }
-        self.scan_workspace(self.analyzer(), false).await;
-        // Re-publish diagnostics for any already-open docs now that the index
-        // is populated (so cross-file references resolve). The cached parse is
-        // still valid — only the index changed.
-        self.refresh_all().await;
+        let progress = self.begin_progress(ProgressWork::Startup).await;
+        let scan = self
+            .scan_workspace(self.analyzer(), false, "startup", &progress)
+            .await;
+        // Keep progress alive until cross-file diagnostics reflect the index.
+        self.finish_index_work(progress, scan, "Ready").await;
         let (ini, models, audio, textures) = {
             let idx = self.index.read().ok();
             let models = idx
@@ -1067,13 +1689,109 @@ impl LanguageServer for Backend {
             .log_message(
                 MessageType::INFO,
                 format!(
-                    "zerosyntax language server ready ({ini} base INI files, {models} W3D models, {audio} audio files, {textures} textures indexed)"
+                    "ZeroSyntax: language server ready ({ini} base INI files, {models} W3D models, {audio} audio files, {textures} textures indexed)."
                 ),
             )
             .await;
     }
 
+    async fn execute_command(
+        &self,
+        params: ExecuteCommandParams,
+    ) -> Result<Option<serde_json::Value>> {
+        if params.command != CLEAR_INDEX_CACHE_COMMAND
+            && params.command != REBUILD_INDEX_CACHE_COMMAND
+        {
+            return Ok(None);
+        }
+        let roots = self
+            .roots
+            .lock()
+            .map(|roots| roots.clone())
+            .unwrap_or_default();
+        let base_roots = self
+            .settings
+            .lock()
+            .map(|settings| settings.base_ini_roots.clone())
+            .unwrap_or_default();
+        let mut progress = if params.command == REBUILD_INDEX_CACHE_COMMAND {
+            Some(self.begin_progress(ProgressWork::ManualRebuild).await)
+        } else {
+            None
+        };
+        if let Some(progress) = &progress {
+            progress
+                .report("Clearing the persistent index cache", Some(0))
+                .await;
+        }
+        let cleared = match clear_index_cache(&roots, &base_roots) {
+            Ok(cleared) => cleared,
+            Err(error) => {
+                tracing::error!(%error, "asset index cache clear failed");
+                if let Some(progress) = progress.take() {
+                    progress
+                        .end("Index rebuild failed — the cache could not be cleared")
+                        .await;
+                }
+                self.client
+                    .log_message(
+                        MessageType::ERROR,
+                        "ZeroSyntax: failed to clear the index cache.",
+                    )
+                    .await;
+                return Err(tower_lsp::jsonrpc::Error::internal_error());
+            }
+        };
+        if params.command == REBUILD_INDEX_CACHE_COMMAND {
+            let previous_scan_finished = self.scan_finished.load(Ordering::Relaxed);
+            let previous_base_indexed_count = self.base_indexed_count.load(Ordering::Relaxed);
+            self.scan_finished.store(false, Ordering::Relaxed);
+            self.base_indexed_count.store(0, Ordering::Relaxed);
+            let progress = progress.expect("rebuild progress initialized above");
+            let scan = self
+                .scan_workspace(self.analyzer(), false, "manual_cache_rebuild", &progress)
+                .await;
+            if self
+                .finish_index_work(progress, scan, "Index rebuilt")
+                .await
+                .is_none()
+            {
+                self.scan_finished
+                    .store(previous_scan_finished, Ordering::Relaxed);
+                self.base_indexed_count
+                    .store(previous_base_indexed_count, Ordering::Relaxed);
+                return Err(tower_lsp::jsonrpc::Error::internal_error());
+            }
+            self.client
+                .log_message(
+                    MessageType::INFO,
+                    format!("ZeroSyntax: index cache rebuilt (previous cache cleared={cleared})."),
+                )
+                .await;
+            self.client
+                .show_message(MessageType::INFO, "ZeroSyntax index cache rebuilt.")
+                .await;
+            return Ok(Some(
+                serde_json::json!({ "rebuilt": true, "cleared": cleared }),
+            ));
+        }
+        let message = if cleared {
+            "ZeroSyntax index cache cleared. Restart the language server to rebuild it."
+        } else {
+            "ZeroSyntax index cache is already clear."
+        };
+        self.client.log_message(MessageType::INFO, message).await;
+        self.client.show_message(MessageType::INFO, message).await;
+        Ok(Some(serde_json::json!({ "cleared": cleared })))
+    }
+
     async fn shutdown(&self) -> Result<()> {
+        self.client
+            .log_message(
+                MessageType::INFO,
+                "ZeroSyntax: language server shutting down.",
+            )
+            .await;
         Ok(())
     }
 
@@ -1088,6 +1806,12 @@ impl LanguageServer for Backend {
         let rope = Rope::from_str(&text);
         let parse = Arc::new(self.analyzer().parse(&text));
         let version = params.text_document.version;
+        tracing::debug!(
+            uri = %uri,
+            version,
+            text_bytes = text.len(),
+            "document opened"
+        );
         self.docs.insert(
             uri.clone(),
             DocumentState {
@@ -1107,8 +1831,24 @@ impl LanguageServer for Backend {
         let version = params.text_document.version;
         let enc = self.enc();
         let analyzer = self.analyzer();
+        let change_count = params.content_changes.len();
+        let incoming_bytes = params
+            .content_changes
+            .iter()
+            .map(|change| change.text.len())
+            .sum::<usize>();
+        let all_ranged = params
+            .content_changes
+            .iter()
+            .all(|change| change.range.is_some());
+        let mut spliced_count = 0;
+        let mut full_fallback_count = 0;
+        let mut full_replacement = false;
+        let parse_strategy;
+        let text_bytes;
         {
             let Some(mut entry) = self.docs.get_mut(&uri) else {
+                tracing::trace!(uri = %uri, version, "document change ignored because it is not open");
                 return;
             };
             let entry = entry.value_mut();
@@ -1122,21 +1862,16 @@ impl LanguageServer for Backend {
             // format edits can each carry kilobytes).
             const BULK_CHANGE_THRESHOLD: usize = 8;
             const BULK_TEXT_BYTES: usize = 32 * 1024;
-            let bulk = params.content_changes.len() > BULK_CHANGE_THRESHOLD
-                || (params.content_changes.len() > 1
-                    && params
-                        .content_changes
-                        .iter()
-                        .map(|c| c.text.len())
-                        .sum::<usize>()
-                        > BULK_TEXT_BYTES);
-            if bulk && params.content_changes.iter().all(|c| c.range.is_some()) {
+            let bulk = change_count > BULK_CHANGE_THRESHOLD
+                || (change_count > 1 && incoming_bytes > BULK_TEXT_BYTES);
+            if bulk && all_ranged {
                 for change in params.content_changes {
                     convert::apply_change(&mut entry.rope, change.range, &change.text, enc);
                 }
                 entry.text = entry.rope.to_string().into();
                 entry.parse = Arc::new(analyzer.parse(&entry.text));
                 entry.version = version;
+                parse_strategy = "bulk_full_parse";
             } else {
                 // Each change applies to the text produced by the previous
                 // one. The parse is kept in lockstep via incremental reparse,
@@ -1154,8 +1889,12 @@ impl LanguageServer for Backend {
                                 old_end: old_end as usize,
                                 new_len: change.text.len(),
                             };
-                            let (parse, _strategy) =
+                            let (parse, strategy) =
                                 analyzer.reparse(&entry.parse, &entry.text, &new_text, edit);
+                            match strategy {
+                                Strategy::Spliced => spliced_count += 1,
+                                Strategy::Full => full_fallback_count += 1,
+                            }
                             entry.parse = Arc::new(parse);
                             entry.text = new_text;
                         }
@@ -1164,11 +1903,20 @@ impl LanguageServer for Backend {
                             entry.rope = Rope::from_str(&change.text);
                             entry.text = change.text.into();
                             entry.parse = Arc::new(analyzer.parse(&entry.text));
+                            full_replacement = true;
                         }
                     }
                 }
                 entry.version = version;
+                parse_strategy = if full_replacement {
+                    "full_document_replacement"
+                } else if full_fallback_count > 0 {
+                    "incremental_full_fallback"
+                } else {
+                    "incremental_splice"
+                };
             }
+            text_bytes = entry.text.len();
             // Definition names power reference completions and are cheap to
             // extract. Commit them while the document guard preserves version
             // order; the expensive index passes wait for the debounce.
@@ -1177,13 +1925,26 @@ impl LanguageServer for Backend {
                 idx.set_file(uri.as_str(), defs);
             }
         }
+        tracing::debug!(
+            uri = %uri,
+            version,
+            change_count,
+            incoming_bytes,
+            text_bytes,
+            parse_strategy,
+            spliced_count,
+            full_fallback_count,
+            "document changed"
+        );
         self.schedule_refresh(uri, version);
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         // Keep the file's symbols in the index (it still exists on disk); just
         // drop the in-memory buffer.
-        self.docs.remove(&canonical_uri(params.text_document.uri));
+        let uri = canonical_uri(params.text_document.uri);
+        let removed = self.docs.remove(&uri).is_some();
+        tracing::debug!(uri = %uri, removed, "document closed");
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -1206,6 +1967,131 @@ impl LanguageServer for Backend {
         .map(|c| convert::to_lsp_completion(c, snippets))
         .collect();
         Ok(Some(CompletionResponse::Array(items)))
+    }
+
+    async fn completion_resolve(&self, mut item: CompletionItem) -> Result<CompletionItem> {
+        let Some(data) = item
+            .data
+            .clone()
+            .and_then(|value| serde_json::from_value::<CompletionResolveData>(value).ok())
+            .filter(|data| {
+                data.zerosyntax == "w3d-model-preview"
+                    && !data.model.is_empty()
+                    && data.model.len() <= 256
+            })
+        else {
+            return Ok(item);
+        };
+        let source = self
+            .index
+            .read()
+            .ok()
+            .and_then(|index| index.effective_model_source(&data.model).map(str::to_owned));
+        let Some(source) = source else {
+            return Ok(item);
+        };
+        let (preview_enabled, image_width, zoom_percent) = self
+            .settings
+            .lock()
+            .map(|settings| {
+                (
+                    settings.preview_enabled,
+                    settings.preview_image_width,
+                    settings.preview_zoom_percent,
+                )
+            })
+            .unwrap_or((
+                true,
+                DEFAULT_PREVIEW_IMAGE_WIDTH,
+                DEFAULT_PREVIEW_ZOOM_PERCENT,
+            ));
+        if !preview_enabled {
+            item.documentation = None;
+            return Ok(item);
+        }
+        let cache_key = format!(
+            "{}\0{}\0{image_width}\0{zoom_percent}",
+            data.model.to_ascii_lowercase(),
+            source
+        );
+        let (cached, cache_generation) = self
+            .preview_cache
+            .lock()
+            .map(|cache| (cache.get(&cache_key), cache.generation))
+            .unwrap_or((None, 0));
+        if let Some(markdown) = cached {
+            item.documentation = Some(Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: markdown.to_string(),
+            }));
+            return Ok(item);
+        }
+
+        let index = self.index.clone();
+        let model = data.model.clone();
+        let zoom = zoom_percent as f32 / 100.0;
+        let rendered = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+            let bytes = read_asset_uri(&source)?;
+            let file = zerosyntax_w3d::W3dFile::parse(&bytes)?;
+            file.render_thumbnail(&model, zoom, |texture| {
+                let uri = index.read().ok().and_then(|index| {
+                    index
+                        .effective_texture_source(texture)
+                        .map(|asset| asset.uri.clone())
+                })?;
+                read_asset_uri(&uri).ok()
+            })
+            .map_err(anyhow::Error::from)
+        })
+        .await;
+
+        let markdown = match rendered {
+            Ok(Ok(rendered)) => {
+                let encoded =
+                    base64::engine::general_purpose::STANDARD.encode(rendered.png.as_slice());
+                let label = markdown_text(&data.model);
+                let mut markdown = format!(
+                    "![{label} model preview](data:image/png;base64,{encoded}|width={image_width})\n\n`{label}`"
+                );
+                if !rendered.missing_textures.is_empty() {
+                    let shown = rendered
+                        .missing_textures
+                        .iter()
+                        .take(3)
+                        .map(|name| format!("`{}`", markdown_text(name)))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let remaining = rendered.missing_textures.len().saturating_sub(3);
+                    markdown.push_str("\n\nMissing texture");
+                    if rendered.missing_textures.len() != 1 {
+                        markdown.push('s');
+                    }
+                    markdown.push_str(&format!(": {shown}"));
+                    if remaining > 0 {
+                        markdown.push_str(&format!(" and {remaining} more"));
+                    }
+                }
+                Arc::<str>::from(markdown)
+            }
+            Ok(Err(error)) => {
+                tracing::debug!(%error, "W3D completion preview render details");
+                tracing::warn!("could not render W3D completion preview");
+                Arc::<str>::from("_Preview unavailable: unsupported or malformed W3D data._")
+            }
+            Err(error) => {
+                tracing::debug!(%error, "W3D completion preview task details");
+                tracing::warn!("W3D preview task failed");
+                Arc::<str>::from("_Preview unavailable: unsupported or malformed W3D data._")
+            }
+        };
+        if let Ok(mut cache) = self.preview_cache.lock() {
+            cache.insert(cache_generation, cache_key, markdown.clone());
+        }
+        item.documentation = Some(Documentation::MarkupContent(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: markdown.to_string(),
+        }));
+        Ok(item)
     }
 
     async fn semantic_tokens_full(
@@ -1410,18 +2296,28 @@ impl LanguageServer for Backend {
         };
         let enc = self.enc();
         let offset = convert::position_to_offset(&rope, pos, enc);
-        let Some(reference) = reference_at(&self.analyzer(), &parse, offset) else {
-            return Ok(None);
-        };
-
         let locations: Vec<(String, zerosyntax_analysis::Span)> = {
             let Ok(idx) = self.index.read() else {
                 return Ok(None);
             };
-            idx.locations(reference.kind, &reference.name)
-                .iter()
-                .map(|l| (l.file.clone(), l.span))
+            if let Some(reference) = reference_at(&self.analyzer(), &parse, offset) {
+                idx.locations(reference.kind, &reference.name)
+                    .iter()
+                    .map(|location| (location.file.clone(), location.span))
+                    .collect()
+            } else if let Some(reference) = module_tag_reference_at(&parse, offset) {
+                idx.effective_module_tag_locations(
+                    &reference.object,
+                    &reference.name,
+                    Some(uri.as_str()),
+                    Some(reference.span.start),
+                )
+                .into_iter()
+                .map(|location| (location.file.clone(), location.span))
                 .collect()
+            } else {
+                return Ok(None);
+            }
         };
 
         let mut out = Vec::new();
@@ -1530,19 +2426,48 @@ impl LanguageServer for Backend {
             let Ok(idx) = self.index.read() else {
                 return Ok(None);
             };
-            let mut v: Vec<_> = idx
-                .reference_sites(sym.kind, &sym.name)
-                .iter()
-                .map(|l| (l.file.clone(), l.span))
-                .collect();
-            if params.context.include_declaration {
-                v.extend(
-                    idx.locations(sym.kind, &sym.name)
+            match &sym {
+                SymbolAt::Reference(sym) => {
+                    let mut locations = idx
+                        .reference_sites(sym.kind, &sym.name)
                         .iter()
-                        .map(|l| (l.file.clone(), l.span)),
-                );
+                        .map(|l| (l.file.clone(), l.span))
+                        .collect::<Vec<_>>();
+                    if params.context.include_declaration {
+                        locations.extend(
+                            idx.locations(sym.kind, &sym.name)
+                                .iter()
+                                .map(|l| (l.file.clone(), l.span)),
+                        );
+                    }
+                    locations
+                }
+                SymbolAt::ModuleTag { symbol, before } => {
+                    let mut locations = idx
+                        .module_tag_reference_locations(&symbol.object, &symbol.name)
+                        .into_iter()
+                        .map(|location| (location.file.clone(), location.span))
+                        .collect::<Vec<_>>();
+                    if params.context.include_declaration {
+                        let definitions = if before.is_some() {
+                            idx.effective_module_tag_locations(
+                                &symbol.object,
+                                &symbol.name,
+                                Some(uri.as_str()),
+                                *before,
+                            )
+                        } else {
+                            idx.module_tag_locations(&symbol.object, &symbol.name)
+                        };
+                        locations.extend(
+                            definitions
+                                .into_iter()
+                                .map(|location| (location.file.clone(), location.span)),
+                        );
+                    }
+                    locations
+                }
             }
-            v
         };
         raw.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.start.cmp(&b.1.start)));
         raw.dedup();
@@ -1563,7 +2488,7 @@ impl LanguageServer for Backend {
         };
         Ok(Some(PrepareRenameResponse::Range(convert::span_to_range(
             &rope,
-            sym.span,
+            sym.span(),
             self.enc(),
         ))))
     }
@@ -1585,11 +2510,31 @@ impl LanguageServer for Backend {
             let Ok(idx) = self.index.read() else {
                 return Ok(None);
             };
-            idx.reference_sites(sym.kind, &sym.name)
-                .iter()
-                .chain(idx.locations(sym.kind, &sym.name).iter())
-                .map(|l| (l.file.clone(), l.span))
-                .collect()
+            match &sym {
+                SymbolAt::Reference(sym) => idx
+                    .reference_sites(sym.kind, &sym.name)
+                    .iter()
+                    .chain(idx.locations(sym.kind, &sym.name).iter())
+                    .map(|location| (location.file.clone(), location.span))
+                    .collect(),
+                SymbolAt::ModuleTag { symbol, before } => {
+                    let definitions = if before.is_some() {
+                        idx.effective_module_tag_locations(
+                            &symbol.object,
+                            &symbol.name,
+                            Some(uri.as_str()),
+                            *before,
+                        )
+                    } else {
+                        idx.module_tag_locations(&symbol.object, &symbol.name)
+                    };
+                    idx.module_tag_reference_locations(&symbol.object, &symbol.name)
+                        .into_iter()
+                        .chain(definitions)
+                        .map(|location| (location.file.clone(), location.span))
+                        .collect()
+                }
+            }
         };
         raw.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.start.cmp(&b.1.start)));
         raw.dedup();
@@ -1813,11 +2758,98 @@ mod tests {
     }
 
     #[test]
+    fn preview_settings_default_and_clamp() {
+        let defaults = RuntimeSettings::default();
+        assert!(defaults.preview_enabled);
+        assert_eq!(defaults.preview_image_width, 160);
+        assert_eq!(defaults.preview_zoom_percent, 100);
+
+        let settings = RuntimeSettings::from_value(Some(&serde_json::json!({
+            "preview": {"enable": false, "imageWidth": 10_000, "zoomPercent": 0}
+        })));
+        assert!(!settings.preview_enabled);
+        assert_eq!(settings.preview_image_width, 640);
+        assert_eq!(settings.preview_zoom_percent, 25);
+    }
+
+    #[test]
+    fn progress_mode_defaults_and_parses() {
+        assert_eq!(
+            RuntimeSettings::default().progress_mode,
+            ProgressMode::Indexing
+        );
+        assert_eq!(
+            RuntimeSettings::from_value(Some(&serde_json::json!({
+                "progress": {"mode": "off"}
+            })))
+            .progress_mode,
+            ProgressMode::Off
+        );
+        assert_eq!(
+            RuntimeSettings::from_value(Some(&serde_json::json!({
+                "zerosyntax": {"progress": {"mode": "verbose"}}
+            })))
+            .progress_mode,
+            ProgressMode::Verbose
+        );
+        assert_eq!(
+            RuntimeSettings::from_value(Some(&serde_json::json!({
+                "progress": {"mode": "future-value"}
+            })))
+            .progress_mode,
+            ProgressMode::Indexing
+        );
+        assert!(!ProgressMode::Off.allows(false));
+        assert!(ProgressMode::Indexing.allows(false));
+        assert!(!ProgressMode::Indexing.allows(true));
+        assert!(ProgressMode::Verbose.allows(true));
+    }
+
+    #[test]
+    fn index_completion_distinguishes_empty_success_and_warnings() {
+        let summary = |stats| IndexSummary {
+            ini_total: 2,
+            model_total: 1,
+            audio_total: 0,
+            texture_total: 0,
+            stats,
+        };
+        assert_eq!(
+            summary(ScanStats::default()).completion_message("Ready"),
+            "Ready — no indexable game data found"
+        );
+        assert!(summary(ScanStats {
+            discovered_inputs: 2,
+            cache_written: true,
+            ..ScanStats::default()
+        })
+        .completion_message("Ready")
+        .starts_with("Ready — 2 INI files"));
+        assert!(summary(ScanStats {
+            discovered_inputs: 2,
+            scan_failures: 1,
+            cache_written: false,
+            ..ScanStats::default()
+        })
+        .completion_message("Ready")
+        .contains("Ready with warnings"));
+        assert!(summary(ScanStats {
+            discovery_failures: 1,
+            cache_written: true,
+            ..ScanStats::default()
+        })
+        .completion_message("Ready")
+        .contains("1 input skipped"));
+    }
+
+    #[test]
     fn runtime_settings_accept_startup_and_vscode_shapes() {
         let startup = RuntimeSettings::from_value(Some(&serde_json::json!({
             "format": {"enable": true},
             "schemaPath": "schema.json",
             "baseIniRoots": ["base"],
+            "progress": {"mode": "verbose"},
+            "preview": {"enable": false, "imageWidth": 320, "zoomPercent": 150},
             "analysis": {"modelMemberStrictness": "strict", "debounceMs": 9000}
         })));
         let notification = RuntimeSettings::from_value(Some(&serde_json::json!({
@@ -1825,11 +2857,17 @@ mod tests {
                 "format": {"enable": true},
                 "schema": {"path": "schema.json"},
                 "baseIniRoots": ["base"],
+                "progress": {"mode": "verbose"},
+                "preview": {"enable": false, "imageWidth": 320, "zoomPercent": 150},
                 "analysis": {"modelMemberStrictness": "strict", "debounceMs": 9000}
             }
         })));
         assert_eq!(startup, notification);
         assert_eq!(startup.debounce_ms, 5000);
+        assert!(!startup.preview_enabled);
+        assert_eq!(startup.preview_image_width, 320);
+        assert_eq!(startup.preview_zoom_percent, 150);
+        assert_eq!(startup.progress_mode, ProgressMode::Verbose);
     }
 
     #[test]
@@ -1865,9 +2903,43 @@ mod tests {
     }
 
     #[test]
-    fn canonical_uri_pass_through_non_file() {
+    fn canonical_uri_pass_through_other_schemes() {
         let u = Url::parse("untitled:///buffer").unwrap();
         assert_eq!(canonical_uri(u.clone()), u);
+    }
+
+    #[test]
+    fn canonical_uri_normalises_big_uri_path() {
+        let scanner =
+            Url::parse("big:///C:/Game%20Folder/Base%23.big!/Data/INI/Object.ini").unwrap();
+        for client in [
+            "big:///C%3A/Game%20Folder/Base%23.big!/Data/INI/Object.ini",
+            "big:/c%3A/Game%20Folder/Base%23.big%21/Data/INI/Object.ini",
+        ] {
+            assert_eq!(canonical_uri(Url::parse(client).unwrap()), scanner);
+        }
+    }
+
+    #[test]
+    fn canonical_uri_keeps_scanner_big_uri() {
+        let scanner =
+            Url::parse("big:///C:/Game%20Folder/Base%23.big!/Data/INI/Object.ini").unwrap();
+        assert_eq!(canonical_uri(scanner.clone()), scanner);
+    }
+
+    #[test]
+    fn malformed_or_unknown_big_uri_has_no_virtual_content() {
+        let files = DashMap::new();
+        files.insert(
+            "big:///C:/Game%20Folder/Base.big!/Data/INI/Object.ini".to_string(),
+            Arc::<str>::from("Object Known\nEnd\n"),
+        );
+        let malformed = Url::parse("big:///C%3A/Game%FF/Base.big!/Data/INI/Object.ini").unwrap();
+        let unknown =
+            Url::parse("big:///C%3A/Game%20Folder/Base.big!/Data/INI/Unknown.ini").unwrap();
+        assert_eq!(canonical_uri(malformed.clone()), malformed);
+        assert!(!files.contains_key(canonical_uri(malformed).as_str()));
+        assert!(!files.contains_key(canonical_uri(unknown).as_str()));
     }
 
     #[test]
@@ -1880,7 +2952,7 @@ mod tests {
     #[test]
     fn scans_ini_w3d_audio_and_texture_from_big_archive() {
         let dir = std::env::temp_dir();
-        let path = dir.join(format!("zerosyntax-test-{}.big", std::process::id()));
+        let path = dir.join(format!("zerosyntax test #-{}.big", std::process::id()));
         let entries: Vec<(&str, &[u8])> = vec![
             ("Data\\INI\\Test.ini", b"Object BigArchiveObject\nEnd\n"),
             ("Art\\Good.w3d", b""),
@@ -1914,7 +2986,6 @@ mod tests {
 
         let analyzer = Analyzer::embedded();
         let scanned = scan_big(&analyzer, &path).unwrap();
-        let _ = std::fs::remove_file(&path);
 
         assert_eq!(scanned.len(), 3, "INI, W3D, and one aggregated asset entry");
         let ini = scanned.iter().find(|entry| !entry.1.is_empty()).unwrap();
@@ -1928,6 +2999,12 @@ mod tests {
         assert_eq!(assets.len(), 2);
         assert!(assets.iter().any(|asset| asset.name == "Click.WAV"));
         assert!(assets.iter().any(|asset| asset.name == "Particle.DDS"));
+        let texture = assets
+            .iter()
+            .find(|asset| asset.name == "Particle.DDS")
+            .unwrap();
+        assert_eq!(read_asset_uri(&texture.uri).unwrap(), b"not read");
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
@@ -1945,6 +3022,7 @@ mod tests {
         assert_eq!(assets.len(), 2);
         assert!(assets.iter().any(|asset| asset.name == "Click.wav"));
         assert!(assets.iter().any(|asset| asset.name == "Particle.tga"));
+        assert!(assets.iter().all(|asset| asset.uri.starts_with("file:")));
     }
 
     #[test]
@@ -2049,6 +3127,27 @@ End
         let good = models.iter().find(|m| m.name == "Good").unwrap();
         assert!(good.members.iter().any(|m| m == "Tire01"), "{good:?}");
         assert!(good.members.iter().any(|m| m == "Cargo01"), "{good:?}");
+    }
+
+    #[test]
+    fn malformed_w3d_keeps_filename_fallback_model() {
+        let mut truncated = 0u32.to_le_bytes().to_vec();
+        truncated.extend_from_slice(&16u32.to_le_bytes());
+
+        let models = parse_w3d_models(&truncated, "Fallback");
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].name, "Fallback");
+        assert!(models[0].members.is_empty());
+    }
+
+    #[test]
+    fn invalidated_preview_is_not_cached_again() {
+        let mut cache = PreviewCache::default();
+        let generation = cache.generation;
+        cache.clear();
+        cache.insert(generation, "model".into(), Arc::from("stale"));
+
+        assert!(cache.get("model").is_none());
     }
 
     #[test]

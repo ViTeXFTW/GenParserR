@@ -15,6 +15,38 @@ over stdio.
 The server writes protocol messages to stdout, so clients must launch it using
 stdio rather than a TCP port.
 
+## Logging and troubleshooting
+
+The server sends concise lifecycle, configuration, indexing, and command
+outcomes through LSP `window/logMessage`. In VS Code these appear under
+**Output → ZeroSyntax v2 Language Server** at their proper Info, Warning, or
+Error level. Long scans also keep their existing status-bar progress report.
+
+Developer detail uses structured `tracing` records on stderr and is controlled
+with the standard `RUST_LOG` filter. The default is `warn`; enable server Debug
+or Trace records before starting the editor:
+
+```powershell
+$env:RUST_LOG = "zerosyntax_lsp=debug" # or zerosyntax_lsp=trace
+code .
+```
+
+```sh
+RUST_LOG=zerosyntax_lsp=debug code . # or zerosyntax_lsp=trace
+```
+
+The same filter works when launching `zerosyntax-lsp --stdio` from another LSP
+client. Debug records include paths, document URIs, versions, timings, cache
+decisions, parse strategies, and diagnostic counts. Info logs contain counts
+instead of paths. Source text, INI values, completion contents, and document
+excerpts are never logged.
+
+`zerosyntax.trace.server = verbose` is separate: it records the LSP requests
+and responses themselves, while `RUST_LOG` explains internal server decisions.
+Raw stderr can be decorated as an error by VS Code's language-client transport;
+the level printed inside each tracing record is authoritative. Stdout is always
+reserved for LSP framing and must never receive logs.
+
 ## Command-line diagnostics
 
 Use the `check` subcommand to run the same parser, schema, workspace index, and
@@ -84,6 +116,8 @@ symbols.
 ```json
 {
   "format": { "enable": false },
+  "preview": { "imageWidth": 160, "zoomPercent": 100 },
+  "progress": { "mode": "indexing" },
   "schemaPath": "C:/Mods/MyMod/schema.json",
   "analysis": {
     "modelMemberStrictness": "compatible",
@@ -101,6 +135,16 @@ symbols.
 
 - `format.enable` controls document formatting. It defaults to `false` and is
   dynamically registered when the client supports it.
+- `preview.imageWidth` controls the displayed W3D thumbnail width in pixels
+  (`80`–`640`, default `160`). The client still owns the outer details-pane
+  bounds.
+- `preview.zoomPercent` controls the default W3D camera zoom (`25`–`400`,
+  default `100`). Both preview settings apply to newly resolved completions
+  without restarting the server.
+- `progress.mode` is `off`, `indexing` (the default), or `verbose`. The default
+  reports phased startup, schema/base-root reload, and manual rebuild progress;
+  `verbose` also reports analysis-setting diagnostic refreshes. `off` hides
+  status progress but retains lifecycle and error details in the client log.
 - `schemaPath` points to a custom schema JSON file. Unreadable or invalid files
   produce a warning and fall back to the built-in schema.
 - `analysis.modelMemberStrictness` is `off`, `compatible` (member exists in any
@@ -120,13 +164,17 @@ symbols.
   INI spelling `stem.tga`. Audio and texture warnings activate independently
   only after that asset kind is indexed. Supply every loaded game/mod root to
   avoid warnings caused by a partial asset index. INI definitions are treated
-  as loaded before `map.ini` and `solo.ini`.
+  as loaded before `map.ini` and `solo.ini`. Definitions in loose files open
+  through native `file:` URIs. Definitions inside `.big` archives open as
+  read-only virtual INIs with navigation and inspection support when the client
+  selects the `big` URI scheme.
 
 The same settings can be sent at runtime through
 `workspace/didChangeConfiguration`, either directly or nested under
 `{"zerosyntax": ...}`. Analysis, debounce, and formatting changes apply
 immediately. Schema and base-root changes rebuild the complete index, keep
-filesystem scanning on a blocking worker, and report indexing progress.
+filesystem scanning on a blocking worker, and report progress through file
+discovery, cache checking, index activation, and open-document diagnostics.
 Identical settings are ignored.
 
 Clients without dynamic formatting registration keep their startup formatting
@@ -134,11 +182,37 @@ capability. If such a client starts with formatting disabled, it must restart
 to expose formatting; all other settings still hot-reload. Only selecting a
 different server executable inherently requires a new process.
 
+## Persistent index cache
+
+Indexing results are cached on disk so a restart reuses unchanged files. The
+cache lives in `%LOCALAPPDATA%\zerosyntax` on Windows and
+`$XDG_CACHE_HOME/zerosyntax` (else the temp directory) elsewhere, as one
+`index-v<version>-<hash>.json` file per set of workspace and base roots. Every
+cache-format bump, renamed workspace folder, or `baseIniRoots` change therefore
+produces a new file.
+
+The server keeps that directory bounded: after each scan it deletes caches
+written by an earlier cache version, caches unused for 30 days, and all but the
+four most recently used current-version caches. The cache the running server
+just wrote is always kept, and files it did not create are never touched.
+Deleting the directory by hand is safe — the next scan rebuilds it.
+
 ## Supported LSP features
 
 ZeroSyntax supports incremental document sync, diagnostics, completion, hover,
 go to definition, references, rename, semantic tokens, document and workspace
 symbols, folding ranges, quick fixes, and optional document formatting.
+
+W3D model completion items support `completionItem/resolve`. Clients that render
+Markdown completion documentation can show a lazy textured thumbnail
+for the active `Model =` suggestion. The initial completion list contains no
+image data. Previews use indexed loose or BIG-contained W3D/TGA/DDS assets and
+cover mesh geometry, base materials, HLOD composition, and hierarchy bind pose.
+`preview.imageWidth` changes its displayed size and `preview.zoomPercent`
+changes the model framing.
+Malformed or unsupported assets leave completion functional and show a short
+preview-unavailable message. Rebuild the asset index or reload the server after
+changing binary assets.
 
 ## Build from source
 

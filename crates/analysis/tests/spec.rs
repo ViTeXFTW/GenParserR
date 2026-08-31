@@ -38,7 +38,9 @@ use std::path::{Path, PathBuf};
 use zerosyntax_analysis::actions;
 use zerosyntax_analysis::completion::complete;
 use zerosyntax_analysis::diagnostics::{diagnose, Severity};
-use zerosyntax_analysis::index::{definitions_in, AssetKind, FileAsset, WorkspaceIndex};
+use zerosyntax_analysis::index::{
+    definitions_in, module_tags_in, AssetKind, FileAsset, WorkspaceIndex,
+};
 use zerosyntax_analysis::{Analyzer, Span};
 
 use serde::Deserialize;
@@ -397,6 +399,7 @@ fn specs_hold() {
         // the definitions it declares (and only those).
         let mut index = WorkspaceIndex::new();
         index.set_file(&name, definitions_in(&analyzer, &parse, &name));
+        index.set_file_tags(&name, module_tags_in(&analyzer, &parse));
         index.set_file_assets(
             "spec-assets",
             spec.audio_assets
@@ -404,10 +407,12 @@ fn specs_hold() {
                 .map(|name| FileAsset {
                     kind: AssetKind::Audio,
                     name: name.clone(),
+                    uri: format!("file:///{name}"),
                 })
                 .chain(spec.texture_assets.iter().map(|name| FileAsset {
                     kind: AssetKind::Texture,
                     name: name.clone(),
+                    uri: format!("file:///{name}"),
                 }))
                 .collect(),
         );

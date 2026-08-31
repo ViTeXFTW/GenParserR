@@ -23,7 +23,8 @@ suite("ZeroSyntax VS Code extension", () => {
       uri,
       Buffer.from(
         "Weapon SmokeGun\n  ScaleWeaponSpeed = Maybe\n  \nEnd\n" +
-          "Armor SmokeArmor\n  Armor = ARMOR_PIERCING 2\nEnd\n"
+          "Armor SmokeArmor\n  Armor = ARMOR_PIERCING 2\nEnd\n" +
+          "Object SmokeObject\n  CommandSet = SmokeArchivedSet\nEnd\n"
       )
     );
 
@@ -80,6 +81,48 @@ suite("ZeroSyntax VS Code extension", () => {
       (items) => items.every((diag) => diag.code !== "bad-percent"),
       "hot-reloaded bare-percentage setting"
     );
+
+    const archivedLocations = await waitForAsync(
+      () =>
+        vscode.commands.executeCommand<vscode.Location[]>(
+          "vscode.executeDefinitionProvider",
+          uri,
+          new vscode.Position(8, 20)
+        ),
+      (locations) => locations.some((location) => location.uri.scheme === "big"),
+      "definition into BIG archive"
+    );
+    const archivedLocation = archivedLocations.find(
+      (location) => location.uri.scheme === "big"
+    );
+    assert.ok(archivedLocation, "expected a BIG archive definition");
+
+    const archivedDocument = await vscode.workspace.openTextDocument(archivedLocation.uri);
+    await vscode.window.showTextDocument(archivedDocument);
+    assert.ok(
+      archivedDocument.getText().includes("CommandSet SmokeArchivedSet"),
+      `expected archived source text for ${archivedDocument.uri.toString()}, got ${JSON.stringify(
+        archivedDocument.getText()
+      )}`
+    );
+    assert.strictEqual(archivedDocument.languageId, "generals-ini");
+
+    const nestedLocations = await waitForAsync(
+      () =>
+        vscode.commands.executeCommand<vscode.Location[]>(
+          "vscode.executeDefinitionProvider",
+          archivedDocument.uri,
+          new vscode.Position(4, 12)
+        ),
+      (locations) =>
+        locations.some(
+          (location) =>
+            location.uri.toString() === archivedDocument.uri.toString() &&
+            location.range.start.line === 0
+        ),
+      "definition inside BIG archive"
+    );
+    assert.ok(nestedLocations.length > 0);
   });
 });
 
@@ -96,6 +139,23 @@ async function waitFor<T>(
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
     value = get();
+  }
+  assert.fail(`timed out waiting for ${label}`);
+}
+
+async function waitForAsync<T>(
+  get: () => Thenable<T>,
+  done: (value: T) => boolean,
+  label: string
+): Promise<T> {
+  const deadline = Date.now() + 15000;
+  let value = await get();
+  while (Date.now() < deadline) {
+    if (done(value)) {
+      return value;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    value = await get();
   }
   assert.fail(`timed out waiting for ${label}`);
 }

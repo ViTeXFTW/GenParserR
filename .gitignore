@@ -4,6 +4,11 @@
 !.github/**
 !editors/vscode/.vscodeignore
 
+# Shared VS Code run/debug config for the local dev workflow (see docs/vscode-development.md)
+!.vscode/
+!.vscode/launch.json
+!.vscode/tasks.json
+
 /target
 **/*.rs.bk
 

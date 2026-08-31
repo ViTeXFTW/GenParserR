@@ -4,6 +4,7 @@
 mod backend;
 mod cli;
 mod convert;
+mod progress;
 mod scan;
 
 use backend::Backend;
@@ -19,9 +20,10 @@ async fn main() -> std::process::ExitCode {
     // Log to stderr (stdout is reserved for the LSP wire protocol).
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
+        .with_ansi(false)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
         )
         .init();
 
@@ -29,6 +31,7 @@ async fn main() -> std::process::ExitCode {
     let stdout = tokio::io::stdout();
     let (service, socket) = LspService::build(Backend::new)
         .custom_method("zerosyntax/readVirtualFile", Backend::read_virtual_file)
+        .custom_method("zerosyntax/indexCachePath", Backend::index_cache_path)
         .finish();
     Server::new(stdin, stdout, socket).serve(service).await;
     std::process::ExitCode::SUCCESS

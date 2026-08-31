@@ -1,0 +1,31 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run Extension (local dev server)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}/editors/vscode"],
+      "outFiles": ["${workspaceFolder}/editors/vscode/out/**/*.js"],
+      "preLaunchTask": "build-dev",
+      "windows": {
+        "env": {
+          "ZEROSYNTAX_LSP_PATH": "${workspaceFolder}\\target\\debug\\zerosyntax-lsp.exe",
+          "RUST_LOG": "zerosyntax_lsp=debug"
+        }
+      },
+      "linux": {
+        "env": {
+          "ZEROSYNTAX_LSP_PATH": "${workspaceFolder}/target/debug/zerosyntax-lsp",
+          "RUST_LOG": "zerosyntax_lsp=debug"
+        }
+      },
+      "osx": {
+        "env": {
+          "ZEROSYNTAX_LSP_PATH": "${workspaceFolder}/target/debug/zerosyntax-lsp",
+          "RUST_LOG": "zerosyntax_lsp=debug"
+        }
+      }
+    }
+  ]
+}

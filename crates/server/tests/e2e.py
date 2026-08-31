@@ -9,11 +9,14 @@ identical to a full-text baseline of the same final text. Exits non-zero on
 failure.
 """
 import json
+import base64
+import os
 import subprocess
 import sys
 import threading
 import queue
 import struct
+import urllib.parse
 
 
 def frame(obj: dict) -> bytes:
@@ -49,6 +52,11 @@ def reader(stream, q: "queue.Queue"):
                 q.put({"_parse_error": str(e)})
 
 
+def line_reader(stream, lines):
+    for line in iter(stream.readline, b""):
+        lines.append(line.decode("utf-8", "replace").rstrip())
+
+
 def main() -> int:
     exe = sys.argv[1]
 
@@ -59,6 +67,29 @@ def main() -> int:
 
     workspace = pathlib.Path(tempfile.mkdtemp(prefix="zerosyntax-e2e-"))
     (workspace / "Images.INI").write_text("MappedImage TestScanImage\nEnd\n")
+
+    def w3d_chunk(kind, payload):
+        return struct.pack("<II", kind, len(payload)) + payload
+
+    mesh_header = bytearray(116)
+    mesh_header[8:16] = b"Triangle"
+    mesh_header[24:31] = b"Preview"
+    preview_w3d = w3d_chunk(0, b"".join([
+        w3d_chunk(0x1F, mesh_header),
+        w3d_chunk(0x02, struct.pack("<9f", -1, 0, 0, 1, 0, 0, 0, 0, 1)),
+        w3d_chunk(0x03, struct.pack("<9f", 0, -1, 0, 0, -1, 0, 0, -1, 0)),
+        w3d_chunk(0x0D, struct.pack("<6f", 0, 0, 1, 0, .5, 1)),
+        w3d_chunk(0x20, struct.pack("<4I4f", 0, 1, 2, 0, 0, -1, 0, 0)),
+        w3d_chunk(0x30, w3d_chunk(0x31, w3d_chunk(0x32, b"Preview.tga\0"))),
+        w3d_chunk(0x38, w3d_chunk(0x48, w3d_chunk(0x49, struct.pack("<I", 0)))),
+    ]))
+    (workspace / "Preview.w3d").write_bytes(preview_w3d)
+    preview_tga = bytes([0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 32, 0x20])
+    preview_tga += bytes([
+        0, 0, 255, 255, 0, 255, 0, 255,
+        255, 0, 0, 255, 255, 255, 255, 255,
+    ])
+    (workspace / "Preview.tga").write_bytes(preview_tga)
     base = pathlib.Path(tempfile.mkdtemp(prefix="zerosyntax-e2e-base-"))
     (base / "Base.ini").write_text("MappedImage HotBaseImage\nEnd\n")
     (base / "HotSound.wav").write_bytes(b"")
@@ -70,6 +101,33 @@ def main() -> int:
 
     (base / "A.w3d").write_bytes(w3d_pivot("Bone01"))
     (base / "B.w3d").write_bytes(w3d_pivot("Other"))
+    archived_text = (
+        "CommandButton ArchivedButton\n"
+        "  Command = UNIT_BUILD\n"
+        "End\n"
+        "CommandSet ArchivedSet\n"
+        "  1 = ArchivedButton\n"
+        "End\n"
+    )
+    archive = base / "Base Cache #.big"
+
+    def write_big(path, entries):
+        data_offset = 0x10 + sum(8 + len(name.encode("ascii")) + 1 for name in entries)
+        archive_size = data_offset + sum(len(data) for data in entries.values())
+        data = bytearray(b"BIGF")
+        data.extend(struct.pack(">III", archive_size, len(entries), 0))
+        offset = data_offset
+        for name, content in entries.items():
+            encoded_name = name.encode("ascii")
+            data.extend(struct.pack(">II", offset, len(content)))
+            data.extend(encoded_name + b"\0")
+            offset += len(content)
+        for content in entries.values():
+            data.extend(content)
+        path.write_bytes(data)
+
+    archive_entry = "Data/INI/Archived.ini"
+    write_big(archive, {archive_entry: archived_text.encode("utf-8")})
     root_uri = workspace.as_uri()
 
     # vscode-languageclient appends this conventional transport flag. The
@@ -78,13 +136,22 @@ def main() -> int:
         [exe, "--stdio"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
         bufsize=0,
+        env={**os.environ, "RUST_LOG": "zerosyntax_lsp=debug"},
     )
     q: "queue.Queue" = queue.Queue()
     threading.Thread(target=reader, args=(proc.stdout, q), daemon=True).start()
+    stderr_lines = []
+    stderr_thread = threading.Thread(
+        target=line_reader, args=(proc.stderr, stderr_lines), daemon=True
+    )
+    stderr_thread.start()
     server_requests = []
     indexing_begins = []
+    progress_reports = []
+    indexing_ends = []
+    log_messages = []
 
     def send(obj):
         proc.stdin.write(frame(obj))
@@ -101,6 +168,7 @@ def main() -> int:
                 break
             if msg is None:
                 break
+            assert "_parse_error" not in msg, msg
             if msg.get("method") in {
                 "client/registerCapability",
                 "client/unregisterCapability",
@@ -111,6 +179,14 @@ def main() -> int:
             if (msg.get("method") == "$/progress"
                     and msg.get("params", {}).get("value", {}).get("kind") == "begin"):
                 indexing_begins.append(msg)
+            if (msg.get("method") == "$/progress"
+                    and msg.get("params", {}).get("value", {}).get("kind") == "report"):
+                progress_reports.append(msg)
+            if (msg.get("method") == "$/progress"
+                    and msg.get("params", {}).get("value", {}).get("kind") == "end"):
+                indexing_ends.append(msg)
+            if msg.get("method") == "window/logMessage":
+                log_messages.append(msg)
             if pred(msg):
                 return msg
         print(f"TIMEOUT waiting for {what}", file=sys.stderr)
@@ -118,6 +194,8 @@ def main() -> int:
 
     runtime_settings = {
         "format": {"enable": False},
+        "preview": {"enable": True, "imageWidth": 240, "zoomPercent": 150},
+        "progress": {"mode": "indexing"},
         "baseIniRoots": [],
         "schema": {"path": ""},
         "analysis": {
@@ -140,12 +218,16 @@ def main() -> int:
                      }, "workspaceFolders": None, "rootUri": root_uri,
                      "initializationOptions": {
                          "format": {"enable": False},
+                         "preview": {"enable": True, "imageWidth": 240, "zoomPercent": 150},
+                         "progress": {"mode": "indexing"},
                          "analysis": {"debounceMs": 50},
                      }}})
     init = wait_for(lambda m: m.get("id") == 1 and "result" in m, "initialize result")
     assert init, "no initialize result"
     caps = init["result"]["capabilities"]
     assert "completionProvider" in caps, "missing completionProvider"
+    assert caps["completionProvider"].get("resolveProvider") is True, \
+        "model previews require completionItem/resolve"
     assert "semanticTokensProvider" in caps, "missing semanticTokensProvider"
     sync = caps.get("textDocumentSync")
     assert sync == 2, f"expected INCREMENTAL sync (2), got {sync!r}"
@@ -156,6 +238,36 @@ def main() -> int:
     print("OK: initialize advertised capabilities (incremental sync, utf-16)")
 
     send({"jsonrpc": "2.0", "method": "initialized", "params": {}})
+    ready = wait_for(
+        lambda m: m.get("method") == "window/logMessage"
+        and "language server ready" in m.get("params", {}).get("message", ""),
+        "startup logging",
+    )
+    assert ready and ready["params"]["type"] == 3, ready
+    startup_logs = [message["params"]["message"] for message in log_messages]
+    assert any("initializing v" in message for message in startup_logs), startup_logs
+    assert any(
+        "indexing started (reason=startup" in message for message in startup_logs
+    ), startup_logs
+    completed = next(
+        message
+        for message in startup_logs
+        if "indexing completed (reason=startup" in message
+    )
+    assert "INI files" in completed and "W3D models" in completed, completed
+    startup_begin = indexing_begins[0]["params"]["value"]
+    assert startup_begin["title"] == "Starting ZeroSyntax", startup_begin
+    startup_progress = indexing_ends[0]["params"]["value"]["message"]
+    assert startup_progress.startswith("Ready"), startup_progress
+    assert "INI files" in startup_progress or "no indexable game data" in startup_progress
+    phase_messages = [
+        message["params"]["value"].get("message", "")
+        for message in progress_reports
+    ]
+    assert any("Discovering workspace" in message for message in phase_messages), phase_messages
+    assert any("Activating workspace index" in message for message in phase_messages), phase_messages
+    assert any("Finalizing workspace state" in message for message in phase_messages), phase_messages
+    print("OK: startup emits initialization, indexing, and ready logs")
 
     # 2) didOpen with a Weapon block: bad bool + unknown field.
     uri = "file:///test/Weapon.ini"
@@ -193,6 +305,44 @@ def main() -> int:
     labels = [i["label"] for i in items]
     assert "PrimaryDamage" in labels, f"expected PrimaryDamage in {labels[:10]}..."
     print(f"OK: completion returned {len(labels)} items incl. field names")
+
+    # 3b) Model completion stays small until resolve, then carries a PNG preview.
+    preview_uri = (workspace / "Preview.ini").as_uri()
+    preview_text = (
+        "Object PreviewObject\n"
+        "  Draw = W3DModelDraw ModuleTag_01\n"
+        "    DefaultConditionState\n"
+        "      Model = \n"
+        "    End\n"
+        "  End\n"
+        "End\n"
+    )
+    send({"jsonrpc": "2.0", "method": "textDocument/didOpen",
+          "params": {"textDocument": {"uri": preview_uri, "languageId": "generals-ini",
+                                       "version": 1, "text": preview_text}}})
+    wait_for(lambda m: m.get("method") == "textDocument/publishDiagnostics"
+             and m["params"]["uri"] == preview_uri, "preview diagnostics")
+    send({"jsonrpc": "2.0", "id": 100, "method": "textDocument/completion",
+          "params": {"textDocument": {"uri": preview_uri},
+                     "position": {"line": 3, "character": len("      Model = ")}}})
+    preview_completion = wait_for(
+        lambda m: m.get("id") == 100 and "result" in m, "model completion")
+    preview_items = preview_completion["result"]
+    if isinstance(preview_items, dict):
+        preview_items = preview_items.get("items", [])
+    preview_item = next(item for item in preview_items if item["label"] == "Preview")
+    assert "documentation" not in preview_item, "preview rendered eagerly"
+    assert preview_item.get("data", {}).get("zerosyntax") == "w3d-model-preview"
+    send({"jsonrpc": "2.0", "id": 101, "method": "completionItem/resolve",
+          "params": preview_item})
+    resolved = wait_for(
+        lambda m: m.get("id") == 101 and "result" in m, "model completion resolve")
+    markdown = resolved["result"]["documentation"]["value"]
+    assert len(markdown) < 100_000, "VS Code truncates longer Markdown payloads"
+    assert "|width=240)" in markdown
+    encoded_png = markdown.split("data:image/png;base64,", 1)[1].split("|", 1)[0]
+    assert base64.b64decode(encoded_png).startswith(b"\x89PNG\r\n\x1a\n")
+    print("OK: model completion resolves lazily to a textured PNG preview")
 
     # 4) semantic tokens (full + range; the server must advertise range).
     assert caps["semanticTokensProvider"].get("range") is True, "range tokens not advertised"
@@ -306,6 +456,54 @@ def main() -> int:
     assert norm(burst_diag["params"]["diagnostics"]) == norm(burst_baseline["diagnostics"]), \
         "debounced burst diagnostics differ from a full-text baseline"
     print("OK: completion beats debounced diagnostics; burst publishes latest version only")
+
+    # RemoveModule tags navigate to the matching module tag on the same object.
+    module_map_uri = "file:///test/remove-module/map.ini"
+    open_doc(
+        module_map_uri,
+        "Object GotoTank\n"
+        "  Behavior = DestroyDie ModuleTag_Target\n"
+        "  End\n"
+        "  RemoveModule ModuleTag_Target\n"
+        "End\n",
+    )
+    send({"jsonrpc": "2.0", "id": 30, "method": "textDocument/definition",
+          "params": {"textDocument": {"uri": module_map_uri},
+                     "position": {"line": 3, "character": 16}}})
+    definition = wait_for(
+        lambda m: m.get("id") == 30 and "result" in m,
+        "RemoveModule definition result",
+    )
+    assert definition and definition["result"], "module tag did not resolve"
+    targets = definition["result"]
+    if isinstance(targets, dict):
+        targets = [targets]
+    assert targets[0]["uri"] == module_map_uri, targets
+    assert targets[0]["range"]["start"]["line"] == 1, targets
+    print("OK: RemoveModule tag resolves to its module definition")
+
+    send({"jsonrpc": "2.0", "id": 70, "method": "textDocument/references",
+          "params": {"textDocument": {"uri": module_map_uri},
+                     "position": {"line": 3, "character": 16},
+                     "context": {"includeDeclaration": True}}})
+    tag_refs = wait_for(
+        lambda m: m.get("id") == 70 and "result" in m,
+        "RemoveModule references result",
+    )
+    assert sorted(location["range"]["start"]["line"] for location in tag_refs["result"]) == [1, 3]
+    send({"jsonrpc": "2.0", "id": 71, "method": "textDocument/rename",
+          "params": {"textDocument": {"uri": module_map_uri},
+                     "position": {"line": 1, "character": 30},
+                     "newName": "ModuleTag_Renamed"}})
+    tag_rename = wait_for(
+        lambda m: m.get("id") == 71 and "result" in m,
+        "module tag rename result",
+    )
+    tag_edits = tag_rename["result"]["changes"][module_map_uri]
+    assert len(tag_edits) == 2 and all(
+        edit["newText"] == "ModuleTag_Renamed" for edit in tag_edits
+    ), tag_edits
+    print("OK: module tag references and rename include declarations and removals")
 
     cases = [
         # (name, initial text, [(range, newText)], final text)
@@ -471,6 +669,28 @@ def main() -> int:
         timeout=2.0,
     )
     assert "bad-percent" not in [d.get("code") for d in delayed["params"]["diagnostics"]]
+
+    runtime_settings["preview"] = {"imageWidth": 320, "zoomPercent": 200}
+    configure()
+    send({"jsonrpc": "2.0", "id": 102, "method": "completionItem/resolve",
+          "params": preview_item})
+    resized = wait_for(
+        lambda m: m.get("id") == 102 and "result" in m, "resized model preview")
+    resized_markdown = resized["result"]["documentation"]["value"]
+    resized_png = resized_markdown.split("data:image/png;base64,", 1)[1].split("|", 1)[0]
+    assert "|width=320)" in resized_markdown
+    assert resized_png != encoded_png, "zoom change reused the previous preview"
+    print("OK: model preview size and zoom hot-reload")
+
+    runtime_settings["preview"]["enable"] = False
+    configure()
+    send({"jsonrpc": "2.0", "id": 103, "method": "completionItem/resolve",
+          "params": resolved["result"]})
+    disabled = wait_for(
+        lambda m: m.get("id") == 103 and "result" in m, "disabled model preview")
+    assert "documentation" not in disabled["result"]
+    print("OK: model preview can be disabled without restarting")
+
     runtime_settings["analysis"]["allowPercentagesWithoutSign"] = False
     configure()
     percent = wait_for(
@@ -511,14 +731,26 @@ def main() -> int:
     print("OK: debounce hot-reloads and publishes the current document version")
 
     progress_before = len(indexing_begins)
-    runtime_settings["baseIniRoots"] = [str(base)]
+    runtime_settings["baseIniRoots"] = [str(base), str(archive)]
     configure()
     wait_for(
         lambda m: m.get("method") == "$/progress"
         and m.get("params", {}).get("value", {}).get("kind") == "end",
         "base-root indexing",
     )
-    assert len(indexing_begins) == progress_before + 1
+    reindexed = next(
+        (
+            message
+            for message in reversed(log_messages)
+            if "indexing completed (reason=configuration_changed"
+            in message.get("params", {}).get("message", "")
+        ),
+        None,
+    )
+    assert reindexed and "audio files" in reindexed["params"]["message"], reindexed
+    assert len(indexing_begins) == progress_before + 1, (
+        f"expected one base-root scan, got {len(indexing_begins) - progress_before}"
+    )
 
     asset_uri = "file:///test/hot-assets.ini"
     open_doc(asset_uri, ("Object HotAssetObject\n  ButtonImage = \nEnd\n"
@@ -540,9 +772,105 @@ def main() -> int:
             items = items.get("items", [])
         return [item["label"] for item in items]
 
-    assert "HotBaseImage" in completion_labels(asset_uri, 1, 16)
-    assert "HotSound.wav" in completion_labels(asset_uri, 4, 13)
-    assert "HotTexture.tga" in completion_labels(asset_uri, 7, 12)
+    assert "HotBaseImage" in completion_labels(asset_uri, 1, 16), \
+        "loose base INI definition missing"
+    assert "HotSound.wav" in completion_labels(asset_uri, 4, 13), \
+        "base audio asset missing"
+    assert "HotTexture.tga" in completion_labels(asset_uri, 7, 12), \
+        "base texture asset missing"
+
+    archive_path = archive.as_posix()
+    if not archive_path.startswith("/"):
+        archive_path = "/" + archive_path
+    archived_uri = "big://" + urllib.parse.quote(
+        f"{archive_path}!/{archive_entry}", safe="/:!"
+    )
+    send({"jsonrpc": "2.0", "id": 34, "method": "zerosyntax/readVirtualFile",
+          "params": {"uri": archived_uri}})
+    canonical_virtual_file = wait_for(
+        lambda m: m.get("id") == 34 and "result" in m,
+        "canonical virtual file",
+    )
+    assert canonical_virtual_file["result"] == archived_text, (
+        archived_uri, canonical_virtual_file["result"]
+    )
+    workspace_ref_uri = "file:///test/archive-reference.ini"
+    workspace_ref = open_doc(
+        workspace_ref_uri,
+        "Object ArchiveUser\n  CommandSet = ArchivedSet\nEnd\n",
+    )
+    assert "unresolved-reference" not in [
+        diagnostic.get("code") for diagnostic in workspace_ref["diagnostics"]
+    ], workspace_ref["diagnostics"]
+    send({"jsonrpc": "2.0", "id": 35, "method": "textDocument/definition",
+          "params": {"textDocument": {"uri": workspace_ref_uri},
+                     "position": {"line": 1, "character": 20}}})
+    archived_definition = wait_for(
+        lambda m: m.get("id") == 35 and "result" in m,
+        "workspace definition into BIG archive",
+    )
+    assert archived_definition["result"] == [{
+        "uri": archived_uri,
+        "range": {
+            "start": {"line": 3, "character": 11},
+            "end": {"line": 3, "character": 22},
+        },
+    }], archived_definition["result"]
+
+    parsed = urllib.parse.urlsplit(archived_uri)
+    vscode_path = urllib.parse.unquote(parsed.path)
+    if len(vscode_path) > 2 and vscode_path[2] == ":":
+        vscode_path = vscode_path[:1] + vscode_path[1].lower() + vscode_path[2:]
+    vscode_uri = "big:" + urllib.parse.quote(vscode_path, safe="/")
+    send({"jsonrpc": "2.0", "id": 36, "method": "zerosyntax/readVirtualFile",
+          "params": {"uri": vscode_uri}})
+    virtual_file = wait_for(
+        lambda m: m.get("id") == 36 and "result" in m,
+        "VS Code-encoded virtual file",
+    )
+    assert virtual_file["result"] == archived_text, virtual_file["result"]
+
+    send({"jsonrpc": "2.0", "id": 37, "method": "zerosyntax/readVirtualFile",
+          "params": {"uri": archived_uri.replace("Archived.ini", "Unknown.ini")}})
+    unknown_virtual = wait_for(
+        lambda m: m.get("id") == 37 and "result" in m,
+        "unknown virtual file",
+    )
+    assert unknown_virtual["result"] is None
+    send({"jsonrpc": "2.0", "id": 38, "method": "zerosyntax/readVirtualFile",
+          "params": {"uri": "big:///C%3A/Game%FF/Base.big!/Data/INI/Archived.ini"}})
+    malformed_virtual = wait_for(
+        lambda m: m.get("id") == 38 and "result" in m,
+        "malformed virtual file",
+    )
+    assert malformed_virtual["result"] is None
+
+    send({"jsonrpc": "2.0", "method": "textDocument/didOpen",
+          "params": {"textDocument": {"uri": vscode_uri, "languageId": "generals-ini",
+                                      "version": 1, "text": archived_text}}})
+    virtual_diag = wait_for(
+        lambda m: m.get("method") == "textDocument/publishDiagnostics"
+        and m["params"]["uri"] == archived_uri,
+        "virtual document diagnostics",
+    )
+    assert virtual_diag
+    send({"jsonrpc": "2.0", "id": 39, "method": "textDocument/definition",
+          "params": {"textDocument": {"uri": vscode_uri},
+                     "position": {"line": 4, "character": 10}}})
+    nested_definition = wait_for(
+        lambda m: m.get("id") == 39 and "result" in m,
+        "definition from inside BIG archive",
+    )
+    assert nested_definition["result"] == [{
+        "uri": archived_uri,
+        "range": {
+            "start": {"line": 0, "character": 14},
+            "end": {"line": 0, "character": 28},
+        },
+    }], nested_definition["result"]
+    send({"jsonrpc": "2.0", "method": "textDocument/didClose",
+          "params": {"textDocument": {"uri": vscode_uri}}})
+    print("OK: BIG definitions open through encoded read-only URIs and navigate")
 
     model_uri = "file:///test/hot-model.ini"
     model_text = ("Object HotModelObject\n"
@@ -596,6 +924,27 @@ def main() -> int:
         "custom-schema diagnostics",
     )
     assert "unknown-block" not in [d.get("code") for d in custom["params"]["diagnostics"]]
+    runtime_settings["schema"]["path"] = str(workspace / "missing-schema.json")
+    configure()
+    schema_warning_log = wait_for(
+        lambda m: m.get("method") == "window/logMessage"
+        and m.get("params", {}).get("type") == 2
+        and "custom schema could not be loaded" in m.get("params", {}).get("message", ""),
+        "invalid-schema warning log",
+    )
+    schema_warning_popup = wait_for(
+        lambda m: m.get("method") == "window/showMessage"
+        and m.get("params", {}).get("type") == 2
+        and "built-in schema" in m.get("params", {}).get("message", ""),
+        "invalid-schema warning popup",
+    )
+    assert schema_warning_log and schema_warning_popup
+    custom = wait_for(
+        lambda m: m.get("method") == "textDocument/publishDiagnostics"
+        and m["params"]["uri"] == custom_uri,
+        "invalid-schema fallback diagnostics",
+    )
+    assert "unknown-block" in [d.get("code") for d in custom["params"]["diagnostics"]]
     runtime_settings["schema"]["path"] = ""
     configure()
     custom = wait_for(
@@ -604,7 +953,7 @@ def main() -> int:
         "embedded-schema diagnostics",
     )
     assert "unknown-block" in [d.get("code") for d in custom["params"]["diagnostics"]]
-    print("OK: schema hot-reload reparses already-open documents")
+    print("OK: schema hot-reload logs invalid fallback and reparses open documents")
 
     runtime_settings["format"]["enable"] = True
     configure()
@@ -629,14 +978,43 @@ def main() -> int:
     configure()
     wait_for(lambda m: m.get("method") == "client/registerCapability",
              "dynamic formatting re-registration")
+    wait_for(
+        lambda m: m.get("method") == "window/logMessage"
+        and "settings updated (format.enable)" in m.get("params", {}).get("message", ""),
+        "dynamic formatting settings log",
+    )
+
+    send({"jsonrpc": "2.0", "id": 30, "method": "workspace/executeCommand",
+          "params": {"command": "zerosyntax.rebuildIndexCache", "arguments": []}})
+    rebuild_started = wait_for(
+        lambda m: m.get("method") == "window/logMessage"
+        and "indexing started (reason=manual_cache_rebuild"
+        in m.get("params", {}).get("message", ""),
+        "manual cache rebuild start log",
+    )
+    rebuild_completed = wait_for(
+        lambda m: m.get("method") == "window/logMessage"
+        and "indexing completed (reason=manual_cache_rebuild"
+        in m.get("params", {}).get("message", ""),
+        "manual cache rebuild completion log",
+    )
+    rebuild = wait_for(lambda m: m.get("id") == 30 and "result" in m,
+                       "manual cache rebuild response")
+    assert rebuild_started and rebuild_completed and rebuild["result"]["rebuilt"] is True
+    assert indexing_begins[-1]["params"]["value"]["title"] == "Rebuilding ZeroSyntax index"
+    print("OK: manual cache rebuild logs its reason and completion")
 
     requests_before = len(server_requests)
     progress_before = len(indexing_begins)
+    logs_before = len(log_messages)
     configure()
     import time
     time.sleep(0.25)
     while not q.empty():
         pending = q.get_nowait()
+        assert "_parse_error" not in pending, pending
+        if pending.get("method") == "window/logMessage":
+            log_messages.append(pending)
         assert pending.get("method") not in {
             "client/registerCapability", "client/unregisterCapability"
         }, pending
@@ -644,7 +1022,56 @@ def main() -> int:
                     and pending.get("params", {}).get("value", {}).get("kind") == "begin"), pending
     assert len(server_requests) == requests_before
     assert len(indexing_begins) == progress_before
+    assert len(log_messages) == logs_before
     print("OK: formatting hot-registers; identical settings are a no-op")
+
+    # Progress mode can suppress indexing UI without suppressing lifecycle logs.
+    runtime_settings["progress"]["mode"] = "off"
+    configure()
+    wait_for(
+        lambda m: m.get("method") == "window/logMessage"
+        and "settings updated (progress.mode)" in m.get("params", {}).get("message", ""),
+        "progress mode off",
+    )
+    progress_before = len(indexing_begins)
+    runtime_settings["baseIniRoots"] = [str(base)]
+    configure()
+    hidden_reindex = wait_for(
+        lambda m: m.get("method") == "window/logMessage"
+        and "indexing completed (reason=configuration_changed"
+        in m.get("params", {}).get("message", ""),
+        "hidden base-root indexing",
+    )
+    assert hidden_reindex
+    assert len(indexing_begins) == progress_before
+
+    # Verbose mode adds progress for settings-driven whole-document refreshes.
+    runtime_settings["progress"]["mode"] = "verbose"
+    runtime_settings["analysis"]["mapOrderingDiagnostics"] = False
+    configure()
+    verbose_refresh = wait_for(
+        lambda m: m.get("method") == "$/progress"
+        and m.get("params", {}).get("value", {}).get("kind") == "begin"
+        and m["params"]["value"].get("title") == "Refreshing ZeroSyntax diagnostics",
+        "verbose diagnostic refresh",
+    )
+    assert verbose_refresh
+    wait_for(
+        lambda m: m.get("method") == "$/progress"
+        and m.get("params", {}).get("value", {}).get("kind") == "end",
+        "verbose diagnostic refresh completion",
+    )
+    runtime_settings["progress"]["mode"] = "indexing"
+    runtime_settings["analysis"]["mapOrderingDiagnostics"] = True
+    runtime_settings["baseIniRoots"] = []
+    configure()
+    wait_for(
+        lambda m: m.get("method") == "window/logMessage"
+        and "indexing completed (reason=configuration_changed"
+        in m.get("params", {}).get("message", ""),
+        "restore base-root configuration",
+    )
+    print("OK: progress mode supports off, indexing, and verbose behavior")
 
     # 9) Phase-6 batch 2: semanticTokens delta, formatting, code actions.
     assert caps["semanticTokensProvider"]["full"] == {"delta": True}, \
@@ -727,6 +1154,17 @@ def main() -> int:
         proc.wait(timeout=5)
     except Exception:
         proc.kill()
+    stderr_thread.join(timeout=2)
+    developer_logs = "\n".join(stderr_lines)
+    assert "workspace scan completed" in developer_logs, developer_logs
+    assert "document changed" in developer_logs, developer_logs
+    assert "document diagnostics published" in developer_logs, developer_logs
+    assert "parse_strategy=" in developer_logs, developer_logs
+    assert uri in developer_logs, developer_logs
+    assert workspace.name in developer_logs, developer_logs
+    assert "ScaleWeaponSpeed = Maybe" not in developer_logs, developer_logs
+    assert "Bogus = 1" not in developer_logs, developer_logs
+    print("OK: RUST_LOG debug records decisions and paths without document contents")
 
     # 10) a default-initialized server (no initializationOptions) must not
     #     advertise formatting and must answer the request with null.

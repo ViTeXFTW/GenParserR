@@ -5551,7 +5551,8 @@
             {
               "name": "Name",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "reference",
+                "ref_kind": "audio_event"
               },
               "parse_fn": "INI::parseAsciiString"
             }
@@ -5563,7 +5564,8 @@
             {
               "name": "Name",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "reference",
+                "ref_kind": "object"
               },
               "parse_fn": "INI::parseAsciiString"
             },
@@ -5589,7 +5591,8 @@
             {
               "name": "TracerName",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "reference",
+                "ref_kind": "object"
               },
               "parse_fn": "INI::parseAsciiString",
               "doc": null
@@ -5731,7 +5734,8 @@
             {
               "name": "Name",
               "value_type": {
-                "kind": "ascii_string"
+                "kind": "reference",
+                "ref_kind": "particle_system"
               },
               "parse_fn": "INI::parseAsciiString"
             },
@@ -14868,12 +14872,12 @@
           "keyword": "DeliverPayload",
           "sub_blocks": [
             {
-         "keyword": "DeliveryDecal",
-         "fields": [
-           {
-             "name": "Texture",
-             "value_type": {
-                "kind": "texture_stem"
+              "keyword": "DeliveryDecal",
+              "fields": [
+                {
+                  "name": "Texture",
+                  "value_type": {
+                    "kind": "texture_stem"
                   },
                   "parse_fn": "INI::parseAsciiString"
                 },
@@ -27154,11 +27158,11 @@
       ],
       "sub_blocks": [
         {
-         "keyword": "DeliveryDecal",
-         "fields": [
-           {
-             "name": "Texture",
-             "value_type": {
+          "keyword": "DeliveryDecal",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
                 "kind": "texture_stem"
               },
               "parse_fn": "INI::parseAsciiString",
@@ -28978,11 +28982,11 @@
       ],
       "sub_blocks": [
         {
-         "keyword": "GridDecalTemplate",
-         "fields": [
-           {
-             "name": "Texture",
-             "value_type": {
+          "keyword": "GridDecalTemplate",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
                 "kind": "texture_stem"
               },
               "parse_fn": "INI::parseAsciiString",
@@ -36802,12 +36806,12 @@
       ],
       "sub_blocks": [
         {
-             "keyword": "DeliveryDecal",
-             "fields": [
-               {
-                 "name": "Texture",
-                 "value_type": {
-                    "kind": "texture_stem"
+          "keyword": "DeliveryDecal",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
+                "kind": "texture_stem"
               },
               "parse_fn": "INI::parseAsciiString",
               "doc": null
@@ -36997,8 +37001,8 @@
                 "kind": "prefixed",
                 "prefix": "Faction",
                 "value_type": {
-                  "kind": "reference",
-                  "ref_kind": "player_template"
+                  "kind": "enum",
+                  "value_set": "ai_side"
                 }
               },
               {
@@ -44160,11 +44164,11 @@
       ],
       "sub_blocks": [
         {
-         "keyword": "AttackAreaDecal",
-         "fields": [
-           {
-             "name": "Texture",
-             "value_type": {
+          "keyword": "AttackAreaDecal",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
                 "kind": "texture_stem"
               },
               "parse_fn": "INI::parseAsciiString",
@@ -44224,11 +44228,11 @@
           "doc": "RadiusDecalTemplate nested field table."
         },
         {
-         "keyword": "TargetingReticleDecal",
-         "fields": [
-           {
-             "name": "Texture",
-             "value_type": {
+          "keyword": "TargetingReticleDecal",
+          "fields": [
+            {
+              "name": "Texture",
+              "value_type": {
                 "kind": "texture_stem"
               },
               "parse_fn": "INI::parseAsciiString",
@@ -67256,6 +67260,10 @@
         {
           "name": "GLAToxinGeneral",
           "value": 11
+        },
+        {
+          "name": "Boss",
+          "value": 12
         }
       ],
       "doc": "AIData.ini SideInfo / SkirmishBuildList side names."

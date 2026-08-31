@@ -212,3 +212,7 @@ any crate.
 - Adding/changing diagnostics or schema content: update the affected
   `tests/spec/*.spec.toml` (and drop any `xfail` a change now satisfies), then
   review the diff.
+- Server logging uses `window/logMessage` for concise user-facing lifecycle
+  events and `tracing` for developer detail. Keep stdout protocol-only, put
+  paths/URIs at Debug or Trace, never log source text or INI values, and use
+  structured `snake_case` fields with unit suffixes such as `_ms` and `_bytes`.

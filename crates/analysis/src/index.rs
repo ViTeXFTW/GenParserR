@@ -6,7 +6,9 @@
 //! change ([`WorkspaceIndex::set_file`]).
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
 use zerosyntax_schema::{RefKind, ValueType};
 use zerosyntax_syntax::ast::{Block, Field, Module};
 use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode, SyntaxToken};
@@ -14,20 +16,21 @@ use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode, SyntaxToken};
 use crate::model::{scope_schema, ScopeSchema};
 use crate::{Analyzer, Span};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AssetKind {
     Audio,
     Texture,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileAsset {
     pub kind: AssetKind,
     pub name: String,
+    pub uri: String,
 }
 
 /// Model data discovered from a W3D asset.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelAsset {
     pub name: String,
     pub members: Vec<String>,
@@ -41,7 +44,7 @@ pub struct Location {
 }
 
 /// A named definition discovered in a document.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Definition {
     pub name: String,
     pub kind: RefKind,
@@ -49,11 +52,20 @@ pub struct Definition {
 }
 
 /// A place where a definition is *referenced* (a Reference-typed field value).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReferenceSite {
     pub name: String,
     pub kind: RefKind,
     pub span: Span,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModuleTagDefinition {
+    pub object: String,
+    pub name: String,
+    pub span: Span,
+    #[serde(default)]
+    pub is_reference: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -69,6 +81,11 @@ struct NameEntry {
     /// The name as first written (for completion display).
     display: String,
     locations: Vec<Location>,
+}
+
+struct ModuleTagEntry {
+    name: String,
+    location: Location,
 }
 
 /// Workspace-wide symbol table, grouped by reference kind then name.
@@ -94,9 +111,11 @@ pub struct WorkspaceIndex {
     generation: u64,
     /// Module tags per object (case-insensitive object name key).
     /// Populated from all indexed files. Powers RemoveModule completions.
-    object_tags: HashMap<String, Vec<String>>,
-    /// Reverse map: file → (object_lower, tag) for removal on re-index.
-    file_tags: HashMap<String, Vec<(String, String)>>,
+    object_tags: HashMap<String, Vec<ModuleTagEntry>>,
+    /// RemoveModule value sites, keyed by (object_lower, tag_lower).
+    object_tag_sites: HashMap<(String, String), Vec<Location>>,
+    /// Reverse map: file → (object_lower, tag, is_reference) for re-indexing.
+    file_tags: HashMap<String, Vec<(String, String, bool)>>,
     /// String table keys from companion `.str` files, keyed by the INI file URI.
     /// Powers DisplayName completions when a map.str is present.
     ini_str_keys: HashMap<String, Vec<String>>,
@@ -104,10 +123,11 @@ pub struct WorkspaceIndex {
     /// keeps the per-file contributions, so re-indexing or removing one asset
     /// file (e.g. a patch archive overriding a base-game model) never drops
     /// another file's model of the same name.
-    model_assets: HashMap<String, Vec<(String, ModelAsset)>>,
+    model_assets: HashMap<String, Vec<(Arc<str>, ModelAsset)>>,
     /// Reverse map for removing/replacing models contributed by one asset file.
-    file_models: HashMap<String, Vec<ModelAsset>>,
-    asset_names: HashMap<AssetKind, HashMap<String, Vec<(String, String)>>>,
+    file_models: HashMap<String, Vec<String>>,
+    asset_names: HashMap<AssetKind, HashMap<String, Vec<(String, FileAsset)>>>,
+    texture_assets: HashMap<String, Vec<(String, FileAsset)>>,
     file_assets: HashMap<String, Vec<FileAsset>>,
     object_models: HashMap<String, Vec<(String, Vec<String>)>>,
     file_object_models: HashMap<String, Vec<(String, Vec<String>)>>,
@@ -202,6 +222,7 @@ impl WorkspaceIndex {
                 .file_object_parents
                 .get(file)
                 .is_some_and(|v| !v.is_empty())
+            || self.file_tags.get(file).is_some_and(|v| !v.is_empty())
         {
             self.generation += 1;
         }
@@ -211,6 +232,7 @@ impl WorkspaceIndex {
         self.set_file_assets(file, Vec::new());
         self.remove_object_model_entries(file);
         self.remove_object_parent_entries(file);
+        self.remove_tag_entries(file);
     }
 
     fn remove_site_entries(&mut self, file: &str) {
@@ -243,35 +265,69 @@ impl WorkspaceIndex {
 
     /// Replace W3D model assets contributed by `file`.
     pub fn set_file_models(&mut self, file: &str, models: Vec<ModelAsset>) {
-        let normalized = normalized_model_assets(&models);
         let changed = match self.file_models.get(file) {
-            Some(old) => normalized_model_assets(old) != normalized,
+            Some(old) => {
+                let old = old
+                    .iter()
+                    .filter_map(|name| self.model_assets.get(name))
+                    .flatten()
+                    .filter(|(source, _)| source.as_ref() == file)
+                    .map(|(_, model)| model)
+                    .collect::<Vec<_>>();
+                normalized_model_asset_refs(&old) != normalized_model_assets(&models)
+            }
             None => !models.is_empty(),
         };
         if changed {
             self.generation += 1;
         }
         self.remove_model_entries(file);
+        let source: Arc<str> = Arc::from(file);
         let mut stored = Vec::with_capacity(models.len());
         for mut model in models {
             dedup_case_insensitive(&mut model.members);
+            let lower = model.name.to_ascii_lowercase();
             self.model_assets
-                .entry(model.name.to_ascii_lowercase())
+                .entry(lower.clone())
                 .or_default()
-                .push((file.to_string(), model.clone()));
-            stored.push(model);
+                .push((source.clone(), model));
+            stored.push(lower);
         }
         if !stored.is_empty() {
             self.file_models.insert(file.to_string(), stored);
         }
     }
 
+    /// Insert pre-normalized W3D models while constructing a fresh index.
+    ///
+    /// Unlike [`set_file_models`](Self::set_file_models), this avoids change
+    /// detection and member normalization. Callers must supply a file that is
+    /// not already present and model members already deduplicated
+    /// case-insensitively (the W3D catalog guarantees this).
+    pub fn insert_file_models_prepared(&mut self, file: &str, models: Vec<ModelAsset>) {
+        debug_assert!(!self.file_models.contains_key(file));
+        if models.is_empty() {
+            return;
+        }
+        self.generation += 1;
+        let source: Arc<str> = Arc::from(file);
+        let mut stored = Vec::with_capacity(models.len());
+        for model in models {
+            let lower = model.name.to_ascii_lowercase();
+            self.model_assets
+                .entry(lower.clone())
+                .or_default()
+                .push((source.clone(), model));
+            stored.push(lower);
+        }
+        self.file_models.insert(file.to_string(), stored);
+    }
+
     fn remove_model_entries(&mut self, file: &str) {
         if let Some(models) = self.file_models.remove(file) {
-            for model in models {
-                let lower = model.name.to_ascii_lowercase();
+            for lower in models {
                 if let Some(contribs) = self.model_assets.get_mut(&lower) {
-                    contribs.retain(|(f, _)| f != file);
+                    contribs.retain(|(source, _)| source.as_ref() != file);
                     if contribs.is_empty() {
                         self.model_assets.remove(&lower);
                     }
@@ -302,7 +358,13 @@ impl WorkspaceIndex {
                 .or_default()
                 .entry(asset.name.to_ascii_lowercase())
                 .or_default()
-                .push((file.to_string(), asset.name.clone()));
+                .push((file.to_string(), asset.clone()));
+            if asset.kind == AssetKind::Texture {
+                self.texture_assets
+                    .entry(asset_stem(&asset.name))
+                    .or_default()
+                    .push((file.to_string(), asset.clone()));
+            }
         }
         if assets.is_empty() {
             self.file_assets.remove(file);
@@ -334,6 +396,15 @@ impl WorkspaceIndex {
                     self.asset_names.remove(&asset.kind);
                 }
             }
+            if asset.kind == AssetKind::Texture {
+                let stem = asset_stem(&asset.name);
+                if let Some(contribs) = self.texture_assets.get_mut(&stem) {
+                    contribs.retain(|(source, _)| source != file);
+                    if contribs.is_empty() {
+                        self.texture_assets.remove(&stem);
+                    }
+                }
+            }
         }
     }
 
@@ -354,7 +425,7 @@ impl WorkspaceIndex {
             .get(&kind)
             .into_iter()
             .flat_map(|names| names.values().filter_map(|sources| sources.first()))
-            .map(|(_, display)| display.as_str())
+            .map(|(_, asset)| asset.name.as_str())
     }
 
     pub fn set_file_object_models(&mut self, file: &str, objects: Vec<(String, Vec<String>)>) {
@@ -450,27 +521,84 @@ impl WorkspaceIndex {
 
     /// Replace module-tag entries contributed by `file`.
     /// Called alongside `set_file` so RemoveModule completions stay current.
-    pub fn set_file_tags(&mut self, file: &str, tags: Vec<(String, String)>) {
-        if let Some(old) = self.file_tags.remove(file) {
-            for (obj_lower, tag) in old {
-                if let Some(list) = self.object_tags.get_mut(&obj_lower) {
-                    list.retain(|t| !t.eq_ignore_ascii_case(&tag));
-                    if list.is_empty() {
-                        self.object_tags.remove(&obj_lower);
-                    }
-                }
-            }
+    pub fn set_file_tags(&mut self, file: &str, tags: Vec<ModuleTagDefinition>) {
+        let entries = tags
+            .iter()
+            .map(|tag| {
+                (
+                    tag.object.to_ascii_lowercase(),
+                    tag.name.clone(),
+                    tag.is_reference,
+                )
+            })
+            .collect::<Vec<_>>();
+        let normalized = normalize_object_tags(
+            &entries
+                .iter()
+                .filter(|(_, _, is_reference)| !is_reference)
+                .map(|(object, name, _)| (object.clone(), name.clone()))
+                .collect::<Vec<_>>(),
+        );
+        if self
+            .file_tags
+            .get(file)
+            .map(|old| {
+                normalize_object_tags(
+                    &old.iter()
+                        .filter(|(_, _, is_reference)| !is_reference)
+                        .map(|(object, name, _)| (object.clone(), name.clone()))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .unwrap_or_default()
+            != normalized
+        {
+            self.generation += 1;
         }
-        let mut entries = Vec::with_capacity(tags.len());
-        for (obj_lower, tag) in &tags {
-            self.object_tags
-                .entry(obj_lower.clone())
-                .or_default()
-                .push(tag.clone());
-            entries.push((obj_lower.clone(), tag.clone()));
+        self.remove_tag_entries(file);
+        for tag in tags {
+            let object = tag.object.to_ascii_lowercase();
+            let location = Location {
+                file: file.to_string(),
+                span: tag.span,
+            };
+            if tag.is_reference {
+                self.object_tag_sites
+                    .entry((object, tag.name.to_ascii_lowercase()))
+                    .or_default()
+                    .push(location);
+            } else {
+                self.object_tags
+                    .entry(object)
+                    .or_default()
+                    .push(ModuleTagEntry {
+                        name: tag.name,
+                        location,
+                    });
+            }
         }
         if !entries.is_empty() {
             self.file_tags.insert(file.to_string(), entries);
+        }
+    }
+
+    fn remove_tag_entries(&mut self, file: &str) {
+        if let Some(old) = self.file_tags.remove(file) {
+            for (object, name, _) in old {
+                if let Some(tags) = self.object_tags.get_mut(&object) {
+                    tags.retain(|tag| tag.location.file != file);
+                    if tags.is_empty() {
+                        self.object_tags.remove(&object);
+                    }
+                }
+                let key = (object, name.to_ascii_lowercase());
+                if let Some(sites) = self.object_tag_sites.get_mut(&key) {
+                    sites.retain(|site| site.file != file);
+                    if sites.is_empty() {
+                        self.object_tag_sites.remove(&key);
+                    }
+                }
+            }
         }
     }
 
@@ -480,7 +608,88 @@ impl WorkspaceIndex {
         self.object_tags
             .get(&name.to_ascii_lowercase())
             .into_iter()
-            .flat_map(|tags| tags.iter().map(|t| t.as_str()))
+            .flat_map(|tags| tags.iter().map(|tag| tag.name.as_str()))
+    }
+
+    pub fn module_tag_locations<'a>(&'a self, object: &str, tag: &str) -> Vec<&'a Location> {
+        self.object_tags
+            .get(&object.to_ascii_lowercase())
+            .into_iter()
+            .flatten()
+            .filter(|entry| entry.name.eq_ignore_ascii_case(tag))
+            .map(|entry| &entry.location)
+            .collect()
+    }
+
+    pub fn module_tag_reference_locations<'a>(
+        &'a self,
+        object: &str,
+        tag: &str,
+    ) -> Vec<&'a Location> {
+        self.object_tag_sites
+            .get(&(object.to_ascii_lowercase(), tag.to_ascii_lowercase()))
+            .into_iter()
+            .flatten()
+            .collect()
+    }
+
+    pub fn is_new_override_object(&self, name: &str, file: &str) -> bool {
+        is_override_layer(file)
+            && !self
+                .locations(RefKind::Object, name)
+                .iter()
+                .any(|location| !is_override_layer(&location.file))
+    }
+
+    /// Module tags visible to RemoveModule. New map/solo objects start as a
+    /// copy of DefaultThingTemplate, while existing objects use their own tags.
+    pub fn effective_module_tags_for_object<'a>(
+        &'a self,
+        name: &str,
+        file: Option<&str>,
+        before: Option<u32>,
+    ) -> Vec<&'a str> {
+        let mut out = self
+            .object_tags
+            .get(&name.to_ascii_lowercase())
+            .into_iter()
+            .flatten()
+            .filter(|tag| {
+                !file.zip(before).is_some_and(|(file, before)| {
+                    tag.location.file == file && tag.location.span.start >= before
+                })
+            })
+            .map(|tag| tag.name.as_str())
+            .collect::<Vec<_>>();
+        let is_new_override = file.is_some_and(|file| self.is_new_override_object(name, file));
+        if is_new_override {
+            out.extend(self.module_tags_for_object("DefaultThingTemplate"));
+            let mut seen = std::collections::HashSet::new();
+            out.retain(|tag| seen.insert(tag.to_ascii_lowercase()));
+        }
+        out
+    }
+
+    pub fn effective_module_tag_locations<'a>(
+        &'a self,
+        object: &str,
+        tag: &str,
+        file: Option<&str>,
+        before: Option<u32>,
+    ) -> Vec<&'a Location> {
+        let mut out = self
+            .module_tag_locations(object, tag)
+            .into_iter()
+            .filter(|location| {
+                !file.zip(before).is_some_and(|(file, before)| {
+                    location.file == file && location.span.start >= before
+                })
+            })
+            .collect::<Vec<_>>();
+        if out.is_empty() && file.is_some_and(|file| self.is_new_override_object(object, file)) {
+            out = self.module_tag_locations("DefaultThingTemplate", tag);
+        }
+        out
     }
 
     /// Store string table keys parsed from the `.str` file co-located with `ini_file`.
@@ -515,8 +724,24 @@ impl WorkspaceIndex {
     pub fn model_names(&self) -> impl Iterator<Item = &str> {
         self.model_assets
             .values()
-            .filter_map(|contribs| contribs.first())
+            .filter_map(|contribs| contribs.last())
             .map(|(_, m)| m.name.as_str())
+    }
+
+    /// Last indexed contributor wins: base roots are indexed first and
+    /// workspace roots last.
+    pub fn effective_model_source(&self, model: &str) -> Option<&str> {
+        self.model_assets
+            .get(&model.to_ascii_lowercase())
+            .and_then(|contribs| contribs.last())
+            .map(|(source, _)| source.as_ref())
+    }
+
+    pub fn effective_texture_source(&self, texture: &str) -> Option<&FileAsset> {
+        self.texture_assets
+            .get(&asset_stem(texture))
+            .and_then(|contribs| contribs.last())
+            .map(|(_, asset)| asset)
     }
 
     /// User-addressable members (pivots/subobjects/meshes) for `model`,
@@ -599,6 +824,10 @@ fn dedup_case_insensitive(values: &mut Vec<String>) {
 }
 
 fn normalized_model_assets(models: &[ModelAsset]) -> Vec<(String, Vec<String>)> {
+    normalized_model_asset_refs(&models.iter().collect::<Vec<_>>())
+}
+
+fn normalized_model_asset_refs(models: &[&ModelAsset]) -> Vec<(String, Vec<String>)> {
     let mut out = models
         .iter()
         .map(|model| {
@@ -616,6 +845,14 @@ fn normalized_model_assets(models: &[ModelAsset]) -> Vec<(String, Vec<String>)> 
     out
 }
 
+fn asset_stem(name: &str) -> String {
+    let file = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    file.rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(file)
+        .to_ascii_lowercase()
+}
+
 fn normalize_object_models(objects: &[(String, Vec<String>)]) -> Vec<(String, Vec<String>)> {
     let mut out = objects
         .iter()
@@ -631,6 +868,21 @@ fn normalize_object_models(objects: &[(String, Vec<String>)]) -> Vec<(String, Ve
         .collect::<Vec<_>>();
     out.sort();
     out
+}
+
+fn normalize_object_tags(tags: &[(String, String)]) -> Vec<(String, String)> {
+    let mut out = tags
+        .iter()
+        .map(|(object, tag)| (object.to_ascii_lowercase(), tag.to_ascii_lowercase()))
+        .collect::<Vec<_>>();
+    out.sort();
+    out
+}
+
+fn is_override_layer(file: &str) -> bool {
+    file.rsplit(['/', '\\']).next().is_some_and(|name| {
+        name.eq_ignore_ascii_case("map.ini") || name.eq_ignore_ascii_case("solo.ini")
+    })
 }
 
 /// Collect the W3D models declared below every Object definition.
@@ -864,9 +1116,9 @@ pub fn definitions_in(analyzer: &Analyzer, parse: &Parse, _file: &str) -> Vec<De
     out
 }
 
-/// Collect `(object_name_lower, module_tag)` pairs from all Object blocks in
-/// a parsed file. Used to populate the RemoveModule completion index.
-pub fn module_tags_in(_analyzer: &Analyzer, parse: &Parse) -> Vec<(String, String)> {
+/// Collect module-tag declarations and RemoveModule reference sites from all
+/// Object blocks in a parsed file.
+pub fn module_tags_in(_analyzer: &Analyzer, parse: &Parse) -> Vec<ModuleTagDefinition> {
     let mut out = Vec::new();
     for node in parse.syntax().children() {
         if node.kind() != SyntaxKind::BLOCK {
@@ -881,7 +1133,28 @@ pub fn module_tags_in(_analyzer: &Analyzer, parse: &Parse) -> Vec<(String, Strin
         let name_lower = name.text().to_ascii_lowercase();
         for child in node.children().filter(|n| n.kind() == SyntaxKind::MODULE) {
             if let Some(tag) = Module(child).tag() {
-                out.push((name_lower.clone(), tag.text().to_string()));
+                out.push(ModuleTagDefinition {
+                    object: name_lower.clone(),
+                    name: tag.text().to_string(),
+                    span: tag.text_range().into(),
+                    is_reference: false,
+                });
+            }
+        }
+        for field in block.fields() {
+            if !field
+                .key()
+                .is_some_and(|key| key.text().eq_ignore_ascii_case("RemoveModule"))
+            {
+                continue;
+            }
+            if let Some(tag) = field.value_tokens().first() {
+                out.push(ModuleTagDefinition {
+                    object: name_lower.clone(),
+                    name: tag.text().trim_matches('"').to_string(),
+                    span: tag.text_range().into(),
+                    is_reference: true,
+                });
             }
         }
     }
@@ -946,6 +1219,33 @@ mod tests {
     }
 
     #[test]
+    fn module_tags_invalidate_diagnostics_and_remove_per_file() {
+        let mut idx = WorkspaceIndex::new();
+        let tag = vec![ModuleTagDefinition {
+            object: "tank".into(),
+            name: "ModuleTag_Physics".into(),
+            span: Span::new(0, 17),
+            is_reference: false,
+        }];
+        let g0 = idx.generation();
+        idx.set_file_tags("base.ini", tag.clone());
+        assert_ne!(idx.generation(), g0);
+
+        idx.set_file_tags("patch.ini", tag);
+        idx.remove_file("base.ini");
+        assert_eq!(
+            idx.module_tags_for_object("Tank").collect::<Vec<_>>(),
+            vec!["ModuleTag_Physics"]
+        );
+        assert_eq!(
+            idx.module_tag_locations("Tank", "ModuleTag_Physics")[0].file,
+            "patch.ini"
+        );
+        idx.remove_file("patch.ini");
+        assert_eq!(idx.module_tags_for_object("Tank").count(), 0);
+    }
+
+    #[test]
     fn collects_and_stores_reference_sites() {
         let a = Analyzer::embedded();
         let src = "Object Tank\n  Behavior = StatusBitsUpgrade ModuleTag_01\n    TriggeredBy = Upgrade_A Upgrade_B\n    FXListUpgrade = None\n  End\nEnd\n";
@@ -980,6 +1280,7 @@ mod tests {
         let audio = |name: &str| FileAsset {
             kind: AssetKind::Audio,
             name: name.into(),
+            uri: format!("file:///{name}"),
         };
         let mut idx = WorkspaceIndex::new();
         idx.set_file_assets("base", vec![audio("Click.WAV")]);
@@ -1002,6 +1303,44 @@ mod tests {
         assert_ne!(idx.generation(), first);
         assert!(!idx.is_asset(AssetKind::Audio, "Click.wav"));
         assert!(idx.is_asset(AssetKind::Audio, "OTHER.WAV"));
+    }
+
+    #[test]
+    fn effective_model_and_texture_use_last_contributor() {
+        let texture = |name: &str, uri: &str| FileAsset {
+            kind: AssetKind::Texture,
+            name: name.into(),
+            uri: uri.into(),
+        };
+        let mut idx = WorkspaceIndex::new();
+        idx.set_file_models(
+            "base.w3d",
+            vec![ModelAsset {
+                name: "Tank".into(),
+                members: Vec::new(),
+            }],
+        );
+        idx.set_file_models(
+            "mod.w3d",
+            vec![ModelAsset {
+                name: "TANK".into(),
+                members: Vec::new(),
+            }],
+        );
+        idx.set_file_assets(
+            "base.big",
+            vec![texture("Tank.dds", "big:///base.big!/Tank.dds")],
+        );
+        idx.set_file_assets(
+            "workspace",
+            vec![texture("tank.tga", "file:///workspace/tank.tga")],
+        );
+        assert_eq!(idx.effective_model_source("tank"), Some("mod.w3d"));
+        assert_eq!(
+            idx.effective_texture_source("TANK.DDS")
+                .map(|asset| asset.uri.as_str()),
+            Some("file:///workspace/tank.tga")
+        );
     }
 
     #[test]
@@ -1057,14 +1396,15 @@ mod tests {
     #[test]
     fn model_asset_member_changes_bump_generation() {
         let mut idx = WorkspaceIndex::new();
-        idx.set_file_models(
-            "model.w3d",
-            vec![ModelAsset {
-                name: "Tank".into(),
-                members: vec!["Tire01".into()],
-            }],
-        );
+        let original = vec![ModelAsset {
+            name: "Tank".into(),
+            members: vec!["Tire01".into()],
+        }];
+        idx.set_file_models("model.w3d", original.clone());
         let g1 = idx.generation();
+        idx.set_file_models("model.w3d", original);
+        assert_eq!(idx.generation(), g1);
+
         idx.set_file_models(
             "model.w3d",
             vec![ModelAsset {
@@ -1073,6 +1413,39 @@ mod tests {
             }],
         );
         assert_ne!(idx.generation(), g1);
+    }
+
+    #[test]
+    fn prepared_model_insert_supports_lookup_override_and_removal() {
+        let mut idx = WorkspaceIndex::new();
+        idx.insert_file_models_prepared(
+            "base.w3d",
+            vec![ModelAsset {
+                name: "Tank".into(),
+                members: vec!["Tire01".into()],
+            }],
+        );
+        idx.insert_file_models_prepared(
+            "patch.w3d",
+            vec![ModelAsset {
+                name: "TANK".into(),
+                members: vec!["Cargo01".into()],
+            }],
+        );
+
+        assert!(idx.is_model_asset("tank"));
+        assert_eq!(idx.effective_model_source("Tank"), Some("patch.w3d"));
+        assert_eq!(
+            idx.model_members("tank").collect::<Vec<_>>(),
+            vec!["Tire01", "Cargo01"]
+        );
+
+        idx.remove_file("patch.w3d");
+        assert_eq!(idx.effective_model_source("tank"), Some("base.w3d"));
+        assert_eq!(
+            idx.model_members("tank").collect::<Vec<_>>(),
+            vec!["Tire01"]
+        );
     }
 
     #[test]
