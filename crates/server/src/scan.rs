@@ -30,6 +30,44 @@ pub(crate) type ScanEntry = (
     Option<Arc<str>>,
 );
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ScanProgress {
+    Discovering,
+    InputsDiscovered {
+        total: usize,
+        skipped: usize,
+    },
+    Indexing {
+        done: usize,
+        total: usize,
+        cache_hits: usize,
+        cache_misses: usize,
+    },
+    WritingCache,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ScanStats {
+    pub(crate) discovered_inputs: usize,
+    pub(crate) discovery_failures: usize,
+    pub(crate) cache_hits: usize,
+    pub(crate) cache_misses: usize,
+    pub(crate) fingerprint_failures: usize,
+    pub(crate) scan_failures: usize,
+    pub(crate) cache_written: bool,
+}
+
+impl ScanStats {
+    pub(crate) fn skipped_inputs(self) -> usize {
+        self.discovery_failures + self.fingerprint_failures + self.scan_failures
+    }
+}
+
+pub(crate) struct ScanOutcome {
+    pub(crate) entries: Vec<(bool, ScanEntry)>,
+    pub(crate) stats: ScanStats,
+}
+
 const INDEX_CACHE_VERSION: u32 = 5;
 const MAX_PREVIEW_ASSET_BYTES: u64 = 128 * 1024 * 1024;
 
@@ -394,17 +432,27 @@ pub(crate) fn scan_big(analyzer: &Analyzer, path: &Path) -> Result<Vec<ScanEntry
     Ok(out)
 }
 
-/// Best-effort discovery used by the interactive server.
+struct DiscoveryOutcome {
+    paths: Vec<PathBuf>,
+    skipped: usize,
+}
+
+/// Best-effort discovery used by tests and helpers that do not need the
+/// skipped-entry count. Interactive indexing consumes `collect_paths`
+/// directly so inaccessible configured inputs remain visible in ScanStats.
+#[cfg(test)]
 pub(crate) fn collect_scan_paths(roots: &[PathBuf]) -> Vec<PathBuf> {
-    collect_paths(roots, false).unwrap_or_default()
+    collect_paths(roots, false)
+        .map(|outcome| outcome.paths)
+        .unwrap_or_default()
 }
 
 /// Checked discovery used by the CLI, where skipped inputs must fail visibly.
 pub(crate) fn collect_scan_paths_checked(roots: &[PathBuf]) -> Result<Vec<PathBuf>> {
-    collect_paths(roots, true)
+    collect_paths(roots, true).map(|outcome| outcome.paths)
 }
 
-fn collect_paths(roots: &[PathBuf], checked: bool) -> Result<Vec<PathBuf>> {
+fn collect_paths(roots: &[PathBuf], checked: bool) -> Result<DiscoveryOutcome> {
     let mut out = Vec::new();
     let mut skipped = 0;
     for root in roots {
@@ -475,7 +523,10 @@ fn collect_paths(roots: &[PathBuf], checked: bool) -> Result<Vec<PathBuf>> {
             "workspace walk skipped inaccessible entries"
         );
     }
-    Ok(out)
+    Ok(DiscoveryOutcome {
+        paths: out,
+        skipped,
+    })
 }
 
 /// Best-effort indexing used by the interactive server.
@@ -502,9 +553,10 @@ pub(crate) fn scan_with_cache(
     analyzer: &Analyzer,
     workspace_roots: &[PathBuf],
     base_roots: &[PathBuf],
-    progress: &mut impl FnMut(usize, usize),
-) -> Vec<(bool, ScanEntry)> {
+    progress: &mut impl FnMut(ScanProgress),
+) -> ScanOutcome {
     let started = Instant::now();
+    progress(ScanProgress::Discovering);
     let cache_path = index_cache_path(workspace_roots, base_roots);
     let expected_schema_hash = schema_hash();
     let empty_cache = || IndexCache {
@@ -540,6 +592,7 @@ pub(crate) fn scan_with_cache(
     };
 
     let mut discovered_inputs = 0;
+    let mut discovery_failures = 0;
     let mut fingerprint_failures = 0;
     let mut cache_hits = 0;
     let mut cache_misses = 0;
@@ -547,7 +600,10 @@ pub(crate) fn scan_with_cache(
     let mut seen = HashSet::new();
     let mut paths = Vec::new();
     for (roots, is_base) in [(base_roots, true), (workspace_roots, false)] {
-        for path in collect_scan_paths(roots) {
+        let discovery = collect_paths(roots, false)
+            .expect("best-effort discovery converts walk errors into skipped entries");
+        discovery_failures += discovery.skipped;
+        for path in discovery.paths {
             let key = path_key(&path);
             if seen.insert(key.clone()) {
                 discovered_inputs += 1;
@@ -563,6 +619,10 @@ pub(crate) fn scan_with_cache(
             }
         }
     }
+    progress(ScanProgress::InputsDiscovered {
+        total: paths.len(),
+        skipped: discovery_failures + fingerprint_failures,
+    });
 
     let mut next = HashMap::with_capacity(paths.len());
     let mut scanned = Vec::new();
@@ -593,8 +653,14 @@ pub(crate) fn scan_with_cache(
             },
         );
         scanned.extend(entries.into_iter().map(|entry| (is_base, entry)));
-        progress(done + 1, total);
+        progress(ScanProgress::Indexing {
+            done: done + 1,
+            total,
+            cache_hits,
+            cache_misses,
+        });
     }
+    progress(ScanProgress::WritingCache);
     let cache = IndexCache {
         version: INDEX_CACHE_VERSION,
         schema_hash: expected_schema_hash,
@@ -626,6 +692,7 @@ pub(crate) fn scan_with_cache(
         path = %cache_path.display(),
         cache_state,
         discovered_inputs,
+        discovery_failures,
         cache_hits,
         cache_misses,
         reparsed_files = cache_misses,
@@ -636,7 +703,18 @@ pub(crate) fn scan_with_cache(
         elapsed_ms = started.elapsed().as_millis() as u64,
         "workspace scan completed"
     );
-    scanned
+    ScanOutcome {
+        entries: scanned,
+        stats: ScanStats {
+            discovered_inputs,
+            discovery_failures,
+            cache_hits,
+            cache_misses,
+            fingerprint_failures,
+            scan_failures,
+            cache_written,
+        },
+    }
 }
 
 pub(crate) fn scan_files_checked(analyzer: &Analyzer, paths: &[PathBuf]) -> Result<Vec<ScanEntry>> {
@@ -748,4 +826,37 @@ pub(crate) fn read_asset_uri(uri: &str) -> Result<Vec<u8>> {
 #[cfg(test)]
 pub(crate) fn scan_roots(analyzer: &Analyzer, roots: &[PathBuf]) -> Vec<ScanEntry> {
     scan_files(analyzer, &collect_scan_paths(roots), &mut |_, _| {})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn discovery_failures_reach_progress_and_scan_stats() {
+        let missing = std::env::temp_dir().join(format!(
+            "zerosyntax-missing-{}-{}",
+            std::process::id(),
+            UNIX_EPOCH.elapsed().unwrap().as_nanos()
+        ));
+        assert!(!missing.exists());
+        let workspace_roots = vec![missing];
+        let mut events = Vec::new();
+        let outcome = scan_with_cache(&Analyzer::embedded(), &workspace_roots, &[], &mut |event| {
+            events.push(event)
+        });
+
+        assert_eq!(outcome.stats.discovered_inputs, 0);
+        assert_eq!(outcome.stats.discovery_failures, 1);
+        assert_eq!(outcome.stats.skipped_inputs(), 1);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ScanProgress::InputsDiscovered {
+                total: 0,
+                skipped: 1
+            }
+        )));
+
+        let _ = clear_index_cache(&workspace_roots, &[]);
+    }
 }
