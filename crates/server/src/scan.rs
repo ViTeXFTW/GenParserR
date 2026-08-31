@@ -69,11 +69,9 @@ pub(crate) struct ScanOutcome {
 }
 
 const INDEX_CACHE_VERSION: u32 = 5;
-/// How many current-version caches survive a scan, newest first. One file
-/// exists per workspace/base-root combination, so a stable setup needs one and
-/// the rest are leftovers from renamed folders or changed `baseIniRoots`.
+/// How many current-version caches `prune_index_caches` keeps, newest first.
 const INDEX_CACHE_RETAINED: usize = 4;
-/// Caches untouched for this long are dropped even within the retained count.
+/// How long a cache may sit unused before `prune_index_caches` drops it.
 const INDEX_CACHE_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 const MAX_PREVIEW_ASSET_BYTES: u64 = 128 * 1024 * 1024;
 
@@ -211,13 +209,14 @@ fn cache_file_version(name: &str) -> Option<u32> {
         .flatten()
 }
 
-/// Delete index caches the server can no longer use — earlier cache versions,
-/// and current-version caches for root sets that have not been indexed lately.
-/// One file exists per workspace/base-root combination, so without this the
-/// directory keeps a file for every version bump, renamed folder, and
-/// `baseIniRoots` change ever seen. Best effort: `keep` and unrecognized files
-/// are never touched, and a failed delete only costs disk space.
-fn prune_index_caches_in(dir: &Path, keep: &Path) -> usize {
+/// Delete index caches the server can no longer use — earlier cache
+/// versions, and current-version caches unused for a while — down to
+/// `INDEX_CACHE_RETAINED` files. `keep`, when given, is exempt and reserves a
+/// retention slot; pass `None` if the caller didn't just write it
+/// successfully, so a failed or partial write can't shield a stale file at
+/// the expense of evicting a newer one. Unrecognized files are never
+/// touched, and a failed delete only costs disk space.
+fn prune_index_caches_in(dir: &Path, keep: Option<&Path>) -> usize {
     let Ok(dir) = std::fs::read_dir(dir) else {
         return 0;
     };
@@ -239,7 +238,7 @@ fn prune_index_caches_in(dir: &Path, keep: &Path) -> usize {
         else {
             continue;
         };
-        if path == keep {
+        if Some(path.as_path()) == keep {
             continue;
         }
         let modified = entry.metadata().and_then(|data| data.modified()).ok();
@@ -252,16 +251,15 @@ fn prune_index_caches_in(dir: &Path, keep: &Path) -> usize {
             current.push((modified, path));
         }
     }
-    // `keep` was just written, so it is the newest cache and owns a slot.
     current.sort_unstable_by_key(|(modified, _)| std::cmp::Reverse(*modified));
-    let retained = INDEX_CACHE_RETAINED.saturating_sub(usize::from(keep.exists()));
+    let retained = INDEX_CACHE_RETAINED.saturating_sub(usize::from(keep.is_some()));
     for (_, path) in current.into_iter().skip(retained) {
         remove(&path);
     }
     pruned
 }
 
-fn prune_index_caches(keep: &Path) -> usize {
+fn prune_index_caches(keep: Option<&Path>) -> usize {
     prune_index_caches_in(&cache_dir(), keep)
 }
 
@@ -275,7 +273,7 @@ pub(crate) fn clear_index_cache(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
         Err(error) => return Err(error),
     };
-    prune_index_caches(&path);
+    prune_index_caches(None);
     Ok(cleared)
 }
 
@@ -754,7 +752,7 @@ pub(crate) fn scan_with_cache(
             cache_written = true;
         }
     }
-    let pruned_caches = prune_index_caches(&cache_path);
+    let pruned_caches = prune_index_caches(cache_written.then_some(cache_path.as_path()));
     let skipped_count = fingerprint_failures + scan_failures;
     if skipped_count > 0 {
         tracing::warn!(
@@ -997,7 +995,7 @@ mod tests {
             })
             .collect();
 
-        let pruned = prune_index_caches_in(&dir, &keep);
+        let pruned = prune_index_caches_in(&dir, Some(&keep));
 
         assert!(keep.exists(), "the cache just written survives");
         assert!(unrelated.exists(), "unrelated files are never touched");
@@ -1023,12 +1021,43 @@ mod tests {
             INDEX_CACHE_MAX_AGE + Duration::from_secs(60),
         );
 
-        // A missing `keep` (the cache write failed) still prunes.
-        let pruned = prune_index_caches_in(&dir, &dir.join("index-v5-ffffffffffffffff.json"));
+        // No `keep` (the cache write failed) still prunes.
+        let pruned = prune_index_caches_in(&dir, None);
 
         assert!(fresh.exists());
         assert!(!expired.exists());
         assert_eq!(pruned, 1);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn failed_write_does_not_reserve_a_retention_slot_for_the_stale_file() {
+        // A write failure leaves the previous file at `cache_path` in place.
+        // It must compete for a retention slot like any other cache, not
+        // reserve one and evict a newer file in its place.
+        let dir = temp_cache_dir("stale-keep");
+        let stale = write_cache_file(
+            &dir,
+            &format!("index-v{INDEX_CACHE_VERSION}-0000000000000001.json"),
+            Duration::from_secs(600),
+        );
+        let others: Vec<_> = (2..=INDEX_CACHE_RETAINED as u64 + 1)
+            .map(|index| {
+                write_cache_file(
+                    &dir,
+                    &format!("index-v{INDEX_CACHE_VERSION}-{index:016x}.json"),
+                    Duration::from_secs(600 - index * 60),
+                )
+            })
+            .collect();
+
+        prune_index_caches_in(&dir, None);
+
+        assert!(!stale.exists(), "the oldest file is evicted, not reserved");
+        assert!(
+            others.iter().all(|path| path.exists()),
+            "newer files are not evicted to make room for the stale one"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
