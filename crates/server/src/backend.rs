@@ -1292,7 +1292,7 @@ impl Backend {
                 replacement.set_file_tags(&uri, tags);
                 replacement.set_file_object_models(&uri, object_models);
                 replacement.set_file_object_parents(&uri, object_parents);
-                replacement.set_file_models(&uri, models);
+                replacement.insert_file_models_prepared(&uri, models);
                 replacement.set_file_assets(&uri, assets);
             }
         }
