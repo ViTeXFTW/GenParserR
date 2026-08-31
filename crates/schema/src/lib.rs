@@ -1353,14 +1353,9 @@ mod tests {
             "parseFactionObjectCreationList",
             1,
             &token_list(vec![
-                // The engine compares this against `PlayerTemplate::getSide()`
-                // (a free-form Side name like `America`), not a PlayerTemplate
-                // object name (`FactionAmerica`) — see OCLUpdate.cpp. Modeled as
-                // the same closed `ai_side` enum as AIData's SideInfo /
-                // SkirmishBuildList (the other usage sites for a known Side
-                // name); mods that add new PlayerTemplate sides ship their own
-                // schema.json via `schemaPath` to extend the vanilla set, same
-                // as for any other engine-fixed vocabulary in this schema.
+                // Compares against `PlayerTemplate::getSide()` (e.g. `America`),
+                // not a PlayerTemplate object name (`FactionAmerica`) — see
+                // OCLUpdate.cpp.
                 prefixed("Faction", enum_type("ai_side")),
                 prefixed("OCL", reference(RefKind::ObjectCreationList)),
             ]),
