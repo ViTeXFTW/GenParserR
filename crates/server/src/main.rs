@@ -2,6 +2,7 @@
 //! INI files. Speaks LSP over stdio.
 
 mod backend;
+mod cache;
 mod cli;
 mod convert;
 mod progress;

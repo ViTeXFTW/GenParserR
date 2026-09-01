@@ -1391,19 +1391,7 @@ impl Backend {
     }
 
     pub async fn index_cache_path(&self) -> Result<String> {
-        let roots = self
-            .roots
-            .lock()
-            .map(|roots| roots.clone())
-            .unwrap_or_default();
-        let base_roots = self
-            .settings
-            .lock()
-            .map(|settings| settings.base_ini_roots.clone())
-            .unwrap_or_default();
-        Ok(index_cache_path(&roots, &base_roots)
-            .to_string_lossy()
-            .into_owned())
+        Ok(index_cache_path().to_string_lossy().into_owned())
     }
 
     /// The (kind, name, span) under the cursor — a reference-typed value token
@@ -1704,16 +1692,6 @@ impl LanguageServer for Backend {
         {
             return Ok(None);
         }
-        let roots = self
-            .roots
-            .lock()
-            .map(|roots| roots.clone())
-            .unwrap_or_default();
-        let base_roots = self
-            .settings
-            .lock()
-            .map(|settings| settings.base_ini_roots.clone())
-            .unwrap_or_default();
         let mut progress = if params.command == REBUILD_INDEX_CACHE_COMMAND {
             Some(self.begin_progress(ProgressWork::ManualRebuild).await)
         } else {
@@ -1724,7 +1702,7 @@ impl LanguageServer for Backend {
                 .report("Clearing the persistent index cache", Some(0))
                 .await;
         }
-        let cleared = match clear_index_cache(&roots, &base_roots) {
+        let cleared = match clear_index_cache() {
             Ok(cleared) => cleared,
             Err(error) => {
                 tracing::error!(%error, "asset index cache clear failed");

@@ -1,14 +1,14 @@
 //! Shared filesystem, BIG archive, and W3D workspace scanning.
 
-use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
-use std::hash::{Hash, Hasher};
+use std::collections::HashSet;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Instant, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use percent_encoding::percent_decode_str;
+use postcard::ser_flavors::Flavor;
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::Url;
 use zerosyntax_analysis::index::{
@@ -17,6 +17,8 @@ use zerosyntax_analysis::index::{
 };
 use zerosyntax_analysis::Analyzer;
 use zerosyntax_w3d::W3dFile;
+
+use crate::cache::{self, Fingerprint, InputCache};
 
 pub(crate) type ScanEntry = (
     String,
@@ -72,18 +74,69 @@ pub(crate) struct ScanOutcome {
     pub(crate) stats: ScanStats,
 }
 
-const INDEX_CACHE_VERSION: u32 = 5;
-/// How many current-version caches `prune_index_caches` keeps, newest first.
-const INDEX_CACHE_RETAINED: usize = 4;
-/// How long a cache may sit unused before `prune_index_caches` drops it.
-const INDEX_CACHE_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 const MAX_PREVIEW_ASSET_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_CACHE_PAYLOAD_BYTES: usize = 256 * 1024 * 1024;
 
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct Fingerprint {
-    len: u64,
-    modified_secs: u64,
-    modified_nanos: u32,
+struct BoundedVec {
+    bytes: Vec<u8>,
+    limit: usize,
+}
+
+impl BoundedVec {
+    fn new(limit: usize) -> Self {
+        Self {
+            bytes: Vec::new(),
+            limit,
+        }
+    }
+
+    fn grow_to_fit(&mut self, required: usize) -> postcard::Result<()> {
+        // Grow geometrically for the ordinary hot path, but never request
+        // capacity beyond the configured payload envelope. The small initial
+        // allocation avoids retaining 4 KiB for every tiny cached input.
+        let target = self
+            .bytes
+            .capacity()
+            .saturating_mul(2)
+            .max(256)
+            .max(required)
+            .min(self.limit);
+        self.bytes
+            .try_reserve_exact(target - self.bytes.len())
+            .map_err(|_| postcard::Error::SerializeBufferFull)?;
+        Ok(())
+    }
+}
+
+impl Flavor for BoundedVec {
+    type Output = Vec<u8>;
+
+    fn try_push(&mut self, byte: u8) -> postcard::Result<()> {
+        if self.bytes.len() == self.limit {
+            return Err(postcard::Error::SerializeBufferFull);
+        }
+        if self.bytes.len() == self.bytes.capacity() {
+            self.grow_to_fit(self.bytes.len() + 1)?;
+        }
+        self.bytes.push(byte);
+        Ok(())
+    }
+
+    fn try_extend(&mut self, bytes: &[u8]) -> postcard::Result<()> {
+        if bytes.len() > self.limit - self.bytes.len() {
+            return Err(postcard::Error::SerializeBufferFull);
+        }
+        let required = self.bytes.len() + bytes.len();
+        if required > self.bytes.capacity() {
+            self.grow_to_fit(required)?;
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(())
+    }
+
+    fn finalize(self) -> postcard::Result<Self::Output> {
+        Ok(self.bytes)
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -131,17 +184,20 @@ impl From<CachedEntry> for ScanEntry {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct CachedFile {
-    fingerprint: Fingerprint,
-    entries: Vec<CachedEntry>,
+fn serialize_cached(entries: &[CachedEntry]) -> Result<Vec<u8>> {
+    serialize_bounded(entries, MAX_CACHE_PAYLOAD_BYTES)
+        .context("failed to encode cache payload within 256 MiB limit")
 }
 
-#[derive(Serialize, Deserialize)]
-struct IndexCache {
-    version: u32,
-    schema_hash: u64,
-    files: HashMap<String, CachedFile>,
+fn serialize_bounded<T: Serialize + ?Sized>(value: &T, limit: usize) -> postcard::Result<Vec<u8>> {
+    postcard::serialize_with_flavor(value, BoundedVec::new(limit))
+}
+
+fn deserialize_cached(payload: &[u8]) -> Result<Vec<CachedEntry>> {
+    if payload.len() > MAX_CACHE_PAYLOAD_BYTES {
+        anyhow::bail!("cache payload exceeds 256 MiB");
+    }
+    postcard::from_bytes(payload).context("failed to decode cache payload")
 }
 
 fn cache_dir() -> PathBuf {
@@ -166,12 +222,6 @@ fn path_key(path: &Path) -> String {
     }
 }
 
-fn schema_hash() -> u64 {
-    let mut hasher = DefaultHasher::new();
-    zerosyntax_schema::EMBEDDED_SCHEMA_JSON.hash(&mut hasher);
-    hasher.finish()
-}
-
 fn fingerprint(path: &Path) -> Option<Fingerprint> {
     let metadata = std::fs::metadata(path).ok()?;
     let modified = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
@@ -182,118 +232,12 @@ fn fingerprint(path: &Path) -> Option<Fingerprint> {
     })
 }
 
-/// Refresh the retention timestamp without rewriting a valid cache.
-fn refresh_index_cache_last_used(path: &Path) -> bool {
-    match std::fs::OpenOptions::new()
-        .write(true)
-        .open(path)
-        .and_then(|file| file.set_modified(SystemTime::now()))
-    {
-        Ok(()) => true,
-        Err(error) => {
-            tracing::debug!(path = %path.display(), %error, "index cache last-used time could not be updated; falling back to cache rewrite");
-            false
-        }
-    }
+pub(crate) fn index_cache_path() -> PathBuf {
+    cache::cache_path(&cache_dir())
 }
 
-pub(crate) fn index_cache_path(workspace_roots: &[PathBuf], base_roots: &[PathBuf]) -> PathBuf {
-    let mut roots: Vec<_> = workspace_roots
-        .iter()
-        .map(|root| format!("workspace:{}", path_key(root)))
-        .chain(
-            base_roots
-                .iter()
-                .map(|root| format!("base:{}", path_key(root))),
-        )
-        .collect();
-    roots.sort_unstable();
-    let mut hasher = DefaultHasher::new();
-    roots.hash(&mut hasher);
-    cache_dir().join(format!(
-        "index-v{INDEX_CACHE_VERSION}-{:016x}.json",
-        hasher.finish()
-    ))
-}
-
-/// The cache version encoded in an `index-v<version>-<hash>.json` file name,
-/// or `None` for anything the server did not write as an index cache.
-fn cache_file_version(name: &str) -> Option<u32> {
-    let (version, hash) = name
-        .strip_prefix("index-v")?
-        .strip_suffix(".json")?
-        .split_once('-')?;
-    (hash.len() == 16 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        .then(|| version.parse().ok())
-        .flatten()
-}
-
-/// Delete index caches the server can no longer use — earlier cache
-/// versions, and current-version caches unused for a while — down to
-/// `INDEX_CACHE_RETAINED` files. `keep`, when given, is exempt and reserves a
-/// retention slot; pass `None` if the caller didn't just write it
-/// successfully, so a failed or partial write can't shield a stale file at
-/// the expense of evicting a newer one. Unrecognized files are never
-/// touched, and a failed delete only costs disk space.
-fn prune_index_caches_in(dir: &Path, keep: Option<&Path>) -> usize {
-    let Ok(dir) = std::fs::read_dir(dir) else {
-        return 0;
-    };
-    let now = SystemTime::now();
-    let mut pruned = 0;
-    let mut remove = |path: &Path| match std::fs::remove_file(path) {
-        Ok(()) => pruned += 1,
-        Err(error) => {
-            tracing::debug!(path = %path.display(), %error, "stale index cache could not be removed")
-        }
-    };
-    let mut current = Vec::new();
-    for entry in dir.flatten() {
-        let path = entry.path();
-        let Some(version) = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .and_then(cache_file_version)
-        else {
-            continue;
-        };
-        if Some(path.as_path()) == keep {
-            continue;
-        }
-        let modified = entry.metadata().and_then(|data| data.modified()).ok();
-        let expired = modified
-            .and_then(|modified| now.duration_since(modified).ok())
-            .is_some_and(|age| age > INDEX_CACHE_MAX_AGE);
-        if version != INDEX_CACHE_VERSION || expired {
-            remove(&path);
-        } else {
-            current.push((modified, path));
-        }
-    }
-    current.sort_unstable_by_key(|(modified, _)| std::cmp::Reverse(*modified));
-    let retained = INDEX_CACHE_RETAINED.saturating_sub(usize::from(keep.is_some()));
-    for (_, path) in current.into_iter().skip(retained) {
-        remove(&path);
-    }
-    pruned
-}
-
-fn prune_index_caches(keep: Option<&Path>) -> usize {
-    prune_index_caches_in(&cache_dir(), keep)
-}
-
-pub(crate) fn clear_index_cache(
-    workspace_roots: &[PathBuf],
-    base_roots: &[PathBuf],
-) -> std::io::Result<bool> {
-    let path = index_cache_path(workspace_roots, base_roots);
-    let cleared = match std::fs::remove_file(&path) {
-        Ok(()) => true,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-        Err(error) => return Err(error),
-    };
-    prune_index_caches(None);
-    Ok(cleared)
+pub(crate) fn clear_index_cache() -> Result<bool> {
+    cache::clear(&cache_dir())
 }
 
 struct BigEntry {
@@ -647,41 +591,32 @@ pub(crate) fn scan_with_cache(
     base_roots: &[PathBuf],
     progress: &mut impl FnMut(ScanProgress),
 ) -> ScanOutcome {
+    scan_with_cache_in(
+        analyzer,
+        workspace_roots,
+        base_roots,
+        &cache_dir(),
+        progress,
+    )
+}
+
+fn scan_with_cache_in(
+    analyzer: &Analyzer,
+    workspace_roots: &[PathBuf],
+    base_roots: &[PathBuf],
+    cache_dir: &Path,
+    progress: &mut impl FnMut(ScanProgress),
+) -> ScanOutcome {
     let started = Instant::now();
     progress(ScanProgress::Discovering);
-    let cache_path = index_cache_path(workspace_roots, base_roots);
-    let expected_schema_hash = schema_hash();
-    let empty_cache = || IndexCache {
-        version: INDEX_CACHE_VERSION,
-        schema_hash: expected_schema_hash,
-        files: HashMap::new(),
-    };
-    let (mut cache, cache_state) = match std::fs::read(&cache_path) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (empty_cache(), "absent"),
-        Err(error) => {
-            tracing::debug!(path = %cache_path.display(), %error, "index cache could not be read");
-            (empty_cache(), "corrupt")
-        }
-        Ok(bytes) => match serde_json::from_slice::<IndexCache>(&bytes) {
-            Err(error) => {
-                tracing::debug!(path = %cache_path.display(), %error, "index cache could not be parsed");
-                (empty_cache(), "corrupt")
-            }
-            Ok(cache)
-                if cache.version != INDEX_CACHE_VERSION
-                    || cache.schema_hash != expected_schema_hash =>
-            {
-                tracing::debug!(
-                    path = %cache_path.display(),
-                    cache_version = cache.version,
-                    expected_version = INDEX_CACHE_VERSION,
-                    "index cache is stale"
-                );
-                (empty_cache(), "stale")
-            }
-            Ok(cache) => (cache, "valid"),
-        },
-    };
+    let cache_path = cache::cache_path(cache_dir);
+    let mut persistent_cache = cache::producer_id(analyzer)
+        .and_then(|producer| InputCache::open(cache_dir, producer))
+        .map_err(|error| {
+            tracing::warn!(path = %cache_path.display(), %error, "persistent input cache unavailable");
+            error
+        })
+        .ok();
 
     let mut discovered_inputs = 0;
     let mut discovery_failures = 0;
@@ -716,52 +651,57 @@ pub(crate) fn scan_with_cache(
         skipped: discovery_failures + fingerprint_failures,
     });
 
-    let cache_manifest_unchanged = cache_state == "valid"
-        && discovery_failures == 0
-        && fingerprint_failures == 0
-        && paths.len() == cache.files.len()
-        && paths.iter().all(|(_, key, fingerprint, _)| {
-            cache
-                .files
-                .get(key)
-                .is_some_and(|cached| cached.fingerprint == *fingerprint)
-        });
-    let cache_unchanged = cache_manifest_unchanged && refresh_index_cache_last_used(&cache_path);
-
-    let mut next = if cache_unchanged {
-        HashMap::new()
-    } else {
-        HashMap::with_capacity(paths.len())
-    };
     let mut scanned = Vec::new();
     let total = paths.len();
     for (done, (path, key, fingerprint, is_base)) in paths.into_iter().enumerate() {
-        let entries = match cache.files.remove(&key) {
-            Some(cached) if cached.fingerprint == fingerprint => {
-                cache_hits += 1;
-                cached.entries.into_iter().map(ScanEntry::from).collect()
-            }
-            _ => {
-                cache_misses += 1;
-                match scan_path(analyzer, &path) {
-                    Ok(entries) => entries,
+        let cached_entries = if let Some(cache) = persistent_cache.as_mut() {
+            match cache.lookup(&key, &fingerprint) {
+                Ok(Some(payload)) => match deserialize_cached(&payload) {
+                    Ok(entries) => Some(entries.into_iter().map(ScanEntry::from).collect()),
                     Err(error) => {
-                        scan_failures += 1;
-                        tracing::debug!(path = %path.display(), %error, "workspace input could not be indexed");
-                        Vec::new()
+                        cache.invalidate(&key);
+                        tracing::debug!(path = %path.display(), %error, "cached input payload is corrupt");
+                        None
                     }
+                },
+                Ok(None) => None,
+                Err(error) => {
+                    tracing::warn!(path = %cache_path.display(), %error, "persistent input cache lookup failed; continuing uncached");
+                    persistent_cache = None;
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        let entries = if let Some(entries) = cached_entries {
+            cache_hits += 1;
+            entries
+        } else {
+            cache_misses += 1;
+            match scan_path_stable(analyzer, &path, fingerprint) {
+                Ok((fingerprint, entries)) => {
+                    if let Some(cache) = persistent_cache.as_mut() {
+                        let cached: Vec<_> = entries.iter().map(CachedEntry::from).collect();
+                        match serialize_cached(&cached) {
+                            Ok(payload) => cache.queue_store(key, fingerprint, payload),
+                            Err(error) => tracing::debug!(
+                                path = %path.display(),
+                                %error,
+                                "workspace input could not be serialized for caching"
+                            ),
+                        }
+                    }
+                    entries
+                }
+                Err(error) => {
+                    scan_failures += 1;
+                    tracing::debug!(path = %path.display(), %error, "workspace input could not be indexed");
+                    Vec::new()
                 }
             }
         };
-        if !cache_unchanged {
-            next.insert(
-                key,
-                CachedFile {
-                    fingerprint,
-                    entries: entries.iter().map(CachedEntry::from).collect(),
-                },
-            );
-        }
         scanned.extend(entries.into_iter().map(|entry| (is_base, entry)));
         progress(ScanProgress::Indexing {
             done: done + 1,
@@ -770,30 +710,24 @@ pub(crate) fn scan_with_cache(
             cache_misses,
         });
     }
-    let mut cache_written = cache_unchanged;
+    let mut cache_written = persistent_cache.is_some();
     let mut cache_updated = false;
-    if !cache_unchanged {
-        progress(ScanProgress::WritingCache);
-        let cache = IndexCache {
-            version: INDEX_CACHE_VERSION,
-            schema_hash: expected_schema_hash,
-            files: next,
-        };
-        if let Some(parent) = cache_path.parent() {
-            if let Err(error) = std::fs::create_dir_all(parent).and_then(|()| {
-                serde_json::to_vec(&cache)
-                    .map_err(std::io::Error::other)
-                    .and_then(|bytes| std::fs::write(&cache_path, bytes))
-            }) {
-                tracing::debug!(path = %cache_path.display(), %error, "asset index cache write failed");
-                tracing::warn!(%error, "could not write asset index cache");
-            } else {
-                cache_written = true;
-                cache_updated = true;
+    let mut pruned_cache_records = 0;
+    if let Some(cache) = persistent_cache.as_mut() {
+        if cache.has_pending_writes() {
+            progress(ScanProgress::WritingCache);
+        }
+        match cache.commit() {
+            Ok(outcome) => {
+                cache_updated = outcome.updated;
+                pruned_cache_records = outcome.pruned;
+            }
+            Err(error) => {
+                cache_written = false;
+                tracing::warn!(path = %cache_path.display(), %error, "persistent input cache commit failed");
             }
         }
     }
-    let pruned_caches = prune_index_caches(cache_written.then_some(cache_path.as_path()));
     let skipped_count = fingerprint_failures + scan_failures;
     if skipped_count > 0 {
         tracing::warn!(
@@ -805,7 +739,6 @@ pub(crate) fn scan_with_cache(
     }
     tracing::debug!(
         path = %cache_path.display(),
-        cache_state,
         discovered_inputs,
         discovery_failures,
         cache_hits,
@@ -815,7 +748,7 @@ pub(crate) fn scan_with_cache(
         scan_failures,
         produced_entries = scanned.len(),
         cache_written,
-        pruned_caches,
+        pruned_cache_records,
         cache_updated,
         elapsed_ms = started.elapsed().as_millis() as u64,
         "workspace scan completed"
@@ -904,6 +837,26 @@ fn scan_path(analyzer: &Analyzer, path: &Path) -> Result<Vec<ScanEntry>> {
     }
 }
 
+/// Analyze one stable physical snapshot. A writer can replace an input after
+/// discovery but before it is read; retry once so the payload is never stored
+/// under a fingerprint for different bytes.
+fn scan_path_stable(
+    analyzer: &Analyzer,
+    path: &Path,
+    mut expected: Fingerprint,
+) -> Result<(Fingerprint, Vec<ScanEntry>)> {
+    for _ in 0..2 {
+        let entries = scan_path(analyzer, path)?;
+        let observed = fingerprint(path)
+            .with_context(|| format!("could not fingerprint {} after indexing", path.display()))?;
+        if observed == expected {
+            return Ok((observed, entries));
+        }
+        expected = observed;
+    }
+    anyhow::bail!("{} changed repeatedly while it was indexed", path.display())
+}
+
 pub(crate) fn read_asset_uri(uri: &str) -> Result<Vec<u8>> {
     let url = Url::parse(uri).with_context(|| format!("invalid asset URI `{uri}`"))?;
     if url.scheme() == "file" {
@@ -958,53 +911,468 @@ mod tests {
         ))
     }
 
-    #[test]
-    fn unchanged_warm_cache_is_not_rewritten() {
-        let root = unique_temp_dir("warm-cache");
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(root.join("Weapon.ini"), "Weapon TestWeapon\nEnd\n").unwrap();
-        let workspace_roots = vec![root.clone()];
+    fn comparable(entries: &[(bool, ScanEntry)]) -> Vec<(bool, Vec<u8>)> {
+        entries
+            .iter()
+            .map(|(is_base, entry)| {
+                (
+                    *is_base,
+                    postcard::to_stdvec(&CachedEntry::from(entry)).unwrap(),
+                )
+            })
+            .collect()
+    }
 
-        let cold = scan_with_cache(&Analyzer::embedded(), &workspace_roots, &[], &mut |_| {});
+    fn write_big(path: &Path, entries: &[(&str, &[u8])]) {
+        let data_offset = 0x10
+            + entries
+                .iter()
+                .map(|(name, _)| 8 + name.len() + 1)
+                .sum::<usize>();
+        let archive_size = data_offset + entries.iter().map(|(_, data)| data.len()).sum::<usize>();
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"BIGF");
+        bytes.extend_from_slice(&(archive_size as u32).to_be_bytes());
+        bytes.extend_from_slice(&(entries.len() as u32).to_be_bytes());
+        bytes.extend_from_slice(&0u32.to_be_bytes());
+        let mut offset = data_offset;
+        for (name, data) in entries {
+            bytes.extend_from_slice(&(offset as u32).to_be_bytes());
+            bytes.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            bytes.extend_from_slice(name.as_bytes());
+            bytes.push(0);
+            offset += data.len();
+        }
+        for (_, data) in entries {
+            bytes.extend_from_slice(data);
+        }
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn warm_scan_is_identical_and_does_not_rewrite_payloads() {
+        let root = unique_temp_dir("warm-cache");
+        let cache_dir = root.join("cache");
+        let workspace = root.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::write(workspace.join("Weapon.ini"), "Weapon TestWeapon\nEnd\n").unwrap();
+        let workspace_roots = vec![workspace];
+
+        let cold = scan_with_cache_in(
+            &Analyzer::embedded(),
+            &workspace_roots,
+            &[],
+            &cache_dir,
+            &mut |_| {},
+        );
         assert_eq!(cold.stats.cache_misses, 1);
         assert!(cold.stats.cache_updated);
-        let cache_path = index_cache_path(&workspace_roots, &[]);
-        let old_last_used = SystemTime::now() - Duration::from_secs(24 * 60 * 60);
-        std::fs::OpenOptions::new()
-            .write(true)
-            .open(&cache_path)
-            .unwrap()
-            .set_modified(old_last_used)
-            .unwrap();
 
         let mut warm_events = Vec::new();
-        let warm = scan_with_cache(&Analyzer::embedded(), &workspace_roots, &[], &mut |event| {
-            warm_events.push(event)
-        });
+        let warm = scan_with_cache_in(
+            &Analyzer::embedded(),
+            &workspace_roots,
+            &[],
+            &cache_dir,
+            &mut |event| warm_events.push(event),
+        );
         assert_eq!(warm.stats.cache_hits, 1);
         assert_eq!(warm.stats.cache_misses, 0);
         assert!(warm.stats.cache_written);
         assert!(!warm.stats.cache_updated);
         assert!(!warm_events.contains(&ScanProgress::WritingCache));
-        assert!(
-            std::fs::metadata(&cache_path).unwrap().modified().unwrap() > old_last_used,
-            "using an unchanged cache refreshes its retention timestamp"
-        );
+        assert_eq!(comparable(&cold.entries), comparable(&warm.entries));
 
-        std::fs::write(root.join("Weapon.ini"), "Weapon UpdatedWeapon\nEnd\n").unwrap();
-        let changed = scan_with_cache(&Analyzer::embedded(), &workspace_roots, &[], &mut |_| {});
+        std::fs::write(
+            workspace_roots[0].join("Weapon.ini"),
+            "Weapon UpdatedWeapon\nEnd\n",
+        )
+        .unwrap();
+        let changed = scan_with_cache_in(
+            &Analyzer::embedded(),
+            &workspace_roots,
+            &[],
+            &cache_dir,
+            &mut |_| {},
+        );
+        assert_eq!(changed.stats.cache_hits, 0);
         assert_eq!(changed.stats.cache_misses, 1);
         assert!(changed.stats.cache_updated);
 
-        let _ = clear_index_cache(&workspace_roots, &[]);
         std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn failed_retention_refresh_rejects_the_no_rewrite_fast_path() {
-        let missing = unique_temp_dir("missing-cache").join("index.json");
-        assert!(!missing.exists());
-        assert!(!refresh_index_cache_last_used(&missing));
+    fn cache_serialization_stops_at_the_payload_limit() {
+        let value = vec![7u8; 128];
+        assert_eq!(
+            serialize_bounded(&value, 64).unwrap_err(),
+            postcard::Error::SerializeBufferFull
+        );
+
+        let payload = serialize_bounded(&value, 256).unwrap();
+        assert_eq!(postcard::from_bytes::<Vec<u8>>(&payload).unwrap(), value);
+    }
+
+    #[test]
+    fn big_archive_is_one_cached_input_with_many_virtual_entries() {
+        let root = unique_temp_dir("big-cache");
+        let cache_dir = root.join("cache");
+        let workspace = root.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        write_big(
+            &workspace.join("Data.big"),
+            &[
+                ("Data\\INI\\Object.ini", b"Object BigObject\nEnd\n"),
+                ("Data\\INI\\Weapon.ini", b"Weapon BigWeapon\nEnd\n"),
+            ],
+        );
+        let workspace_roots = vec![workspace];
+
+        let cold = scan_with_cache_in(
+            &Analyzer::embedded(),
+            &workspace_roots,
+            &[],
+            &cache_dir,
+            &mut |_| {},
+        );
+        assert_eq!(cold.stats.cache_misses, 1);
+        assert_eq!(cold.entries.len(), 2);
+
+        let warm = scan_with_cache_in(
+            &Analyzer::embedded(),
+            &workspace_roots,
+            &[],
+            &cache_dir,
+            &mut |_| {},
+        );
+        assert_eq!(warm.stats.cache_hits, 1);
+        assert_eq!(warm.stats.cache_misses, 0);
+        assert_eq!(comparable(&cold.entries), comparable(&warm.entries));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unchanged_base_roots_are_reused_across_workspaces() {
+        let root = unique_temp_dir("cross-workspace-cache");
+        let cache_dir = root.join("cache");
+        let base_root = root.join("base");
+        let workspace_a = root.join("workspace-a");
+        let workspace_b = root.join("workspace-b");
+        for directory in [&base_root, &workspace_a, &workspace_b] {
+            std::fs::create_dir_all(directory).unwrap();
+        }
+        std::fs::write(base_root.join("Weapon.ini"), "Weapon BaseWeapon\nEnd\n").unwrap();
+        std::fs::write(workspace_a.join("Object.ini"), "Object WorkspaceA\nEnd\n").unwrap();
+        std::fs::write(workspace_b.join("Object.ini"), "Object WorkspaceB\nEnd\n").unwrap();
+        let base_roots = vec![base_root.clone()];
+        let workspace_a_roots = vec![workspace_a];
+        let workspace_b_roots = vec![workspace_b];
+
+        let cold = scan_with_cache_in(
+            &Analyzer::embedded(),
+            &workspace_a_roots,
+            &base_roots,
+            &cache_dir,
+            &mut |_| {},
+        );
+        assert_eq!(cold.stats.cache_hits, 0);
+        assert_eq!(cold.stats.cache_misses, 2);
+
+        let switched = scan_with_cache_in(
+            &Analyzer::embedded(),
+            &workspace_b_roots,
+            &base_roots,
+            &cache_dir,
+            &mut |_| {},
+        );
+        assert_eq!(
+            switched.stats.cache_hits, 1,
+            "the unchanged base file should be reused from workspace A's cache"
+        );
+        assert_eq!(
+            switched.stats.cache_misses, 1,
+            "only workspace B's file should need indexing"
+        );
+
+        let added_base_root = root.join("base-added-later");
+        std::fs::create_dir_all(&added_base_root).unwrap();
+        std::fs::write(added_base_root.join("Armor.ini"), "Armor TestArmor\nEnd\n").unwrap();
+        let extended_base_roots = vec![base_root.clone(), added_base_root];
+        let extended = scan_with_cache_in(
+            &Analyzer::embedded(),
+            &workspace_b_roots,
+            &extended_base_roots,
+            &cache_dir,
+            &mut |_| {},
+        );
+        assert_eq!(
+            extended.stats.cache_hits, 2,
+            "the existing base and workspace files should be reused"
+        );
+        assert_eq!(
+            extended.stats.cache_misses, 1,
+            "only the newly configured base file should need indexing"
+        );
+
+        std::fs::write(
+            base_root.join("Weapon.ini"),
+            "Weapon UpdatedBaseWeapon\nEnd\n",
+        )
+        .unwrap();
+        let changed = scan_with_cache_in(
+            &Analyzer::embedded(),
+            &workspace_a_roots,
+            &base_roots,
+            &cache_dir,
+            &mut |_| {},
+        );
+        assert_eq!(
+            changed.stats.cache_hits, 1,
+            "the unchanged workspace file should still be reusable"
+        );
+        assert_eq!(
+            changed.stats.cache_misses, 1,
+            "a modified base file must not be reused"
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn actual_schema_identity_separates_cached_analysis() {
+        let root = unique_temp_dir("schema-cache");
+        let cache_dir = root.join("cache");
+        let base_root = root.join("base");
+        let workspace = root.join("workspace");
+        for directory in [&base_root, &workspace] {
+            std::fs::create_dir_all(directory).unwrap();
+        }
+        std::fs::write(base_root.join("Weapon.ini"), "Weapon BaseWeapon\nEnd\n").unwrap();
+        std::fs::write(workspace.join("Object.ini"), "Object Workspace\nEnd\n").unwrap();
+        let base_roots = vec![base_root];
+        let workspace_roots = vec![workspace];
+
+        scan_with_cache_in(
+            &Analyzer::embedded(),
+            &workspace_roots,
+            &base_roots,
+            &cache_dir,
+            &mut |_| {},
+        );
+        let mut schema = zerosyntax_schema::embedded();
+        schema.engine_revision.push_str("-custom");
+        let custom = Analyzer::new(schema);
+        let rescanned = scan_with_cache_in(
+            &custom,
+            &workspace_roots,
+            &base_roots,
+            &cache_dir,
+            &mut |_| {},
+        );
+        assert_eq!(rescanned.stats.cache_hits, 0);
+        assert_eq!(rescanned.stats.cache_misses, 2);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cached_role_is_taken_from_the_current_scan_plan() {
+        let root = unique_temp_dir("cache-role");
+        let cache_dir = root.join("cache");
+        let shared = root.join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        std::fs::write(shared.join("Weapon.ini"), "Weapon SharedWeapon\nEnd\n").unwrap();
+
+        let base = scan_with_cache_in(
+            &Analyzer::embedded(),
+            &[],
+            std::slice::from_ref(&shared),
+            &cache_dir,
+            &mut |_| {},
+        );
+        assert!(base.entries.iter().all(|(is_base, _)| *is_base));
+
+        let workspace = scan_with_cache_in(
+            &Analyzer::embedded(),
+            std::slice::from_ref(&shared),
+            &[],
+            &cache_dir,
+            &mut |_| {},
+        );
+        assert_eq!(workspace.stats.cache_hits, 1);
+        assert!(workspace.entries.iter().all(|(is_base, _)| !*is_base));
+        assert_eq!(
+            comparable(&base.entries)
+                .into_iter()
+                .map(|(_, payload)| payload)
+                .collect::<Vec<_>>(),
+            comparable(&workspace.entries)
+                .into_iter()
+                .map(|(_, payload)| payload)
+                .collect::<Vec<_>>()
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cached_payloads_follow_current_root_order_and_overlap_deduplication() {
+        let root = unique_temp_dir("cache-order");
+        let cache_dir = root.join("cache");
+        let first = root.join("first");
+        let nested = first.join("nested");
+        let second = root.join("second");
+        for directory in [&nested, &second] {
+            std::fs::create_dir_all(directory).unwrap();
+        }
+        std::fs::write(first.join("First.ini"), "Object FirstObject\nEnd\n").unwrap();
+        std::fs::write(nested.join("Nested.ini"), "Object NestedObject\nEnd\n").unwrap();
+        std::fs::write(second.join("Second.ini"), "Object SecondObject\nEnd\n").unwrap();
+
+        let cold = scan_with_cache_in(
+            &Analyzer::embedded(),
+            &[],
+            &[first.clone(), second.clone(), nested.clone()],
+            &cache_dir,
+            &mut |_| {},
+        );
+        assert_eq!(cold.stats.discovered_inputs, 3);
+        assert_eq!(cold.entries.len(), 3, "nested overlap is emitted once");
+
+        let reordered = scan_with_cache_in(
+            &Analyzer::embedded(),
+            &[],
+            &[second, first, nested],
+            &cache_dir,
+            &mut |_| {},
+        );
+        assert_eq!(reordered.stats.cache_hits, 3);
+        assert_eq!(reordered.entries.len(), 3);
+        let files: Vec<_> = reordered
+            .entries
+            .iter()
+            .map(|(_, entry)| entry.0.as_str())
+            .collect();
+        assert!(files[0].ends_with("Second.ini"));
+        assert!(files[1].ends_with("First.ini"));
+        assert!(files[2].ends_with("Nested.ini"));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_physical_input_is_retried_instead_of_cached_empty() {
+        let root = unique_temp_dir("failed-input");
+        let cache_dir = root.join("cache");
+        let workspace = root.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::write(workspace.join("Broken.big"), b"not a BIG archive").unwrap();
+        let workspace_roots = vec![workspace];
+
+        for _ in 0..2 {
+            let outcome = scan_with_cache_in(
+                &Analyzer::embedded(),
+                &workspace_roots,
+                &[],
+                &cache_dir,
+                &mut |_| {},
+            );
+            assert_eq!(outcome.stats.cache_hits, 0);
+            assert_eq!(outcome.stats.cache_misses, 1);
+            assert_eq!(outcome.stats.scan_failures, 1);
+        }
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn corrupt_payload_invalidates_only_that_input() {
+        let root = unique_temp_dir("corrupt-payload");
+        let cache_dir = root.join("cache");
+        let workspace = root.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::write(workspace.join("Weapon.ini"), "Weapon TestWeapon\nEnd\n").unwrap();
+        std::fs::write(workspace.join("Object.ini"), "Object TestObject\nEnd\n").unwrap();
+        let workspace_roots = vec![workspace];
+
+        scan_with_cache_in(
+            &Analyzer::embedded(),
+            &workspace_roots,
+            &[],
+            &cache_dir,
+            &mut |_| {},
+        );
+        let connection = rusqlite::Connection::open(cache::cache_path(&cache_dir)).unwrap();
+        connection
+            .execute(
+                "UPDATE input_cache SET payload = X'FF' WHERE path LIKE '%weapon.ini'",
+                [],
+            )
+            .unwrap();
+        drop(connection);
+
+        let recovered = scan_with_cache_in(
+            &Analyzer::embedded(),
+            &workspace_roots,
+            &[],
+            &cache_dir,
+            &mut |_| {},
+        );
+        assert_eq!(recovered.stats.cache_hits, 1);
+        assert_eq!(recovered.stats.cache_misses, 1);
+        assert!(recovered.stats.cache_updated);
+
+        let warm = scan_with_cache_in(
+            &Analyzer::embedded(),
+            &workspace_roots,
+            &[],
+            &cache_dir,
+            &mut |_| {},
+        );
+        assert_eq!(warm.stats.cache_hits, 2);
+        assert_eq!(warm.stats.cache_misses, 0);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn many_inputs_share_one_store_and_warm_without_payload_writes() {
+        let root = unique_temp_dir("many-inputs");
+        let cache_dir = root.join("cache");
+        let workspace = root.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        const INPUTS: usize = 256;
+        for index in 0..INPUTS {
+            std::fs::write(
+                workspace.join(format!("Object{index:03}.ini")),
+                format!("Object CachedObject{index:03}\nEnd\n"),
+            )
+            .unwrap();
+        }
+        let workspace_roots = vec![workspace];
+        let analyzer = Analyzer::embedded();
+
+        let cold_started = Instant::now();
+        let cold = scan_with_cache_in(&analyzer, &workspace_roots, &[], &cache_dir, &mut |_| {});
+        let cold_elapsed = cold_started.elapsed();
+        assert_eq!(cold.stats.cache_misses, INPUTS);
+        assert!(cold.stats.cache_updated);
+
+        let warm_started = Instant::now();
+        let warm = scan_with_cache_in(&analyzer, &workspace_roots, &[], &cache_dir, &mut |_| {});
+        let warm_elapsed = warm_started.elapsed();
+        assert_eq!(warm.stats.cache_hits, INPUTS);
+        assert_eq!(warm.stats.cache_misses, 0);
+        assert!(!warm.stats.cache_updated);
+        assert_eq!(comparable(&cold.entries), comparable(&warm.entries));
+        assert!(cache::cache_path(&cache_dir).is_file());
+        eprintln!(
+            "physical input cache: {INPUTS} inputs, cold={cold_elapsed:?}, warm={warm_elapsed:?}"
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1014,12 +1382,17 @@ mod tests {
             std::process::id(),
             UNIX_EPOCH.elapsed().unwrap().as_nanos()
         ));
+        let cache_dir = unique_temp_dir("missing-root-cache");
         assert!(!missing.exists());
         let workspace_roots = vec![missing];
         let mut events = Vec::new();
-        let outcome = scan_with_cache(&Analyzer::embedded(), &workspace_roots, &[], &mut |event| {
-            events.push(event)
-        });
+        let outcome = scan_with_cache_in(
+            &Analyzer::embedded(),
+            &workspace_roots,
+            &[],
+            &cache_dir,
+            &mut |event| events.push(event),
+        );
 
         assert_eq!(outcome.stats.discovered_inputs, 0);
         assert_eq!(outcome.stats.discovery_failures, 1);
@@ -1032,132 +1405,6 @@ mod tests {
             }
         )));
 
-        let _ = clear_index_cache(&workspace_roots, &[]);
-    }
-
-    fn temp_cache_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "zerosyntax-prune-{name}-{}-{}",
-            std::process::id(),
-            UNIX_EPOCH.elapsed().unwrap().as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    /// Write a cache-shaped file `age` old, so retention order is deterministic
-    /// instead of dependent on filesystem timestamp granularity.
-    fn write_cache_file(dir: &Path, name: &str, age: Duration) -> PathBuf {
-        let path = dir.join(name);
-        let file = std::fs::File::create(&path).unwrap();
-        file.set_modified(SystemTime::now() - age).unwrap();
-        path
-    }
-
-    #[test]
-    fn cache_file_version_accepts_only_generated_names() {
-        assert_eq!(
-            cache_file_version("index-v5-0123456789abcdef.json"),
-            Some(5)
-        );
-        assert_eq!(
-            cache_file_version("index-v12-0123456789abcdef.json"),
-            Some(12)
-        );
-        for name in [
-            "index-v5-0123456789abcde.json",   // hash too short
-            "index-v5-0123456789abcdefg.json", // not hexadecimal
-            "index-vX-0123456789abcdef.json",
-            "index-v5-0123456789abcdef.json.bak",
-            "notes.txt",
-        ] {
-            assert_eq!(cache_file_version(name), None, "{name}");
-        }
-    }
-
-    #[test]
-    fn pruning_drops_earlier_versions_and_keeps_recent_caches() {
-        let dir = temp_cache_dir("versions");
-        let unrelated = write_cache_file(&dir, "notes.txt", Duration::ZERO);
-        let old_version = write_cache_file(&dir, "index-v1-00000000000000ff.json", Duration::ZERO);
-        let keep = write_cache_file(
-            &dir,
-            &format!("index-v{INDEX_CACHE_VERSION}-0000000000000000.json"),
-            Duration::ZERO,
-        );
-        let others: Vec<_> = (1..=INDEX_CACHE_RETAINED as u64 + 2)
-            .map(|index| {
-                write_cache_file(
-                    &dir,
-                    &format!("index-v{INDEX_CACHE_VERSION}-{index:016x}.json"),
-                    Duration::from_secs(index * 60),
-                )
-            })
-            .collect();
-
-        let pruned = prune_index_caches_in(&dir, Some(&keep));
-
-        assert!(keep.exists(), "the cache just written survives");
-        assert!(unrelated.exists(), "unrelated files are never touched");
-        assert!(!old_version.exists(), "earlier cache versions are dropped");
-        let surviving = others.iter().filter(|path| path.exists()).count();
-        assert_eq!(surviving, INDEX_CACHE_RETAINED - 1, "newest others survive");
-        assert!(others[0].exists() && !others[others.len() - 1].exists());
-        assert_eq!(pruned, 1 + others.len() - surviving);
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn pruning_drops_caches_unused_past_the_age_limit() {
-        let dir = temp_cache_dir("age");
-        let fresh = write_cache_file(
-            &dir,
-            &format!("index-v{INDEX_CACHE_VERSION}-000000000000000a.json"),
-            Duration::ZERO,
-        );
-        let expired = write_cache_file(
-            &dir,
-            &format!("index-v{INDEX_CACHE_VERSION}-000000000000000b.json"),
-            INDEX_CACHE_MAX_AGE + Duration::from_secs(60),
-        );
-
-        // No `keep` (the cache write failed) still prunes.
-        let pruned = prune_index_caches_in(&dir, None);
-
-        assert!(fresh.exists());
-        assert!(!expired.exists());
-        assert_eq!(pruned, 1);
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn failed_write_does_not_reserve_a_retention_slot_for_the_stale_file() {
-        // A write failure leaves the previous file at `cache_path` in place.
-        // It must compete for a retention slot like any other cache, not
-        // reserve one and evict a newer file in its place.
-        let dir = temp_cache_dir("stale-keep");
-        let stale = write_cache_file(
-            &dir,
-            &format!("index-v{INDEX_CACHE_VERSION}-0000000000000001.json"),
-            Duration::from_secs(600),
-        );
-        let others: Vec<_> = (2..=INDEX_CACHE_RETAINED as u64 + 1)
-            .map(|index| {
-                write_cache_file(
-                    &dir,
-                    &format!("index-v{INDEX_CACHE_VERSION}-{index:016x}.json"),
-                    Duration::from_secs(600 - index * 60),
-                )
-            })
-            .collect();
-
-        prune_index_caches_in(&dir, None);
-
-        assert!(!stale.exists(), "the oldest file is evicted, not reserved");
-        assert!(
-            others.iter().all(|path| path.exists()),
-            "newer files are not evicted to make room for the stale one"
-        );
-        std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::remove_dir_all(cache_dir).unwrap();
     }
 }
