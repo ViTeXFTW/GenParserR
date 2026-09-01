@@ -824,18 +824,30 @@ fn module_name_completions(
         .collect()
 }
 
-/// Suggest the next numeric tag used by direct module slots in this scope.
+/// Suggest the next numeric tag used by module slots in the enclosing Object.
 ///
 /// Descriptive tags (such as `ModuleTag_Draw`) deliberately do not affect the
 /// numeric sequence. Only genuine module slots are considered: sub-block
 /// headers can also have several arguments, but those arguments are not tags.
 fn next_module_tag(analyzer: &Analyzer, scope_node: &SyntaxNode) -> String {
     const PREFIX: &str = "ModuleTag_";
-    let module_slots = scope_schema(analyzer, scope_node).module_slots();
-    let highest = scope_node
-        .children()
+    let object_node = scope_node
+        .ancestors()
+        .find(|node| {
+            Block(node.clone())
+                .keyword()
+                .is_some_and(|keyword| keyword.text().eq_ignore_ascii_case("Object"))
+        })
+        .unwrap_or_else(|| scope_node.clone());
+    let highest = object_node
+        .descendants()
         .filter_map(Module::cast)
         .filter(|module| {
+            let parent = enclosing_scope(&module.0);
+            let module_slots = parent
+                .as_ref()
+                .map(|parent| scope_schema(analyzer, parent).module_slots())
+                .unwrap_or_default();
             module.slot().is_some_and(|slot| {
                 module_slots
                     .iter()
@@ -848,11 +860,11 @@ fn next_module_tag(analyzer: &Analyzer, scope_node: &SyntaxNode) -> String {
             text.get(..PREFIX.len())
                 .filter(|prefix| prefix.eq_ignore_ascii_case(PREFIX))
                 .and_then(|_| text.get(PREFIX.len()..))
-                .and_then(|number| number.parse::<u32>().ok())
+                .and_then(|number| number.parse::<u64>().ok())
         })
         .max()
         .unwrap_or(0);
-    format!("ModuleTag_{:02}", highest.saturating_add(1))
+    format!("ModuleTag_{:02}", highest + 1)
 }
 
 // --- position helpers ---
@@ -1069,6 +1081,30 @@ mod tests {
         assert_eq!(
             completion.insert.as_deref(),
             Some("AutoHealBehavior ${1:ModuleTag_01}\n\t$0\nEnd")
+        );
+    }
+
+    #[test]
+    fn module_snippet_in_reentrant_scope_uses_object_wide_sequence() {
+        let src = "Object Tank\n  AddModule\n    Behavior = SlowDeathBehavior ModuleTag_04\n    End\n    Behavior = \n  End\nEnd\n";
+        let offset = "Object Tank\n  AddModule\n    Behavior = SlowDeathBehavior ModuleTag_04\n    End\n    Behavior = ".len() as u32;
+        let completion = item(src, offset, "AutoHealBehavior");
+        assert_eq!(
+            completion.insert.as_deref(),
+            Some("AutoHealBehavior ${1:ModuleTag_05}\n\t$0\nEnd")
+        );
+    }
+
+    #[test]
+    fn module_snippet_continues_past_u32_tag_values() {
+        let src = "Object Tank\n  Behavior = SlowDeathBehavior ModuleTag_4294967295\n  End\n  Behavior = \nEnd\n";
+        let offset =
+            "Object Tank\n  Behavior = SlowDeathBehavior ModuleTag_4294967295\n  End\n  Behavior = "
+                .len() as u32;
+        let completion = item(src, offset, "AutoHealBehavior");
+        assert_eq!(
+            completion.insert.as_deref(),
+            Some("AutoHealBehavior ${1:ModuleTag_4294967296}\n\t$0\nEnd")
         );
     }
 
