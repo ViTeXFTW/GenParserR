@@ -217,6 +217,12 @@ impl<'a> Sem<'a> {
                 );
                 continue;
             }
+            // Coordinates are a single schema value expressed as several raw
+            // syntax tokens (`X:… Y:… [Z:…]`). Highlight every axis alike.
+            if matches!(active_ty, Some(ValueType::Coord2D | ValueType::Coord3D)) {
+                self.set(tok, SemKind::Number);
+                continue;
+            }
             // Token lists classify each position by its own element type.
             let elem = active_ty.and_then(|ty| ty.token_type_at_input(&input, i));
             self.set(tok, value_token_kind(tok, elem));
@@ -329,6 +335,19 @@ mod tests {
                 t.iter()
                     .any(|(kind, text)| *kind == SemKind::Number && text == value),
                 "{value} was not classified as a number"
+            );
+        }
+    }
+
+    #[test]
+    fn classifies_coordinate_axes_as_numbers() {
+        let src = "Object Test\n  Behavior = DefaultProductionExitUpdate ModuleTag_07\n    NaturalRallyPoint = X:0.0 Y:-60.0 Z:0.0\n  End\nEnd\n";
+        let t = toks(src);
+        for axis in ["X:0.0", "Y:-60.0", "Z:0.0"] {
+            assert!(
+                t.iter()
+                    .any(|(kind, text)| *kind == SemKind::Number && text == axis),
+                "{axis} was not classified as a number"
             );
         }
     }
