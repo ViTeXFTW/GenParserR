@@ -186,16 +186,25 @@ different server executable inherently requires a new process.
 
 Indexing results are cached on disk so a restart reuses unchanged files. The
 cache lives in `%LOCALAPPDATA%\zerosyntax` on Windows and
-`$XDG_CACHE_HOME/zerosyntax` (else the temp directory) elsewhere, as one
-`index-v<version>-<hash>.json` file per set of workspace and base roots. Every
-cache-format bump, renamed workspace folder, or `baseIniRoots` change therefore
-produces a new file.
+`$XDG_CACHE_HOME/zerosyntax` (else the temp directory) elsewhere, in one
+versioned SQLite database. Records belong to canonical physical inputs rather
+than a workspace or configured root set. Consequently, changing workspaces,
+adding or reordering `baseIniRoots`, or changing a root's base/workspace role
+reuses every unchanged input and parses only new or modified files. A BIG
+archive is one physical input whose cached payload contains its virtual files.
 
-The server keeps that directory bounded: after each scan it deletes caches
-written by an earlier cache version, caches unused for 30 days, and all but the
-four most recently used current-version caches. The cache the running server
-just wrote is always kept, and files it did not create are never touched.
-Deleting the directory by hand is safe — the next scan rebuilds it.
+Record identity includes the input fingerprint, the actual configured schema,
+and the scanner/extractor format. SQLite WAL transactions allow editor windows
+to share the database safely; cache failures degrade to ordinary parsing, a
+corrupt payload invalidates only its input, and a corrupt database is rebuilt.
+Failed scans are never cached. Clear/rebuild increments a database epoch so an
+older in-flight scan cannot repopulate data after the clear completes.
+
+Unused records expire after 30 days and the logical payload budget is 1 GiB,
+with least-recently-used records removed first. Older root-set JSON caches are
+removed after the new store commits successfully. Deleting the cache directory
+by hand is safe while the language server is stopped — the next scan rebuilds
+it.
 
 ## Supported LSP features
 
