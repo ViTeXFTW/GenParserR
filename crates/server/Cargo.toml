@@ -27,5 +27,5 @@ anyhow.workspace = true
 walkdir.workspace = true
 clap.workspace = true
 rusqlite.workspace = true
-bincode.workspace = true
+postcard.workspace = true
 blake3.workspace = true

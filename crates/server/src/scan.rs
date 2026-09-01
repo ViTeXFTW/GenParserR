@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::time::{Instant, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use bincode::Options;
 use percent_encoding::percent_decode_str;
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::Url;
@@ -122,18 +121,19 @@ impl From<CachedEntry> for ScanEntry {
     }
 }
 
-fn serialize_cached(entries: &[CachedEntry]) -> bincode::Result<Vec<u8>> {
-    bincode::DefaultOptions::new()
-        .with_fixint_encoding()
-        .with_limit(MAX_CACHE_PAYLOAD_BYTES)
-        .serialize(entries)
+fn serialize_cached(entries: &[CachedEntry]) -> Result<Vec<u8>> {
+    let payload = postcard::to_stdvec(entries).context("failed to encode cache payload")?;
+    if payload.len() as u64 > MAX_CACHE_PAYLOAD_BYTES {
+        anyhow::bail!("cache payload exceeds 256 MiB");
+    }
+    Ok(payload)
 }
 
-fn deserialize_cached(payload: &[u8]) -> bincode::Result<Vec<CachedEntry>> {
-    bincode::DefaultOptions::new()
-        .with_fixint_encoding()
-        .with_limit(MAX_CACHE_PAYLOAD_BYTES)
-        .deserialize(payload)
+fn deserialize_cached(payload: &[u8]) -> Result<Vec<CachedEntry>> {
+    if payload.len() as u64 > MAX_CACHE_PAYLOAD_BYTES {
+        anyhow::bail!("cache payload exceeds 256 MiB");
+    }
+    postcard::from_bytes(payload).context("failed to decode cache payload")
 }
 
 fn cache_dir() -> PathBuf {
@@ -853,7 +853,7 @@ mod tests {
             .map(|(is_base, entry)| {
                 (
                     *is_base,
-                    bincode::serialize(&CachedEntry::from(entry)).unwrap(),
+                    postcard::to_stdvec(&CachedEntry::from(entry)).unwrap(),
                 )
             })
             .collect()
