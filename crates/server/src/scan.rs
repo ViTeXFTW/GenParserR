@@ -8,6 +8,7 @@ use std::time::{Instant, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use percent_encoding::percent_decode_str;
+use postcard::ser_flavors::Flavor;
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::Url;
 use zerosyntax_analysis::index::{
@@ -74,7 +75,69 @@ pub(crate) struct ScanOutcome {
 }
 
 const MAX_PREVIEW_ASSET_BYTES: u64 = 128 * 1024 * 1024;
-const MAX_CACHE_PAYLOAD_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_CACHE_PAYLOAD_BYTES: usize = 256 * 1024 * 1024;
+
+struct BoundedVec {
+    bytes: Vec<u8>,
+    limit: usize,
+}
+
+impl BoundedVec {
+    fn new(limit: usize) -> Self {
+        Self {
+            bytes: Vec::new(),
+            limit,
+        }
+    }
+
+    fn grow_to_fit(&mut self, required: usize) -> postcard::Result<()> {
+        // Grow geometrically for the ordinary hot path, but never request
+        // capacity beyond the configured payload envelope. The small initial
+        // allocation avoids retaining 4 KiB for every tiny cached input.
+        let target = self
+            .bytes
+            .capacity()
+            .saturating_mul(2)
+            .max(256)
+            .max(required)
+            .min(self.limit);
+        self.bytes
+            .try_reserve_exact(target - self.bytes.len())
+            .map_err(|_| postcard::Error::SerializeBufferFull)?;
+        Ok(())
+    }
+}
+
+impl Flavor for BoundedVec {
+    type Output = Vec<u8>;
+
+    fn try_push(&mut self, byte: u8) -> postcard::Result<()> {
+        if self.bytes.len() == self.limit {
+            return Err(postcard::Error::SerializeBufferFull);
+        }
+        if self.bytes.len() == self.bytes.capacity() {
+            self.grow_to_fit(self.bytes.len() + 1)?;
+        }
+        self.bytes.push(byte);
+        Ok(())
+    }
+
+    fn try_extend(&mut self, bytes: &[u8]) -> postcard::Result<()> {
+        if bytes.len() > self.limit - self.bytes.len() {
+            return Err(postcard::Error::SerializeBufferFull);
+        }
+        let required = self.bytes.len() + bytes.len();
+        if required > self.bytes.capacity() {
+            self.grow_to_fit(required)?;
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(())
+    }
+
+    fn finalize(self) -> postcard::Result<Self::Output> {
+        Ok(self.bytes)
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 struct CachedEntry {
@@ -122,15 +185,16 @@ impl From<CachedEntry> for ScanEntry {
 }
 
 fn serialize_cached(entries: &[CachedEntry]) -> Result<Vec<u8>> {
-    let payload = postcard::to_stdvec(entries).context("failed to encode cache payload")?;
-    if payload.len() as u64 > MAX_CACHE_PAYLOAD_BYTES {
-        anyhow::bail!("cache payload exceeds 256 MiB");
-    }
-    Ok(payload)
+    serialize_bounded(entries, MAX_CACHE_PAYLOAD_BYTES)
+        .context("failed to encode cache payload within 256 MiB limit")
+}
+
+fn serialize_bounded<T: Serialize + ?Sized>(value: &T, limit: usize) -> postcard::Result<Vec<u8>> {
+    postcard::serialize_with_flavor(value, BoundedVec::new(limit))
 }
 
 fn deserialize_cached(payload: &[u8]) -> Result<Vec<CachedEntry>> {
-    if payload.len() as u64 > MAX_CACHE_PAYLOAD_BYTES {
+    if payload.len() > MAX_CACHE_PAYLOAD_BYTES {
         anyhow::bail!("cache payload exceeds 256 MiB");
     }
     postcard::from_bytes(payload).context("failed to decode cache payload")
@@ -936,6 +1000,18 @@ mod tests {
         assert!(changed.stats.cache_updated);
 
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cache_serialization_stops_at_the_payload_limit() {
+        let value = vec![7u8; 128];
+        assert_eq!(
+            serialize_bounded(&value, 64).unwrap_err(),
+            postcard::Error::SerializeBufferFull
+        );
+
+        let payload = serialize_bounded(&value, 256).unwrap();
+        assert_eq!(postcard::from_bytes::<Vec<u8>>(&payload).unwrap(), value);
     }
 
     #[test]
