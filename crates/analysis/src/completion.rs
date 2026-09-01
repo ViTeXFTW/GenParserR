@@ -71,7 +71,10 @@ pub fn complete(
             index,
             (file, offset),
         ),
-        PosContext::ModuleName { slot_accepts } => module_name_completions(analyzer, &slot_accepts),
+        PosContext::ModuleName {
+            scope_node,
+            slot_accepts,
+        } => module_name_completions(analyzer, &scope_node, &slot_accepts),
         PosContext::SubBlockArg { argument_type } => {
             completions_for_type(analyzer, &argument_type, 0, None, None, index)
         }
@@ -93,8 +96,10 @@ enum PosContext {
         first_token: Option<String>,
     },
     /// Completing a module type name after a slot `=`. Carries the slot's
-    /// accepted interfaces so completions can be filtered to valid modules only.
+    /// enclosing scope so its snippet can choose an unused-looking module tag,
+    /// and accepted interfaces so candidates can be filtered to valid modules.
     ModuleName {
+        scope_node: SyntaxNode,
         slot_accepts: Vec<String>,
     },
     /// Completing the argument of a sub-block header.
@@ -189,7 +194,8 @@ fn classify_position(analyzer: &Analyzer, root: &SyntaxNode, offset: u32) -> Pos
         // (before any nested field/scope) and after `=`, and the slot is a real
         // module slot of the parent block.
         if on_header_line(&module_node, offset) && after_equals(&module_node, offset) {
-            let parent = enclosing_scope(&module_node).map(|p| scope_schema(analyzer, &p));
+            let scope_node = enclosing_scope(&module_node);
+            let parent = scope_node.as_ref().map(|p| scope_schema(analyzer, p));
             let slot = Module(module_node.clone()).slot();
             let slot_accepts = slot.as_ref().and_then(|s| {
                 parent.as_ref().and_then(|p| {
@@ -201,6 +207,7 @@ fn classify_position(analyzer: &Analyzer, root: &SyntaxNode, offset: u32) -> Pos
             });
             if let Some(accepts) = slot_accepts {
                 return PosContext::ModuleName {
+                    scope_node: scope_node.unwrap_or_else(|| root.clone()),
                     slot_accepts: accepts,
                 };
             }
@@ -790,7 +797,12 @@ fn top_level_completions(analyzer: &Analyzer) -> Vec<Completion> {
         .collect()
 }
 
-fn module_name_completions(analyzer: &Analyzer, slot_accepts: &[String]) -> Vec<Completion> {
+fn module_name_completions(
+    analyzer: &Analyzer,
+    scope_node: &SyntaxNode,
+    slot_accepts: &[String],
+) -> Vec<Completion> {
+    let tag = next_module_tag(analyzer, scope_node);
     analyzer
         .schema()
         .modules
@@ -801,7 +813,7 @@ fn module_name_completions(analyzer: &Analyzer, slot_accepts: &[String]) -> Vec<
         .map(|m| {
             // Snippet: module name + placeholder tag + indented body + End.
             // Also satisfies missing-module-tag in one accept.
-            let insert = Some(format!("{} ${{1:ModuleTag_01}}\n\t$0\nEnd", m.name));
+            let insert = Some(format!("{} ${{1:{tag}}}\n\t$0\nEnd", m.name));
             Completion {
                 label: m.name.clone(),
                 kind: CompletionKind::Module,
@@ -810,6 +822,37 @@ fn module_name_completions(analyzer: &Analyzer, slot_accepts: &[String]) -> Vec<
             }
         })
         .collect()
+}
+
+/// Suggest the next numeric tag used by direct module slots in this scope.
+///
+/// Descriptive tags (such as `ModuleTag_Draw`) deliberately do not affect the
+/// numeric sequence. Only genuine module slots are considered: sub-block
+/// headers can also have several arguments, but those arguments are not tags.
+fn next_module_tag(analyzer: &Analyzer, scope_node: &SyntaxNode) -> String {
+    const PREFIX: &str = "ModuleTag_";
+    let module_slots = scope_schema(analyzer, scope_node).module_slots();
+    let highest = scope_node
+        .children()
+        .filter_map(Module::cast)
+        .filter(|module| {
+            module.slot().is_some_and(|slot| {
+                module_slots
+                    .iter()
+                    .any(|module_slot| module_slot.keyword.eq_ignore_ascii_case(slot.text()))
+            })
+        })
+        .filter_map(|module| module.tag())
+        .filter_map(|tag| {
+            let text = tag.text();
+            text.get(..PREFIX.len())
+                .filter(|prefix| prefix.eq_ignore_ascii_case(PREFIX))
+                .and_then(|_| text.get(PREFIX.len()..))
+                .and_then(|number| number.parse::<u32>().ok())
+        })
+        .max()
+        .unwrap_or(0);
+    format!("ModuleTag_{:02}", highest.saturating_add(1))
 }
 
 // --- position helpers ---
@@ -1005,6 +1048,28 @@ mod tests {
         let offset = "Object Tank\n  Body = ".len() as u32;
         let out = labels(src, offset);
         assert!(out.contains(&"ActiveBody".to_string()), "{out:?}");
+    }
+
+    #[test]
+    fn module_snippet_uses_next_numeric_tag_in_object() {
+        let src = "Object Tank\n  Draw = W3DTankDraw ModuleTag_01\n  End\n  Behavior = SlowDeathBehavior MODULETAG_03\n  End\n  Behavior = \nEnd\n";
+        let offset = "Object Tank\n  Draw = W3DTankDraw ModuleTag_01\n  End\n  Behavior = SlowDeathBehavior MODULETAG_03\n  End\n  Behavior = ".len() as u32;
+        let completion = item(src, offset, "AutoHealBehavior");
+        assert_eq!(
+            completion.insert.as_deref(),
+            Some("AutoHealBehavior ${1:ModuleTag_04}\n\t$0\nEnd")
+        );
+    }
+
+    #[test]
+    fn module_snippet_ignores_descriptive_tags_and_sub_block_arguments() {
+        let src = "Object Tank\n  Draw = W3DTankDraw ModuleTag_Draw\n    ConditionState = DAMAGED REALLYDAMAGED\n    End\n  End\n  Behavior = \nEnd\n";
+        let offset = "Object Tank\n  Draw = W3DTankDraw ModuleTag_Draw\n    ConditionState = DAMAGED REALLYDAMAGED\n    End\n  End\n  Behavior = ".len() as u32;
+        let completion = item(src, offset, "AutoHealBehavior");
+        assert_eq!(
+            completion.insert.as_deref(),
+            Some("AutoHealBehavior ${1:ModuleTag_01}\n\t$0\nEnd")
+        );
     }
 
     #[test]
