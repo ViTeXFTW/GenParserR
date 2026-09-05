@@ -12,8 +12,8 @@ use zerosyntax_syntax::{Parse, SyntaxKind, SyntaxNode};
 
 use crate::index::AssetKind;
 use crate::model::{
-    is_model_asset_type, is_model_member_type, model_member_ini_name, models_for_source,
-    scope_schema,
+    is_model_asset_type, is_model_member_type, model_member_mode, model_member_names,
+    models_for_source, scope_schema,
 };
 use crate::{Analyzer, WorkspaceIndex};
 
@@ -374,10 +374,18 @@ fn field_value_completions(
             if let Some(asset_completions) = model_asset_completions(
                 analyzer,
                 scope_node,
-                &f.value_type,
-                value_index,
+                f,
+                (value_index, current_token, first_token),
                 index,
-                f.model_source.as_ref(),
+                scope_node
+                    .children()
+                    .find(|node| {
+                        node.kind() == SyntaxKind::FIELD
+                            && u32::from(node.text_range().start()) <= offset
+                            && offset <= u32::from(node.text_range().end())
+                    })
+                    .map(Field)
+                    .as_ref(),
             ) {
                 asset_completions
             } else {
@@ -410,16 +418,24 @@ fn field_value_completions(
 fn model_asset_completions(
     analyzer: &Analyzer,
     scope_node: &SyntaxNode,
-    ty: &ValueType,
-    value_index: usize,
+    field_schema: &zerosyntax_schema::Field,
+    position: (usize, Option<&str>, Option<&str>),
     index: Option<&WorkspaceIndex>,
-    source: Option<&zerosyntax_schema::ModelSource>,
+    field: Option<&Field>,
 ) -> Option<Vec<Completion>> {
     let index = index?;
     if !index.has_model_assets() {
         return None;
     }
-    let ty = token_value_type(ty, value_index);
+    let (value_index, current_token, first_token) = position;
+    let ty = field_schema
+        .value_type
+        .variant_for_first_token(first_token)?
+        .token_type_at(value_index)?;
+    let (ty, prefix) = match ty {
+        ValueType::Prefixed { prefix, value_type } => (value_type.as_ref(), Some(prefix)),
+        _ => (ty, None),
+    };
     if is_model_asset_type(ty) {
         return Some(
             index
@@ -436,31 +452,49 @@ fn model_asset_completions(
     if !is_model_member_type(ty) {
         return None;
     }
+    let mode = model_member_mode(field_schema.model_member_mode, field);
     let mut seen = std::collections::HashSet::new();
-    let out = models_for_source(analyzer, scope_node, source, index)
-        .into_iter()
-        .flat_map(|model| {
-            index
-                .model_members(&model)
-                .map(|member| model_member_ini_name(member).to_string())
-                .collect::<Vec<_>>()
-        })
-        .filter(|member| seen.insert(member.to_ascii_lowercase()))
-        .map(|member| Completion {
-            label: member,
-            kind: CompletionKind::Reference,
-            detail: Some("W3D model member".into()),
-            insert: None,
-        })
-        .collect();
+    let out = models_for_source(
+        analyzer,
+        scope_node,
+        field_schema.model_source.as_ref(),
+        index,
+    )
+    .into_iter()
+    .flat_map(|model| {
+        index
+            .model_members(&model)
+            .flat_map(|member| {
+                model_member_names(member, mode)
+                    .into_iter()
+                    .map(move |name| {
+                        (
+                            name.to_string(),
+                            mode.is_some() && name != member.rsplit('.').next().unwrap_or(member),
+                        )
+                    })
+            })
+            .collect::<Vec<_>>()
+    })
+    .filter(|(member, _)| seen.insert(member.to_ascii_lowercase()))
+    .map(|(member, family)| Completion {
+        insert: prefix
+            .filter(|prefix| {
+                !current_token
+                    .and_then(|t| t.split_once(':'))
+                    .is_some_and(|(actual, _)| actual.eq_ignore_ascii_case(prefix))
+            })
+            .map(|prefix| format!("{prefix}:{member}")),
+        detail: Some(if family {
+            "W3D numbered bone family (01, 02, ...)".into()
+        } else {
+            "W3D model member".into()
+        }),
+        label: member,
+        kind: CompletionKind::Reference,
+    })
+    .collect();
     Some(out)
-}
-
-fn token_value_type(ty: &ValueType, value_index: usize) -> &ValueType {
-    match ty {
-        ValueType::TokenList { tokens } => tokens.get(value_index).unwrap_or(ty),
-        _ => ty,
-    }
 }
 
 /// Build a single-token snippet placeholder for a value type, used when
@@ -472,7 +506,7 @@ fn type_snippet_placeholder(ty: &ValueType, n: usize) -> String {
             if prefix.eq_ignore_ascii_case("Bone")
                 && matches!(
                     value_type.as_ref(),
-                    ValueType::AsciiString | ValueType::QuotedString
+                    ValueType::AsciiString | ValueType::QuotedString | ValueType::W3dModelMember
                 )
             {
                 format!("{prefix}:${{{n}:NONE}}")
