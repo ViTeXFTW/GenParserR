@@ -35,6 +35,8 @@ pub struct Completion {
     pub label: String,
     pub kind: CompletionKind,
     pub detail: Option<String>,
+    /// Optional Markdown shown by an LSP client alongside the selected item.
+    pub documentation: Option<String>,
     /// Optional LSP snippet string. When the client supports snippets, the
     /// server uses this as `insertText` with `InsertTextFormat::SNIPPET`
     /// instead of the plain `label`. `$0` marks the final cursor position;
@@ -270,6 +272,7 @@ fn field_key_completions(analyzer: &Analyzer, scope_node: &SyntaxNode) -> Vec<Co
             label: f.name.clone(),
             kind: CompletionKind::Field,
             detail: Some(type_label(&f.value_type)),
+            documentation: None,
             insert: value_snippet(&f.value_type).map(|value| format!("{} = {value}", f.name)),
         })
         .collect();
@@ -280,6 +283,7 @@ fn field_key_completions(analyzer: &Analyzer, scope_node: &SyntaxNode) -> Vec<Co
             label: slot.keyword.clone(),
             kind: CompletionKind::Field,
             detail: Some("module slot".into()),
+            documentation: None,
             insert,
         });
     }
@@ -303,6 +307,7 @@ fn field_key_completions(analyzer: &Analyzer, scope_node: &SyntaxNode) -> Vec<Co
             label: sub.keyword.clone(),
             kind: CompletionKind::Block,
             detail: Some("sub-block".into()),
+            documentation: None,
             insert,
         });
     }
@@ -355,9 +360,11 @@ fn field_value_completions(
                     .effective_module_tags_for_object(&obj_name, file, Some(offset))
                     .into_iter()
                     .map(|tag| Completion {
-                        label: tag.to_string(),
+                        label: tag.name.to_string(),
                         kind: CompletionKind::Reference,
                         detail: Some("module tag".into()),
+                        documentation: (!tag.snippet.is_empty())
+                            .then(|| format!("```ini\n{}\n```", tag.snippet)),
                         insert: None,
                     })
                     .collect();
@@ -400,6 +407,7 @@ fn field_value_completions(
                 label: k.to_string(),
                 kind: CompletionKind::Value,
                 detail: Some("string key".into()),
+                documentation: None,
                 insert: None,
             }));
         }
@@ -428,6 +436,7 @@ fn model_asset_completions(
                     label: name.to_string(),
                     kind: CompletionKind::W3dModel,
                     detail: Some("W3D model".into()),
+                    documentation: None,
                     insert: None,
                 })
                 .collect(),
@@ -450,6 +459,7 @@ fn model_asset_completions(
             label: member,
             kind: CompletionKind::Reference,
             detail: Some("W3D model member".into()),
+            documentation: None,
             insert: None,
         })
         .collect();
@@ -624,6 +634,7 @@ fn completions_for_type(
                             label: "<full sequence>".into(),
                             kind: CompletionKind::Value,
                             detail: Some(format!("{} tokens", tokens.len())),
+                            documentation: None,
                             insert: Some(snippet),
                         },
                     );
@@ -636,18 +647,21 @@ fn completions_for_type(
             label: "R: G: B:".into(),
             kind: CompletionKind::Value,
             detail: Some("color".into()),
+            documentation: None,
             insert: Some("R:${1:255} G:${2:255} B:${3:255}".into()),
         }],
         ValueType::Coord2D => vec![Completion {
             label: "X: Y:".into(),
             kind: CompletionKind::Value,
             detail: Some("2D coordinate".into()),
+            documentation: None,
             insert: Some("X:${1:0} Y:${2:0}".into()),
         }],
         ValueType::Coord3D => vec![Completion {
             label: "X: Y: Z:".into(),
             kind: CompletionKind::Value,
             detail: Some("3D coordinate".into()),
+            documentation: None,
             insert: Some("X:${1:0} Y:${2:0} Z:${3:0}".into()),
         }],
         ValueType::Bool => ["Yes", "No"]
@@ -656,6 +670,7 @@ fn completions_for_type(
                 label: v.to_string(),
                 kind: CompletionKind::Value,
                 detail: None,
+                documentation: None,
                 insert: None,
             })
             .collect(),
@@ -668,6 +683,7 @@ fn completions_for_type(
                         label: m.name.clone(),
                         kind: CompletionKind::EnumMember,
                         detail: Some(value_set.clone()),
+                        documentation: None,
                         insert: None,
                     })
                     .collect()
@@ -681,6 +697,7 @@ fn completions_for_type(
                             label: n.to_string(),
                             kind: CompletionKind::Reference,
                             detail: Some(format!("{ref_kind:?}")),
+                            documentation: None,
                             insert: None,
                         })
                         .collect()
@@ -692,6 +709,7 @@ fn completions_for_type(
                 label: n.to_string(),
                 kind: CompletionKind::Reference,
                 detail: Some(format!("{ref_kind:?} (engine builtin)")),
+                documentation: None,
                 insert: None,
             }));
             out
@@ -768,6 +786,7 @@ fn asset_completions(
             label,
             kind: CompletionKind::Reference,
             detail: Some(detail.to_string()),
+            documentation: None,
             insert: None,
         })
         .collect()
@@ -791,6 +810,7 @@ fn top_level_completions(analyzer: &Analyzer) -> Vec<Completion> {
                 label: b.name.clone(),
                 kind: CompletionKind::Block,
                 detail: Some("block".into()),
+                documentation: None,
                 insert,
             }
         })
@@ -818,6 +838,7 @@ fn module_name_completions(
                 label: m.name.clone(),
                 kind: CompletionKind::Module,
                 detail: Some("module".into()),
+                documentation: None,
                 insert,
             }
         })
@@ -1043,6 +1064,25 @@ mod tests {
         let offset = "Object Tank\n  RemoveModule ".len() as u32;
         let out = complete(&a, &parse, offset, Some(&index), Some("map.ini"));
         assert!(!out.iter().any(|item| item.label == "ModuleTag_Later"));
+    }
+
+    #[test]
+    fn remove_module_completion_documents_the_defining_module() {
+        let a = Analyzer::embedded();
+        let defs =
+            a.parse("Object Tank\n  Behavior = PhysicsBehavior ModuleTag_Physics\n  End\nEnd\n");
+        let mut index = WorkspaceIndex::new();
+        index.set_file_tags("base.ini", crate::index::module_tags_in(&a, &defs));
+        let src = "Object Tank\n  RemoveModule \nEnd\n";
+        let offset = "Object Tank\n  RemoveModule ".len() as u32;
+        let item = complete(&a, &a.parse(src), offset, Some(&index), Some("map.ini"))
+            .into_iter()
+            .find(|item| item.label == "ModuleTag_Physics")
+            .expect("module tag completion");
+        assert_eq!(
+            item.documentation.as_deref(),
+            Some("```ini\nBehavior = PhysicsBehavior ModuleTag_Physics\n```")
+        );
     }
 
     #[test]
